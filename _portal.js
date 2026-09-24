@@ -104,7 +104,6 @@
        <div class="pright">
          <span class="pstale" id="pStale" style="display:none">STALE</span>
          <span class="pstamp" id="pStamp">—</span>
-         <button class="pbtn" onclick="location.reload()">↻ Refresh</button>
        </div>
      </div></div>
      ${subLinks?`<div class="psub"><div class="row">${subLinks}</div></div>`:''}`);

@@ -199,7 +199,6 @@
       <div class="chip-row" id="branchChips"></div>
     </div>
     <div class="btn-col">
-      <button class="refresh-btn" id="refreshBtn">Refresh</button>
       <button class="reset-btn" id="resetBtn">Reset All</button>
     </div>
   </div>
@@ -304,8 +303,8 @@ let ALL_SHIPS = [];
 // ============ FETCH & PARSE ============
 async function loadData() {
   const statusEl = document.getElementById('statusText');
-  const btn = document.getElementById('refreshBtn');
-  btn.disabled = true;
+  const btn = document.getElementById('refreshBtn'); // removed; may be null
+  if(btn){ /* refresh btn removed */ }
   statusEl.innerText = 'Loading latest data...';
   statusEl.style.color = 'var(--muted)';
 
@@ -349,7 +348,7 @@ async function loadData() {
     statusEl.innerText = 'ERROR: ' + err.message;
     statusEl.style.color = 'red';
   } finally {
-    btn.disabled = false;
+    if(btn){ /* refresh btn removed */ }
   }
 }
 
@@ -889,7 +888,6 @@ document.getElementById('resetBtn').addEventListener('click', () => {
   applyShortcut('month');     // back to current month
   update();
 });
-document.getElementById('refreshBtn').addEventListener('click', loadData);
 
 // Shortcut buttons
 document.querySelectorAll('.dr-chip').forEach(btn => {
