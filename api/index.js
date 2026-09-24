@@ -30,8 +30,20 @@ function cors(req, res) {
 }
 
 // api/dispatch.js
+var lastSyncAt = 0;
 async function handler(req, res) {
   if (cors(req, res)) return;
+  // Optional live pull: ?sync=1 runs the Excel->Neon import first (rate-limited to
+  // once per 20s so a refresh-spam can't hammer Graph). Uses the server-side secret;
+  // the browser never sees it.
+  const wantSync = /[?&]sync=1/.test(req.url || "");
+  if (wantSync && process.env.CRON_SECRET && (Date.now() - lastSyncAt > 20000)) {
+    lastSyncAt = Date.now();
+    try {
+      const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
+      await fetch(base + "/api/sync", { headers: { authorization: "Bearer " + process.env.CRON_SECRET } });
+    } catch (e) { /* if sync fails, still return whatever Neon has */ }
+  }
   try {
     const c = await sql`select * from coils where coalesce(remarks,'') not ilike '%cancelled%' order by excel_row nulls last, created_at`;
     const rows = c.map((r) => ({

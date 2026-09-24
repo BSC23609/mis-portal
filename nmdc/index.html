@@ -107,7 +107,7 @@ footer code{background:#fff;border:1px solid var(--line);padding:1px 5px;border-
     <label class="dest"><span>Receiving unit</span><select id="destSel"><option value="">All units</option></select></label>
     <span class="stamp" id="stamp">Not loaded yet</span>
     <button id="btnAuto" class="ghost" type="button" aria-pressed="false">Auto-refresh off</button>
-    <button id="btnRefresh" type="button">Refresh</button>
+    <button id="btnRefresh" type="button">Refresh (live from Excel)</button>
   </div>
 </header>
 
@@ -192,7 +192,7 @@ function banner(msg, err){ const b=$("#banner"); b.hidden=!msg; b.textContent=ms
 async function fetchLive(force){
   
   for(let attempt=0; attempt<2; attempt++){
-    const r = await fetch(CONFIG.apiBase + "/api/dispatch" + (force?"?force=1":""), {cache:"no-store"});
+    const r = await fetch(CONFIG.apiBase + "/api/dispatch" + (force?"?sync=1":""), {cache:"no-store"});
     const j = await r.json().catch(()=>({}));
     if(!r.ok) throw new Error(j.error || `API ${r.status}`);
     sos = Array.isArray(j.sos) ? j.sos : [];
@@ -242,7 +242,6 @@ function renderVehicles(){
       <div class="vtr">${esc(g.tr)||"Transporter not entered"}${g.mob?" · "+esc(g.mob):""}${g.lr?" · LR "+esc(g.lr):""}</div>
       <div class="vcoils">${g.coils.map(r=>`<div><span><b>${esc(r.inv||(r.so?"SO "+r.so:r.ref))}</b> ${r.ncoils?r.ncoils+" coil"+(r.ncoils==1?"":"s")+" ":""}${/^ctl/i.test(r.form||"")?"CTL ":""}${esc(r.grade)} ${size(r)}</span><span>${fmtW(r.wt)}</span></div>`).join("")}</div>
       <div class="vsum"><span>${pill(g.status)}${g.expected?` <span class="${late?"late":""}">exp. ${fmtD(g.expected)}</span>`:""}</span><span>${g.coils.length} ${g.coils.length===1?"line":"lines"}${g.coils.reduce((a,r)=>a+(r.ncoils||0),0)?" · "+g.coils.reduce((a,r)=>a+(r.ncoils||0),0)+" coils":""} · <b>${fmtW(wt)} MT</b></span></div>
-      <button type="button" class="arrive" data-veh="${esc(g.veh)}">Mark delivered at ${esc(g.unit)||"destination"}</button>
     </div>`);
   });
 }
@@ -315,22 +314,22 @@ function render(){
 }
 
 /* ---------- Refresh ---------- */
-async function refresh(){
-  const b = $("#btnRefresh"); b.disabled = true; b.textContent = "Refreshing…";
+async function refresh(doSync){
+  const b = $("#btnRefresh"); b.disabled = true; b.textContent = "Pulling live…";
   try{
     if(DEMO){ allRows = demoRows(); sos = DEMO_SOS; banner("Demo mode — showing the workbook's sample rows. Remove ?demo from the address to see live data."); }
-    else { allRows = normalise(await fetchLive(true)); banner(""); }
+    else { allRows = normalise(await fetchLive(!!doSync)); banner(""); }
     render();
     $("#stamp").textContent = "Updated " + new Date().toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit",second:"2-digit"});
   }catch(e){
     banner("Could not read the workbook: " + e.message + ". Check the Vercel environment variables, the app permissions, and that the table is still named " + CONFIG.tableName + ".", true);
-  }finally{ b.disabled = false; b.textContent = "Refresh"; }
+  }finally{ b.disabled = false; b.textContent = "Refresh (live from Excel)"; }
 }
-$("#btnRefresh").addEventListener("click", refresh);
+$("#btnRefresh").addEventListener("click", ()=>refresh(true));
 $("#btnAuto").addEventListener("click", e => {
   const on = !timer; e.target.classList.toggle("on", on); e.target.setAttribute("aria-pressed", on);
   e.target.textContent = on ? `Auto-refresh every ${CONFIG.autoRefreshSeconds}s` : "Auto-refresh off";
-  if(on) timer = setInterval(refresh, CONFIG.autoRefreshSeconds*1000); else { clearInterval(timer); timer = null; }
+  if(on) timer = setInterval(()=>refresh(false), CONFIG.autoRefreshSeconds*1000); else { clearInterval(timer); timer = null; }
 });
 $("#filters").addEventListener("click", e => {
   const b = e.target.closest("button"); if(!b) return;
@@ -339,19 +338,7 @@ $("#filters").addEventListener("click", e => {
 $("#destSel").addEventListener("change", e => { dest = e.target.value; render(); });
 $("#byso").addEventListener("click", e => { const tr = e.target.closest("tr.so"); if(!tr) return; openSO = openSO === tr.dataset.so ? null : tr.dataset.so; renderBySO(); });
 $("#byloc").addEventListener("click", e => { const tr = e.target.closest("tr[data-dest]"); if(!tr) return; dest = tr.dataset.dest; $("#destSel").value = dest; render(); });
-$("#vehicles").addEventListener("click", async e => {
-  const b = e.target.closest("button.arrive"); if(!b) return;
-  const veh = b.dataset.veh; if(!confirm(`Mark all coils on ${veh} as delivered?`)) return;
-  let pin = sessionStorage.getItem("yardPin") || prompt("Yard PIN"); if(!pin) return;
-  b.disabled = true;
-  try{
-    const r = await fetch(CONFIG.apiBase + "/api/arrive", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({pin, vehicle_no: veh})});
-    const j = await r.json().catch(()=>({}));
-    if(r.status === 401){ sessionStorage.removeItem("yardPin"); throw new Error("Wrong PIN"); }
-    if(!r.ok) throw new Error(j.error || "Failed");
-    sessionStorage.setItem("yardPin", pin); await refresh();
-  }catch(err){ alert(err.message); b.disabled = false; }
-});
+/* NMDC is read-only in the portal — the "mark delivered" (arrive) flow was removed. */
 $("#fTable").textContent = CONFIG.tableName;
 refresh();
 </script>
