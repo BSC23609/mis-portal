@@ -1,0 +1,96 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Daily Stock Report — Bharat Steel MIS</title><link rel="icon" href="BSC.png"/>
+<script>window.PORTAL={module:'stock',screen:'daily'}</script>
+<style>
+  .sheet{background:#fff;border:1px solid var(--line);border-radius:10px;padding:16px;margin:14px 0}
+  .sheet h2{text-align:center;background:#2f9fe0;color:#fff;font-size:15px;margin:-16px -16px 14px;padding:8px;border-radius:10px 10px 0 0}
+  .panel-h{background:#ffe08a;font-weight:700;font-size:12px;padding:5px 8px;margin:16px 0 6px;border:1px solid #e6c65a}
+  table.x{width:100%;border-collapse:collapse;font-size:12px}
+  table.x th,table.x td{border:1px solid #cdd7df;padding:3px 7px}
+  table.x th{background:#dbeaf5;font-size:11px;text-align:center}
+  table.x td.n{text-align:right;font-family:var(--mono)}
+  table.x tr.gt td{background:#dbeaf5;font-weight:700;font-family:var(--mono)}
+  table.x tr.gt td:first-child{font-family:inherit}
+  .cols{display:grid;grid-template-columns:1fr;gap:20px}
+  @media(min-width:980px){.cols{grid-template-columns:minmax(0,420px) minmax(0,1fr)}}
+  .asof{text-align:right;font-weight:700;background:#ffe08a;display:inline-block;padding:3px 10px;border:1px solid #e6c65a;float:right}
+</style>
+</head><body>
+<div class="pw">
+  <div id="errbox"></div>
+  <div class="sheet">
+    <h2>BHARAT STEEL (CHENNAI) PRIVATE LIMITED</h2>
+    <div style="overflow:hidden"><span class="asof" id="asof2"></span></div>
+    <div class="cols">
+      <div>
+        <div class="panel-h">BHARAT HR COIL STOCK</div>
+        <div class="tblwrap" id="coilStock"></div>
+      </div>
+      <div>
+        <div class="panel-h">BHARAT SALES REPORT</div>
+        <div class="tblwrap" id="salesRep"></div>
+        <div class="panel-h">BHARAT PURCHASE REPORT</div>
+        <div class="tblwrap" id="purRep"></div>
+        <div class="panel-h">WAREHOUSEWISE STOCK</div>
+        <div class="tblwrap" id="whsRep"></div>
+      </div>
+    </div>
+  </div>
+  <footer id="foot"></footer>
+</div>
+<script src="../_portal.js"></script>
+<script src="_stockdata.js"></script>
+<script>
+const MONTHS=['Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec','Jan','Feb','Mar'];
+const fyOf=(y,m)=>m>=4?y:y-1, idx=m=>(m+8)%12;
+// warehouse-wise stock category (mirrors mis_stock server CASE)
+function whsCat(g){
+  const G=(g||'').toUpperCase();
+  return '';
+}
+async function loadTx(f){const t=await fetch(f+'?t='+Date.now()).then(r=>r.ok?r.text():'').catch(()=>'');return parseCSV(t).map(r=>({...r,Yr:+r.Yr,Mth:+r.Mth,Qty:num(r.Qty)}));}
+function monthPivot(rows,elId,fy){
+  const data={},tot={};let latest=-1;
+  rows.forEach(r=>{if(r.JW==='Y')return;if(fyOf(r.Yr,r.Mth)!==fy)return;const i=idx(r.Mth);
+    (data[r.Category]??={})[i]=(data[r.Category][i]||0)+r.Qty;tot[i]=(tot[i]||0)+r.Qty;if(i>latest)latest=i;});
+  const cats=Object.keys(data).sort(), months=MONTHS.map((_,i)=>i).filter(i=>i<=latest);
+  if(!cats.length){$(elId).innerHTML='<div class="empty">No data.</div>';return;}
+  let h=`<table class="x"><thead><tr><th style="text-align:left">Category</th>${months.map(i=>`<th>${MONTHS[i]}</th>`).join('')}<th>Grand Total</th></tr></thead><tbody>`;
+  cats.forEach(c=>{h+=`<tr><td>${esc(c)}</td>${months.map(i=>`<td class="n">${data[c][i]?f0(data[c][i]):''}</td>`).join('')}<td class="n"><b>${f0(Object.values(data[c]).reduce((a,b)=>a+b,0))}</b></td></tr>`;});
+  h+=`<tr class="gt"><td>Grand Total</td>${months.map(i=>`<td class="n">${f0(tot[i]||0)}</td>`).join('')}<td class="n">${f0(Object.values(tot).reduce((a,b)=>a+b,0))}</td></tr></tbody></table>`;
+  $(elId).innerHTML=h;
+}
+(async function(){
+  let S;
+  try{ S=await loadStock(); }catch(e){ $('errbox').innerHTML='<div class="err">Couldn\'t load stock data.</div>'; return; }
+  const asof=$('pStamp').textContent.replace('as of ','');
+  $('asof2').textContent=asof;
+
+  // --- HR COIL STOCK (WH 38, item-wise, all grades) ---
+  const w38={}; S.STOCK.filter(r=>r.WhsCode==='38').forEach(r=>w38[r.ItemName]=(w38[r.ItemName]||0)+r.OnHand);
+  const arr=Object.entries(w38).sort((a,b)=>b[1]-a[1]); const t38=arr.reduce((s,[,q])=>s+q,0);
+  $('coilStock').innerHTML=`<table class="x"><thead><tr><th style="text-align:left">Row Labels</th><th>38</th><th>Grand Total</th></tr></thead><tbody>
+    ${arr.map(([n,q])=>`<tr><td>${esc(n)}</td><td class="n">${f3(q)}</td><td class="n">${f3(q)}</td></tr>`).join('')}
+    <tr class="gt"><td>Grand Total</td><td class="n">${f3(t38)}</td><td class="n">${f3(t38)}</td></tr></tbody></table>`;
+
+  // --- SALES / PURCHASE (month × category, current FY) ---
+  const now=new Date(), fy=(now.getMonth()+1)>=4?now.getFullYear():now.getFullYear()-1;
+  monthPivot(await loadTx('mis_sales.csv'),'salesRep',fy);
+  monthPivot(await loadTx('mis_purchase.csv'),'purRep',fy);
+
+  // --- WAREHOUSEWISE STOCK: category × warehouse (needs mis_stock category col) ---
+  // mis_stock.csv already carries Category (server CASE). Read it raw for that.
+  const raw=parseCSV(await fetch('mis_stock.csv?t='+Date.now()).then(r=>r.text()));
+  const wd={},ws=new Set(),wt={};
+  raw.filter(r=>SHOWN.includes(r.WhsCode)).forEach(r=>{const q=num(r.OnHand);const c=r.Category||'8. OTHERS';
+    (wd[c]??={})[r.WhsCode]=(wd[c][r.WhsCode]||0)+q;ws.add(r.WhsCode);wt[r.WhsCode]=(wt[r.WhsCode]||0)+q;});
+  const cats=Object.keys(wd).sort(), whs=[...ws].sort();
+  $('whsRep').innerHTML=cats.length?`<table class="x"><thead><tr><th style="text-align:left">Category</th>${whs.map(w=>`<th>${w}</th>`).join('')}<th>Grand Total</th></tr></thead><tbody>
+    ${cats.map(c=>`<tr><td>${esc(c)}</td>${whs.map(w=>`<td class="n">${wd[c][w]?f0(wd[c][w]):''}</td>`).join('')}<td class="n"><b>${f0(Object.values(wd[c]).reduce((a,b)=>a+b,0))}</b></td></tr>`).join('')}
+    <tr class="gt"><td>Grand Total</td>${whs.map(w=>`<td class="n">${f0(wt[w])}</td>`).join('')}<td class="n">${f0(Object.values(wt).reduce((a,b)=>a+b,0))}</td></tr></tbody></table>`:'<div class="empty">No stock.</div>';
+
+  $('foot').textContent=`WH 38 coil stock ${f3(t38)} MT · sales/purchase = current FY (own material, excl. job work)`;
+})();
+</script>
+</body></html>

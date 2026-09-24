@@ -1,0 +1,82 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Coil Stock — Bharat Steel MIS</title><link rel="icon" href="BSC.png"/>
+<script>window.PORTAL={module:'stock',screen:'pivot'}</script>
+</head><body>
+<div class="pw">
+  <div id="errbox"></div>
+  <div class="filters">
+    <label>Location
+      <select id="loc" onchange="draw()"><option value="">All Chennai + Salem</option>
+        <option value="chennai">Chennai (11·38)</option><option value="salem">Salem (22·07)</option></select></label>
+    <label>Measure <select id="measure" onchange="draw()">
+      <option value="OnHand">On hand</option><option value="Committed">Booked</option>
+      <option value="OnOrder">Incoming</option><option value="Available">Available</option></select></label>
+    <label><input type="checkbox" id="allW" onchange="draw()"/> all widths (incl. slit)</label>
+    <span class="fcount" id="fcount"></span>
+  </div>
+  <div id="blocks"></div>
+  <div class="card" id="drillCard" style="display:none"><h3>Items in <span class="r" id="drillSub"></span></h3><div class="tblwrap" id="drill"></div></div>
+  <footer id="foot"></footer>
+</div>
+<script src="../_portal.js"></script>
+<script src="_stockdata.js"></script>
+<script>
+let S={},sel=null;
+const GRADES=['E250','E350','E450','E550','IS3502 / IS10748'];
+const STDW=new Set([1250,1500,2000,2500]);
+function bucket(g){
+  const G=(g||'').toUpperCase();
+  if(G.includes('IS3502')||G.includes('IS10748'))return 'IS3502 / IS10748';
+  if(G.includes('E550')||G.includes('HSFQ550'))return 'E550';
+  if(G.includes('E450')||G.includes('HSFQ450'))return 'E450';
+  if(G.includes('E350'))return 'E350';
+  if(G.includes('E250')||G.trim()==='IS2062'||G.startsWith('IS2062'))return 'E250';
+  return null;
+}
+function excl(g){const G=(g||'').toUpperCase();return ['FE550D','FE500D','SEQR','EQR'].some(t=>G.includes(t))||G.includes('WIR')||G==='IS1309';}
+function scope(){
+  const loc=$('loc').value;
+  return S.STOCK.filter(r=>{
+    if(loc==='chennai'&&LOC[r.WhsCode]!=='Chennai')return false;
+    if(loc==='salem'&&LOC[r.WhsCode]!=='Salem')return false;
+    return true;
+  });
+}
+function draw(){
+  const meas=$('measure').value, allW=$('allW').checked, rs=scope();
+  let html=''; let grand=0, gcount=0;
+  GRADES.forEach(gr=>{
+    const items=rs.filter(r=>!excl(r.Grade)&&bucket(r.Grade)===gr&&r.T&&r.W&&(allW||STDW.has(r.W))&&(r[meas]||0)>0);
+    if(!items.length) return;
+    const data={},Ws=new Set(),Ts=new Set(),colTot={};
+    items.forEach(r=>{(data[r.T]??={})[r.W]=(data[r.T][r.W]||0)+(r[meas]||0);Ts.add(r.T);Ws.add(r.W);colTot[r.W]=(colTot[r.W]||0)+(r[meas]||0);});
+    const ts=[...Ts].sort((a,b)=>a-b),ws=[...Ws].sort((a,b)=>a-b);
+    const gtot=Object.values(colTot).reduce((a,b)=>a+b,0); grand+=gtot; gcount+=items.length;
+    let t=`<table class="pivot"><thead><tr><th>T \\ W</th>${ws.map(w=>`<th class="num">${w}</th>`).join('')}<th class="num">Grand Total</th></tr></thead><tbody>`;
+    ts.forEach(T=>{const rt=ws.reduce((a,w)=>a+(data[T][w]||0),0);
+      t+=`<tr><td class="num"><b>${T}</b></td>${ws.map(w=>{const v=data[T][w]||0;return `<td class="num cell${sel&&sel.g===gr&&sel.t===T&&sel.w===w?' sel':''}" ${v?`data-g="${esc(gr)}" data-t="${T}" data-w="${w}"`:''}>${v?f1(v):''}</td>`;}).join('')}<td class="num"><b>${f1(rt)}</b></td></tr>`;});
+    t+=`<tr class="tot"><td>Grand Total</td>${ws.map(w=>`<td class="num">${f1(colTot[w]||0)}</td>`).join('')}<td class="num">${f1(gtot)}</td></tr></tbody></table>`;
+    html+=`<div class="card"><h3>${esc(gr)} <span class="r">${f1(gtot)} MT · ${items.length} items</span></h3><div class="tblwrap">${t}</div></div>`;
+  });
+  $('blocks').innerHTML=html||'<div class="empty">No dimensioned coil stock for this filter.</div>';
+  $('fcount').textContent=`${gcount} items · ${f1(grand)} MT ${meas.replace('OnHand','on hand').replace('OnOrder','incoming')}`;
+  document.querySelectorAll('#blocks td.cell[data-t]').forEach(td=>td.onclick=()=>drill(td.dataset.g,+td.dataset.t,+td.dataset.w));
+  if(sel)drill(sel.g,sel.t,sel.w);
+}
+function drill(g,t,w){
+  sel={g,t,w};
+  document.querySelectorAll('#blocks td.cell').forEach(td=>td.classList.toggle('sel',td.dataset.g===g&&+td.dataset.t===t&&+td.dataset.w===w));
+  const meas=$('measure').value, rs=scope().filter(r=>!excl(r.Grade)&&bucket(r.Grade)===g&&r.T===t&&r.W===w&&(r[meas]||0)>0).sort((a,b)=>b[meas]-a[meas]);
+  $('drillCard').style.display=''; $('drillSub').textContent=`${g} · ${t} × ${w} · ${rs.length} items · ${f1(rs.reduce((a,r)=>a+(r[meas]||0),0))} MT`;
+  $('drill').innerHTML=`<table><thead><tr><th>Item</th><th>Brand</th><th>Grade</th><th>Whs</th><th class="num">On hand</th><th class="num">Booked</th><th class="num">Available</th></tr></thead><tbody>
+    ${rs.map(r=>`<tr><td>${esc(r.ItemName)}<div class="muted">${esc(r.ItemCode)}</div></td><td><span class="tag">${esc(r.Brand)}</span></td><td class="muted">${esc(r.Grade)}</td><td class="num">${r.WhsCode}</td><td class="num"><b>${f3(r.OnHand)}</b></td><td class="num">${r.Committed?f3(r.Committed):''}</td><td class="num">${f3(r.Available)}</td></tr>`).join('')}</tbody></table>`;
+}
+(async function(){
+  try{S=await loadStock();}catch(e){$('errbox').innerHTML='<div class="err">Couldn\'t load stock data.</div>';return;}
+  S.STOCK=S.STOCK.filter(r=>/COIL/i.test(r.ItemName)||r.WhsCode==='38'||r.WhsCode==='22'||r.WhsCode==='07');
+  $('foot').textContent='Grades grouped: E250 (incl. IS2062), E350, E450, E550, IS3502/IS10748. TMT, job-work and un-graded coils are excluded.';
+  draw();
+})();
+</script>
+</body></html>

@@ -1,0 +1,48 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Sheet Stock List — Bharat Steel MIS</title><link rel="icon" href="BSC.png"/>
+<script>window.PORTAL={module:'stock',screen:'sheets'}</script>
+</head><body>
+<div class="pw">
+  <div id="errbox"></div>
+  <div class="filters">
+    <input type="search" id="q" placeholder="Search item / code / grade…" oninput="draw()"/>
+    <label>Grade <select id="grade" onchange="draw()"><option value="">All grades</option></select></label>
+    <label>Brand <select id="brand" onchange="draw()"><option value="">All brands</option></select></label>
+    <button class="pbtn" style="background:var(--blue);border-color:var(--blue)" onclick="dl()">Download CSV</button>
+    <span class="fcount" id="fcount"></span>
+  </div>
+  <div class="card"><h3>Sheet &amp; plate stock <span class="r" id="sub"></span></h3><div class="tblwrap scroll" id="tbl"></div></div>
+  <footer id="foot"></footer>
+</div>
+<script src="../_portal.js"></script>
+<script src="_stockdata.js"></script>
+<script>
+let S={};
+function rows(){
+  const q=($('q').value||'').toLowerCase(),gr=$('grade').value,br=$('brand').value;
+  return S.PLATES.filter(r=>(!gr||r.Grade===gr)&&(!br||r.Brand===br)&&(!q||r.ItemName.toLowerCase().includes(q)||r.ItemCode.toLowerCase().includes(q)||r.Grade.toLowerCase().includes(q))).sort((a,b)=>b.TotalQty-a.TotalQty);
+}
+function draw(){
+  const rs=rows(),tq=rs.reduce((a,r)=>a+r.TotalQty,0),tn=rs.reduce((a,r)=>a+r.TotalNos,0);
+  $('sub').textContent=`${rs.length} items · ${f3(tq)} MT · ${f0(tn)} nos`;
+  $('fcount').textContent=`${rs.length} items`;
+  $('tbl').innerHTML=rs.length?`<table><thead><tr><th>Item</th><th>Brand</th><th>Grade</th><th class="num">T</th><th class="num">W</th><th class="num">L</th><th class="num">Qty (MT)</th><th class="num">Nos</th></tr></thead><tbody>
+    ${rs.map(r=>`<tr><td><b>${esc(r.ItemName)}</b><div class="muted">${esc(r.ItemCode)}</div></td><td><span class="tag">${esc(r.Brand)}</span></td><td class="muted">${esc(r.Grade)}</td><td class="num">${nz(r.T)}</td><td class="num">${nz(r.W)}</td><td class="num">${nz(r.L)}</td><td class="num"><b>${f3(r.TotalQty)}</b></td><td class="num">${f0(r.TotalNos)}</td></tr>`).join('')}
+    <tr class="tot"><td colspan="6">Total</td><td class="num">${f3(tq)}</td><td class="num">${f0(tn)}</td></tr></tbody></table>`:'<div class="empty">No sheets match.</div>';
+}
+function dl(){
+  const rs=rows(),head=['ItemCode','ItemName','Brand','Grade','Thickness','Width','Length','TotalQty','TotalNos'];
+  const csv=[head.join(',')].concat(rs.map(r=>[r.ItemCode,`"${r.ItemName}"`,r.Brand,r.Grade,r.T,r.W,r.L,r.TotalQty,r.TotalNos].join(','))).join('\n');
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='sheet_stock_'+new Date().toISOString().slice(0,10)+'.csv';a.click();
+}
+(async function(){
+  try{S=await loadStock();}catch(e){$('errbox').innerHTML='<div class="err">Couldn\'t load stock data.</div>';return;}
+  const fill=(id,vals)=>{const el=$(id);el.innerHTML=el.options[0].outerHTML+vals.map(v=>`<option>${esc(v)}</option>`).join('');};
+  fill('grade',[...new Set(S.PLATES.map(r=>r.Grade).filter(Boolean))].sort());
+  fill('brand',[...new Set(S.PLATES.map(r=>r.Brand))].sort());
+  $('foot').textContent=`${S.PLATES.length} sheet/plate items`;
+  draw();
+})();
+</script>
+</body></html>
