@@ -16,6 +16,21 @@
     { id:'nmdc', label:'NMDC', href:BASE+'/nmdc/index.html', screens:[] },
   ];
 
+
+  const isEmbedded = (P.module==='dispatch'||P.module==='nmdc');
+  if(isEmbedded){
+    // self-contained bar, all styles inline so nothing leaks into the host page's CSS
+    const bar=document.createElement('div');
+    bar.setAttribute('style','position:sticky;top:0;z-index:99999;display:flex;align-items:center;gap:14px;'+
+      'background:linear-gradient(180deg,#1367a6,#0e4d7d);color:#fff;padding:8px 16px;'+
+      'font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;font-size:14px;box-shadow:0 1px 4px rgba(0,0,0,.15)');
+    const link=(m)=>`<a href="${m.href}" style="color:#fff;text-decoration:none;font-weight:600;font-size:13px;padding:6px 13px;border-radius:7px;${m.id===P.module?'background:rgba(255,255,255,.18)':'opacity:.75'}">${m.label}</a>`;
+    bar.innerHTML='<span style="font-weight:700;font-size:15px">Bharat Steel MIS</span>'+
+      '<nav style="display:flex;gap:2px">'+MODULES.map(link).join('')+'</nav>';
+    document.body.insertBefore(bar, document.body.firstChild);
+    return; // do NOT add global css / portalskin / helpers to embedded pages
+  }
+
   const css = `
   :root{--blue:#1367a6;--blue-dark:#0e4d7d;--ink:#14202b;--gray:#5b6b78;--line:#e3e8ec;--bg:#f5f7f9;--head:#e6eef5;--good:#1a7f4b;--amber:#c77a10;--red:#b3261e;--yellow:#fff1c2;--mono:"SFMono-Regular",ui-monospace,Menlo,Consolas,monospace;}
   *{box-sizing:border-box}

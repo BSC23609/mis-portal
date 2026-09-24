@@ -32,8 +32,6 @@ function cors(req, res) {
 // api/dispatch.js
 async function handler(req, res) {
   if (cors(req, res)) return;
-  if (!process.env.DASH_PIN) return json(res, 503, { error: "DASH_PIN not set" });
-  if (req.headers["x-dash-pin"] !== process.env.DASH_PIN) return json(res, 401, { error: "pin" });
   try {
     const c = await sql`select * from coils where coalesce(remarks,'') not ilike '%cancelled%' order by excel_row nulls last, created_at`;
     const rows = c.map((r) => ({
