@@ -564,9 +564,11 @@ async function ensureWheelsTable(){
     id int primary key default 1,
     mail_to text[] default '{}', mail_cc text[] default '{}',
     send_time text default '10:00', enabled boolean default true,
-    wip text[] default '{}', updated_at timestamptz default now()
+    wip text[] default '{}', mail_subject text default '', mail_body text default '', updated_at timestamptz default now()
   )`;
   await sql`insert into wheels_settings (id) values (1) on conflict (id) do nothing`;
+  await sql`alter table wheels_settings add column if not exists mail_subject text default ''`;
+  await sql`alter table wheels_settings add column if not exists mail_body text default ''`;
 }
 async function handlerWheels(req, res){
   if (cors(req, res)) return;
@@ -581,20 +583,100 @@ async function handlerWheels(req, res){
       if (Array.isArray(body.mail_cc)) await sql`update wheels_settings set mail_cc=${body.mail_cc} where id=1`;
       if (typeof body.send_time === "string") await sql`update wheels_settings set send_time=${body.send_time} where id=1`;
       if (typeof body.enabled === "boolean") await sql`update wheels_settings set enabled=${body.enabled} where id=1`;
+      if (typeof body.mail_subject === "string") await sql`update wheels_settings set mail_subject=${body.mail_subject} where id=1`;
+      if (typeof body.mail_body === "string") await sql`update wheels_settings set mail_body=${body.mail_body} where id=1`;
       if (Array.isArray(body.wip)) await sql`update wheels_settings set wip=${body.wip.map(String)} where id=1`;
+      // test send: render from the last CSV and email to the given address (or configured To)
+      if (body.send) {
+        const rows = await sql`select mail_to, mail_cc, wip from wheels_settings where id=1`;
+        const s2 = rows[0] || {};
+        const wipSet = new Set((s2.wip||[]).map(String));
+        const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
+        const note = typeof body.mail_body === "string" ? body.mail_body : (s2.mail_body||"");
+        const { html, gb, gq } = await renderWheelsHtml(base, wipSet, note);
+        const to = body.test_to ? [String(body.test_to)] : (s2.mail_to||[]);
+        const cc = body.test_to ? [] : (s2.mail_cc||[]);
+        if (!to.length) return json(res, 400, { error: "no recipient" });
+        const baseSubj = (body.mail_subject || s2.mail_subject || "BSC — Wheels India Job Work Stock Statement — " + new Date().toLocaleDateString("en-IN"));
+        const subj = (body.test_to ? "[TEST] " : "") + baseSubj;
+        await sendWheelsMail(to, cc, html, subj);
+        await sql`update wheels_settings set updated_at=now() where id=1`;
+        return json(res, 200, { ok: true, sent_to: to, items: gb, mt: Number(gq.toFixed(3)) });
+      }
       await sql`update wheels_settings set updated_at=now() where id=1`;
       return json(res, 200, { ok: true });
     }
-    const rows = await sql`select mail_to, mail_cc, send_time, enabled, wip from wheels_settings where id=1`;
+    const rows = await sql`select mail_to, mail_cc, send_time, enabled, wip, mail_subject, mail_body from wheels_settings where id=1`;
     const s = rows[0] || {};
     return json(res, 200, {
       mail_to: s.mail_to || [], mail_cc: s.mail_cc || [],
       send_time: s.send_time || "10:00", enabled: s.enabled !== false,
-      wip: s.wip || []
+      wip: s.wip || [], mail_subject: s.mail_subject || "", mail_body: s.mail_body || ""
     });
   }catch(e){
     return json(res, 500, { error: String(e.message || e) });
   }
+}
+
+
+// wheels-mail.js — render the branded statement from the last-pushed CSV and send via Graph.
+function wheelsFormOf(n){ n=(n||"").toUpperCase();
+  if(n.includes("SCRAP"))return "SCRAP";
+  if(n.includes("BLANK")||n.includes("FLAT")||n.includes("STRIP"))return "STRIP";
+  if(n.includes("PLATE"))return "PLATE";
+  if(n.includes("COIL"))return "COIL"; return "OTHER"; }
+function parseCsvSrv(t){ if(!t)return[]; if(t.charCodeAt(0)===0xFEFF)t=t.slice(1);
+  const rows=[];let row=[],cur="",q=false;
+  for(let i=0;i<t.length;i++){const c=t[i];
+    if(q){if(c==='"'){if(t[i+1]==='"'){cur+='"';i++;}else q=false;}else cur+=c;}
+    else{if(c==='"')q=true;else if(c===",")row.push(cur),cur="";else if(c==="\n")row.push(cur),rows.push(row),row=[],cur="";else if(c==="\r"){}else cur+=c;}}
+  if(cur!==""||row.length){row.push(cur);rows.push(row);}
+  const h=rows.shift().map(x=>x.trim());
+  return rows.filter(r=>r.length>1).map(r=>{const o={};h.forEach((k,i)=>o[k]=(r[i]??"").trim());return o;}); }
+function dimS(v){ const n=parseFloat(v); return isNaN(n)?"":(""+ +n.toFixed(2)); }
+function lenS(v){ const n=parseFloat(v); return (n&&n>0)?(""+ +n.toFixed(0)):"—"; }
+function esc2(s){ return String(s??"").replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
+
+async function renderWheelsHtml(baseUrl, wipSet, note){
+  const csvRes = await fetch(baseUrl + "/wheels/wheels_stock.csv?t=" + Date.now());
+  const rows = parseCsvSrv(csvRes.ok ? await csvRes.text() : "").map(r=>({...r, Quantity:parseFloat(r.Quantity)||0, form:wheelsFormOf(r.ItemName)})).filter(r=>!wipSet.has(String(r.BatchNum)));
+  const SEC=[["COIL","Coil Stock","#1367a6"],["PLATE","Plate Stock","#0e7a4b"],["STRIP","Strip / Blank Stock","#b5651d"],["SCRAP","Scrap","#8a1c1c"]];
+  let body="", gb=0, gq=0;
+  for(const [k,t,c] of SEC){
+    const rs=rows.filter(r=>r.form===k).sort((a,b)=>b.Quantity-a.Quantity); if(!rs.length)continue;
+    const tq=rs.reduce((a,r)=>a+r.Quantity,0); gb+=rs.length; gq+=tq;
+    body+=`<tr><td colspan="10" style="background:${c};color:#fff;font-weight:700;padding:7px 10px;font-size:13px">${t}<span style="float:right">${rs.length} items &middot; ${tq.toFixed(3)} MT</span></td></tr>`+
+      `<tr style="background:#eef3f7"><th style="width:24px">#</th><th style="text-align:left">Mill</th><th style="text-align:left">Grade</th><th>Thk</th><th>Width</th><th>Length</th><th style="text-align:left">Coil / Batch No</th><th style="text-align:left">Mother Coil</th><th>Qty (MT)</th><th>Age (d)</th></tr>`;
+    rs.forEach((x,i)=>{ const mill=(x.ItemName||"").split(" ")[0];
+      body+=`<tr><td style="text-align:center;color:#888">${i+1}</td><td>${esc2(mill)}</td><td>${esc2(x.Grade)}</td><td style="text-align:right">${dimS(x.Thick)}</td><td style="text-align:right">${dimS(x.Width)}</td><td style="text-align:right">${lenS(x.Length)}</td><td style="font-family:monospace;font-size:11px">${esc2(x.CoilNo||x.BatchNum)}</td><td style="font-family:monospace;font-size:11px;color:#999">${esc2(x.Mothercoil||"—")}</td><td style="text-align:right;font-weight:600">${x.Quantity.toFixed(3)}</td><td style="text-align:right;color:#888">${esc2(x.AgeDays)}</td></tr>`; });
+    body+=`<tr><td colspan="8" style="text-align:right;font-weight:700;padding:6px 10px;border-top:2px solid #333">${t} total</td><td style="text-align:right;font-weight:700;border-top:2px solid #333">${tq.toFixed(3)}</td><td style="border-top:2px solid #333"></td></tr>`;
+  }
+  const asof=new Date().toLocaleString("en-IN",{day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"});
+  const noteHtml = note && note.trim() ? `<div style="padding:14px 22px 0;font-size:13px;color:#222;line-height:1.6;white-space:pre-wrap">${esc2(note)}</div>` : "";
+  const html=`<div style="font-family:Arial,Helvetica,sans-serif;color:#1a1a1a;max-width:920px;margin:auto;border:1px solid #d0d7dd">
+    <div style="background:#0e2a47;color:#fff;padding:14px 22px"><div style="font-size:18px;font-weight:700">Job Work Stock Statement &mdash; Wheels India Limited</div><div style="font-size:12px;opacity:.85;margin-top:3px">Bharat Steel (Chennai) Pvt. Ltd. &middot; Material held at BSC on customer's account</div></div>
+    ${noteHtml}
+    <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;padding:11px 22px;background:#f7f9fb;border-bottom:1px solid #e3e8ec;font-size:13px"><div>Customer: <b>Wheels India Limited</b></div><div>As on: <b>${asof}</b></div><div>Warehouse: <b>Job Work (WH 45)</b></div></div>
+    <div style="padding:14px 22px 4px"><table style="width:100%;border-collapse:collapse;font-size:12px">${body}</table></div>
+    <div style="margin:14px 22px;padding:12px 16px;background:#0e2a47;color:#fff;border-radius:5px;display:flex;justify-content:space-between;font-size:15px;font-weight:700"><span>TOTAL MATERIAL HELD</span><span>${gb} items &middot; ${gq.toFixed(3)} MT</span></div>
+    <div style="margin:0 22px 14px;padding:9px 13px;background:#fff8e1;border:1px solid #f0dc9a;color:#6b5200;font-size:11px;border-radius:5px">Plates currently under process (awaiting shearing) are excluded from this statement.</div>
+    <div style="padding:16px 22px;font-size:11px;color:#667;border-top:1px solid #e3e8ec;line-height:1.6"><b>Bharat Steel (Chennai) Pvt. Ltd.</b> &middot; No.147, Survey No.133, Thirunilai Village, Ponneri Taluk, Chennai 600103 &middot; 044 6791 7800 &middot; info@bharatsteels.in<br>System-generated statement of your material held at BSC as on the date/time shown.</div></div>`;
+  return { html, gb, gq };
+}
+async function sendWheelsMail(to, cc, html, subject){
+  const tenant=process.env.TENANT_ID, cid=process.env.CLIENT_ID, sec=process.env.CLIENT_SECRET;
+  const sender=process.env.WHEELS_SENDER || "pdqc@bharatsteels.in";
+  const tok = await fetch(`https://login.microsoftonline.com/${tenant}/oauth2/v2.0/token`, {
+    method:"POST", headers:{"Content-Type":"application/x-www-form-urlencoded"},
+    body:new URLSearchParams({client_id:cid,client_secret:sec,scope:"https://graph.microsoft.com/.default",grant_type:"client_credentials"})
+  }).then(r=>r.json());
+  if(!tok.access_token) throw new Error("token: "+(tok.error_description||tok.error||"failed"));
+  const msg={ message:{ subject, body:{contentType:"HTML",content:html},
+    toRecipients:(to||[]).map(a=>({emailAddress:{address:a}})),
+    ccRecipients:(cc||[]).map(a=>({emailAddress:{address:a}})) }, saveToSentItems:true };
+  const r = await fetch(`https://graph.microsoft.com/v1.0/users/${sender}/sendMail`, {
+    method:"POST", headers:{Authorization:"Bearer "+tok.access_token,"Content-Type":"application/json"}, body:JSON.stringify(msg) });
+  if(r.status!==202) throw new Error("sendMail HTTP "+r.status+" "+(await r.text()).slice(0,200));
 }
 
 // _router.js

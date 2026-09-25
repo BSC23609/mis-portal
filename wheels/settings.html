@@ -32,6 +32,15 @@
       <label>CC (Bharat Steel)</label>
       <textarea id="mailCc" rows="2" placeholder="internal addresses to keep in copy"></textarea>
     </div>
+    <div class="fld">
+      <label>Email subject <span style="font-weight:400;text-transform:none;color:var(--gray)">(optional — a default is used if blank)</span></label>
+      <input type="text" id="mailSubject" placeholder="BSC — Wheels India Job Work Stock Statement"/>
+    </div>
+    <div class="fld">
+      <label>Message body <span style="font-weight:400;text-transform:none;color:var(--gray)">(appears above the stock table)</span></label>
+      <textarea id="mailBody" rows="5" placeholder="Dear Sir/Madam,&#10;&#10;Please find below the current status of your material held at BSC as on date.&#10;&#10;Regards,&#10;Bharat Steel (Chennai) Pvt. Ltd."></textarea>
+      <div class="hint">Plain text. Line breaks are preserved. The branded stock table is added automatically below this message.</div>
+    </div>
     <div style="display:flex;gap:24px;flex-wrap:wrap">
       <div class="fld"><label>Send time (IST)</label><input type="time" id="sendTime" value="10:00"/></div>
       <div class="fld"><label>Daily email</label>
@@ -42,6 +51,16 @@
     <div class="saverow">
       <button class="pbtn" style="background:var(--blue);border-color:var(--blue)" onclick="saveSettings()">Save settings</button>
       <span class="saved" id="savedS">✓ Saved</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Send a test email</h3>
+    <div class="hint" style="margin-bottom:10px">Sends the current statement (from the latest stock refresh, WIP excluded) to one address so you can check branding and delivery. Uses the configured sender. Does not affect the daily schedule.</div>
+    <div class="fld" style="max-width:420px"><label>Test recipient</label><input type="text" id="testTo" placeholder="you@bharatsteels.in"/></div>
+    <div class="saverow">
+      <button class="pbtn" style="background:var(--blue);border-color:var(--blue)" id="testBtn" onclick="sendTest()">Send test now</button>
+      <span class="saved" id="savedT"></span>
     </div>
   </div>
 
@@ -85,6 +104,8 @@ async function load(){
     $('mailCc').value=(SET.mail_cc||[]).join('\n');
     if(SET.send_time) $('sendTime').value=SET.send_time;
     $('enabled').checked=SET.enabled!==false;
+    $('mailSubject').value=SET.mail_subject||'';
+    $('mailBody').value=SET.mail_body||'';
     renderWip();
     $('foot').textContent=`${ROWS.length} WH45 batches loaded`;
   }catch(e){ $('errbox').innerHTML='<div class="err">Couldn\'t load settings / stock.</div>'; }
@@ -111,13 +132,27 @@ function flash(id){const e=$(id);e.style.display='inline';setTimeout(()=>e.style
 async function saveSettings(){
   try{
     const split=v=>v.split(/[\n,;]+/).map(s=>s.trim()).filter(Boolean);
-    await post({mail_to:split($('mailTo').value),mail_cc:split($('mailCc').value),send_time:$('sendTime').value,enabled:$('enabled').checked});
+    await post({mail_to:split($('mailTo').value),mail_cc:split($('mailCc').value),send_time:$('sendTime').value,enabled:$('enabled').checked,mail_subject:$('mailSubject').value,mail_body:$('mailBody').value});
     flash('savedS');
   }catch(e){ alert(e.message); }
 }
 async function saveWip(){
   try{ await post({wip:[...WIP]}); flash('savedW'); }
   catch(e){ alert(e.message); }
+}
+async function sendTest(){
+  const to=$('testTo').value.trim();
+  if(!to){ alert('Enter a test recipient address'); return; }
+  const b=$('testBtn'); b.disabled=true; b.textContent='Sending…';
+  const msg=$('savedT'); msg.style.display='inline'; msg.style.color='var(--gray)'; msg.textContent='sending…';
+  try{
+    // save current settings first so the test reflects what's on screen
+    const split=v=>v.split(/[\n,;]+/).map(s=>s.trim()).filter(Boolean);
+    await post({mail_to:split($('mailTo').value),mail_cc:split($('mailCc').value),send_time:$('sendTime').value,enabled:$('enabled').checked,mail_subject:$('mailSubject').value,mail_body:$('mailBody').value,wip:[...WIP]});
+    const r=await post({send:true,test_to:to});
+    msg.style.color='var(--good)'; msg.textContent=`✓ Sent to ${to} · ${r.items} items · ${r.mt} MT`;
+  }catch(e){ msg.style.color='var(--red)'; msg.textContent='✗ '+e.message; }
+  finally{ b.disabled=false; b.textContent='Send test now'; }
 }
 load();
 </script>
