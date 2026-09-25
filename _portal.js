@@ -3,7 +3,7 @@
    Each page sets  window.PORTAL = { module:'stock', screen:'daily' }  before including this. */
 (function(){
   const P = window.PORTAL || {};
-  const BASE = location.pathname.includes('/stock/')||location.pathname.includes('/dispatch/')||location.pathname.includes('/nmdc/') ? '..' : '.';
+  const BASE = location.pathname.includes('/stock/')||location.pathname.includes('/dispatch/')||location.pathname.includes('/nmdc/')||location.pathname.includes('/wheels/') ? '..' : '.';
 
   const MODULES = [
     { id:'stock', label:'Stock', href:BASE+'/stock/daily.html', screens:[
