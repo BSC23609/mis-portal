@@ -557,6 +557,46 @@ async function handler4(req, res) {
   json(res, 200, { ok: true, updated: rows.map((r) => r.coil_no) });
 }
 
+
+// wheels.js — settings + WIP exclusions for the Wheels India module (Neon-backed).
+async function ensureWheelsTable(){
+  await sql`create table if not exists wheels_settings (
+    id int primary key default 1,
+    mail_to text[] default '{}', mail_cc text[] default '{}',
+    send_time text default '10:00', enabled boolean default true,
+    wip text[] default '{}', updated_at timestamptz default now()
+  )`;
+  await sql`insert into wheels_settings (id) values (1) on conflict (id) do nothing`;
+}
+async function handlerWheels(req, res){
+  if (cors(req, res)) return;
+  try{
+    await ensureWheelsTable();
+    if (req.method === "POST"){
+      let body = req.body;
+      if (typeof body === "string") { try { body = JSON.parse(body); } catch { body = {}; } }
+      body = body || {};
+      // update only the keys provided (settings save and WIP save are separate posts)
+      if (Array.isArray(body.mail_to)) await sql`update wheels_settings set mail_to=${body.mail_to} where id=1`;
+      if (Array.isArray(body.mail_cc)) await sql`update wheels_settings set mail_cc=${body.mail_cc} where id=1`;
+      if (typeof body.send_time === "string") await sql`update wheels_settings set send_time=${body.send_time} where id=1`;
+      if (typeof body.enabled === "boolean") await sql`update wheels_settings set enabled=${body.enabled} where id=1`;
+      if (Array.isArray(body.wip)) await sql`update wheels_settings set wip=${body.wip.map(String)} where id=1`;
+      await sql`update wheels_settings set updated_at=now() where id=1`;
+      return json(res, 200, { ok: true });
+    }
+    const rows = await sql`select mail_to, mail_cc, send_time, enabled, wip from wheels_settings where id=1`;
+    const s = rows[0] || {};
+    return json(res, 200, {
+      mail_to: s.mail_to || [], mail_cc: s.mail_cc || [],
+      send_time: s.send_time || "10:00", enabled: s.enabled !== false,
+      wip: s.wip || []
+    });
+  }catch(e){
+    return json(res, 500, { error: String(e.message || e) });
+  }
+}
+
 // _router.js
 async function handler5(req, res) {
   const url = req.url || "";
@@ -565,6 +605,7 @@ async function handler5(req, res) {
   route = route.replace(/^\/+|\/+$/g, "");
   if (route === "dispatch") return handler(req, res);
   if (route === "sync") return handler2(req, res);
+  if (route === "wheels") return handlerWheels(req, res);
   res.setHeader("Cache-Control", "no-store");
   res.status(404).json({ error: "unknown route: " + route });
 }

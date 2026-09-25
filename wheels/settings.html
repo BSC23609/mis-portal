@@ -1,0 +1,124 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Wheels India — Settings — Bharat Steel MIS</title><link rel="icon" type="image/png" href="BSC.png"/>
+<script>window.PORTAL={module:'wheels',screen:'settings'}</script>
+<style>
+  .fld{margin-bottom:14px}
+  .fld label{display:block;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--gray);margin-bottom:5px}
+  .fld input[type=text],.fld input[type=time],.fld textarea{width:100%;border:1px solid var(--line);border-radius:8px;padding:9px 11px;font-size:14px;font-family:inherit}
+  .fld .hint{font-size:11px;color:var(--gray);margin-top:4px}
+  .saverow{display:flex;align-items:center;gap:12px;margin-top:8px}
+  .saved{color:var(--good);font-size:13px;font-weight:600;display:none}
+  .wipitem{display:flex;align-items:center;gap:10px;padding:7px 10px;border-bottom:1px solid var(--line);font-size:13px}
+  .wipitem input{width:16px;height:16px}
+  .wipitem .nm{flex:1;min-width:0}
+  .wipitem .q{font-family:var(--mono);color:var(--gray)}
+  .pill{display:inline-block;font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;margin-left:6px}
+  .pill.plate{background:#e3f2ea;color:#0e7a4b} .pill.strip{background:#f6ecdf;color:#b5651d}
+  .toggle{display:flex;align-items:center;gap:8px;font-size:14px}
+</style>
+</head><body>
+<div class="pw">
+  <div id="errbox"></div>
+
+  <div class="card">
+    <h3>Daily email — Wheels India stock statement</h3>
+    <div class="fld">
+      <label>Send to (customer)</label>
+      <textarea id="mailTo" rows="2" placeholder="one address per line or comma-separated"></textarea>
+      <div class="hint">The customer recipients. Comma or newline separated.</div>
+    </div>
+    <div class="fld">
+      <label>CC (Bharat Steel)</label>
+      <textarea id="mailCc" rows="2" placeholder="internal addresses to keep in copy"></textarea>
+    </div>
+    <div style="display:flex;gap:24px;flex-wrap:wrap">
+      <div class="fld"><label>Send time (IST)</label><input type="time" id="sendTime" value="10:00"/></div>
+      <div class="fld"><label>Daily email</label>
+        <div class="toggle"><input type="checkbox" id="enabled"/> <span>enabled</span></div>
+        <div class="hint">Turn off to pause the 10 AM mail without removing recipients.</div>
+      </div>
+    </div>
+    <div class="saverow">
+      <button class="pbtn" style="background:var(--blue);border-color:var(--blue)" onclick="saveSettings()">Save settings</button>
+      <span class="saved" id="savedS">✓ Saved</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>WIP exclusions <span class="r">tick a plate/strip batch to exclude it from the customer report &amp; email</span></h3>
+    <div class="hint" style="margin-bottom:10px">Plates awaiting shearing and any material not to be shown as available stock. Coils and scrap are listed too in case you ever need to hold one back. Excluded items still appear internally on the report page (tick "show WIP-excluded").</div>
+    <div class="filters" style="margin:0 0 10px">
+      <input type="search" id="wipQ" placeholder="Search item / batch…" oninput="renderWip()"/>
+      <label><input type="checkbox" id="onlyPS" checked onchange="renderWip()"/> only plates &amp; strips</label>
+      <span class="fcount" id="wipCount"></span>
+    </div>
+    <div class="tblwrap scroll" id="wipList"></div>
+    <div class="saverow">
+      <button class="pbtn" style="background:var(--blue);border-color:var(--blue)" onclick="saveWip()">Save exclusions</button>
+      <span class="saved" id="savedW">✓ Saved</span>
+    </div>
+  </div>
+
+  <footer id="foot"></footer>
+</div>
+<script src="../_portal.js"></script>
+<script>
+let ROWS=[], WIP=new Set(), SET={};
+function formOf(name){const n=(name||'').toUpperCase();
+  if(n.includes('SCRAP'))return 'SCRAP';
+  if(n.includes('BLANK')||n.includes('FLAT')||n.includes('STRIP'))return 'STRIP';
+  if(n.includes('PLATE'))return 'PLATE';
+  if(n.includes('COIL'))return 'COIL'; return 'OTHER';}
+const gnum=v=>{const n=parseFloat(v);return isNaN(n)?0:n;};
+
+async function load(){
+  try{
+    const b='?t='+Date.now();
+    const [csv,set]=await Promise.all([
+      fetch('wheels_stock.csv'+b).then(r=>r.ok?r.text():''),
+      fetch(BASE+'/api/wheels?route=settings'+b).then(r=>r.ok?r.json():{}).catch(()=>({}))
+    ]);
+    ROWS=parseCSV(csv).map(r=>({...r,Quantity:gnum(r.Quantity),form:formOf(r.ItemName)}));
+    SET=set||{}; WIP=new Set((SET.wip||[]).map(String));
+    $('mailTo').value=(SET.mail_to||[]).join('\n');
+    $('mailCc').value=(SET.mail_cc||[]).join('\n');
+    if(SET.send_time) $('sendTime').value=SET.send_time;
+    $('enabled').checked=SET.enabled!==false;
+    renderWip();
+    $('foot').textContent=`${ROWS.length} WH45 batches loaded`;
+  }catch(e){ $('errbox').innerHTML='<div class="err">Couldn\'t load settings / stock.</div>'; }
+}
+function renderWip(){
+  const q=($('wipQ').value||'').toLowerCase(), onlyPS=$('onlyPS').checked;
+  let rows=ROWS.filter(r=>(!onlyPS||r.form==='PLATE'||r.form==='STRIP')&&(!q||r.ItemName.toLowerCase().includes(q)||(r.BatchNum||'').toLowerCase().includes(q)));
+  rows.sort((a,b)=>(a.form>b.form?1:-1)||b.Quantity-a.Quantity);
+  $('wipCount').textContent=`${WIP.size} excluded`;
+  $('wipList').innerHTML=rows.length?rows.map(r=>{
+    const pill=r.form==='PLATE'?'<span class="pill plate">PLATE</span>':r.form==='STRIP'?'<span class="pill strip">STRIP</span>':'';
+    return `<label class="wipitem"><input type="checkbox" data-b="${esc(r.BatchNum)}" ${WIP.has(r.BatchNum)?'checked':''} onchange="toggleWip(this)"/>
+      <span class="nm">${esc(r.ItemName)}${pill}<div class="muted mono">${esc(r.BatchNum)}</div></span>
+      <span class="q">${r.Quantity.toFixed(3)} MT</span></label>`;}).join(''):'<div class="empty">No matching batches.</div>';
+}
+function toggleWip(el){ const b=el.dataset.b; if(el.checked)WIP.add(b);else WIP.delete(b); $('wipCount').textContent=`${WIP.size} excluded`; }
+
+async function post(body){
+  const r=await fetch(BASE+'/api/wheels?route=settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(!r.ok) throw new Error('save failed ('+r.status+')');
+  return r.json().catch(()=>({}));
+}
+function flash(id){const e=$(id);e.style.display='inline';setTimeout(()=>e.style.display='none',2500);}
+async function saveSettings(){
+  try{
+    const split=v=>v.split(/[\n,;]+/).map(s=>s.trim()).filter(Boolean);
+    await post({mail_to:split($('mailTo').value),mail_cc:split($('mailCc').value),send_time:$('sendTime').value,enabled:$('enabled').checked});
+    flash('savedS');
+  }catch(e){ alert(e.message); }
+}
+async function saveWip(){
+  try{ await post({wip:[...WIP]}); flash('savedW'); }
+  catch(e){ alert(e.message); }
+}
+load();
+</script>
+</body></html>

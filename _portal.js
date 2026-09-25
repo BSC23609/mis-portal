@@ -14,6 +14,10 @@
     ]},
     { id:'dispatch', label:'Dispatch', href:BASE+'/dispatch/index.html', screens:[] },
     { id:'nmdc', label:'NMDC', href:BASE+'/nmdc/index.html', screens:[] },
+    { id:'wheels', label:'Wheels India', href:BASE+'/wheels/index.html', screens:[
+        {id:'report',   label:'Stock Statement', href:BASE+'/wheels/index.html'},
+        {id:'settings', label:'Settings', href:BASE+'/wheels/settings.html'},
+    ]},
   ];
 
 
