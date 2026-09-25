@@ -593,15 +593,20 @@ async function handlerWheels(req, res){
         const wipSet = new Set((s2.wip||[]).map(String));
         const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
         const note = typeof body.mail_body === "string" ? body.mail_body : (s2.mail_body||"");
-        const { html, gb, gq } = await renderWheelsHtml(base, wipSet, note);
+        const { html, gb, gq, rows: wrows } = await renderWheelsHtml(base, wipSet, note);
         const to = body.test_to ? [String(body.test_to)] : (s2.mail_to||[]);
         const cc = body.test_to ? [] : (s2.mail_cc||[]);
         if (!to.length) return json(res, 400, { error: "no recipient" });
         const baseSubj = (body.mail_subject || s2.mail_subject || "BSC — Wheels India Job Work Stock Statement — " + new Date().toLocaleDateString("en-IN"));
         const subj = (body.test_to ? "[TEST] " : "") + baseSubj;
-        await sendWheelsMail(to, cc, html, subj);
+        let attach = null, attachErr = null;
+        try {
+          const xlsxB64 = await buildWheelsXlsx(wrows);
+          attach = { name: "WheelsIndia_Stock_" + new Date().toISOString().slice(0,10).replace(/-/g,"") + ".xlsx", b64: xlsxB64 };
+        } catch(e){ attachErr = String(e.message||e); }
+        await sendWheelsMail(to, cc, html, subj, attach);
         await sql`update wheels_settings set updated_at=now() where id=1`;
-        return json(res, 200, { ok: true, sent_to: to, items: gb, mt: Number(gq.toFixed(3)) });
+        return json(res, 200, { ok: true, sent_to: to, items: gb, mt: Number(gq.toFixed(3)), attached: !!attach, attach_error: attachErr });
       }
       await sql`update wheels_settings set updated_at=now() where id=1`;
       return json(res, 200, { ok: true });
@@ -661,9 +666,37 @@ async function renderWheelsHtml(baseUrl, wipSet, note){
     <div style="margin:14px 22px;padding:12px 16px;background:#0e2a47;color:#fff;border-radius:5px;display:flex;justify-content:space-between;font-size:15px;font-weight:700"><span>TOTAL MATERIAL HELD</span><span>${gb} items &middot; ${gq.toFixed(3)} MT</span></div>
     <div style="margin:0 22px 14px;padding:9px 13px;background:#fff8e1;border:1px solid #f0dc9a;color:#6b5200;font-size:11px;border-radius:5px">Plates currently under process (awaiting shearing) are excluded from this statement.</div>
     <div style="padding:16px 22px;font-size:11px;color:#667;border-top:1px solid #e3e8ec;line-height:1.6"><b>Bharat Steel (Chennai) Pvt. Ltd.</b> &middot; No.147, Survey No.133, Thirunilai Village, Ponneri Taluk, Chennai 600103 &middot; 044 6791 7800 &middot; info@bharatsteels.in<br>System-generated statement of your material held at BSC as on the date/time shown.</div></div>`;
-  return { html, gb, gq };
+  return { html, gb, gq, rows };
 }
-async function sendWheelsMail(to, cc, html, subject){
+
+async function buildWheelsXlsx(rows){
+  let XLSX;
+  try { XLSX = await import("xlsx"); } catch(e){ throw new Error("xlsx module not available on server: "+e.message); }
+  const SEC=[["COIL","Coil Stock"],["PLATE","Plate Stock"],["STRIP","Strip / Blank Stock"],["SCRAP","Scrap"]];
+  const aoa=[["BHARAT STEEL (CHENNAI) PRIVATE LIMITED"],
+             ["Job Work Stock Statement — Wheels India Limited"],
+             ["As on: "+new Date().toLocaleString("en-IN")+"   |   Customer: Wheels India Limited   |   Warehouse: Job Work (WH 45)"],
+             []];
+  const hdr=["#","Mill","Grade","Thk","Width","Length","Coil / Batch No","Mother Coil","Qty (MT)","Age (d)"];
+  let gGrand=0, secRanges=[];
+  for(const [k,t] of SEC){
+    const rs=rows.filter(r=>r.form===k).sort((a,b)=>b.Quantity-a.Quantity); if(!rs.length)continue;
+    const tq=rs.reduce((a,r)=>a+r.Quantity,0); gGrand+=tq;
+    aoa.push([`${t}   (${rs.length} items, ${tq.toFixed(3)} MT)`]);
+    aoa.push(hdr);
+    rs.forEach((x,i)=>{ const mill=(x.ItemName||"").split(" ")[0];
+      const T=parseFloat(x.Thick), W=parseFloat(x.Width), L=parseFloat(x.Length);
+      aoa.push([i+1, mill, x.Grade, isNaN(T)?"":T, isNaN(W)?"":W, (L>0?L:""), (x.CoilNo||x.BatchNum), (x.Mothercoil||"-"), Number(x.Quantity.toFixed(3)), x.AgeDays?parseInt(x.AgeDays):""]); });
+    aoa.push(["","","","","","","","",Number(tq.toFixed(3)),""]);
+    aoa.push([]);
+  }
+  aoa.push(["TOTAL MATERIAL HELD","","","","","","","",Number(gGrand.toFixed(3)),""]);
+  const ws=XLSX.utils.aoa_to_sheet(aoa);
+  ws["!cols"]=[{wch:4},{wch:10},{wch:16},{wch:7},{wch:8},{wch:9},{wch:22},{wch:22},{wch:11},{wch:7}];
+  const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,"Stock Statement");
+  return XLSX.write(wb,{type:"base64",bookType:"xlsx"});
+}
+async function sendWheelsMail(to, cc, html, subject, attach){
   const tenant=process.env.TENANT_ID, cid=process.env.CLIENT_ID, sec=process.env.CLIENT_SECRET;
   const sender=process.env.WHEELS_SENDER || "pdqc@bharatsteels.in";
   const tok = await fetch(`https://login.microsoftonline.com/${tenant}/oauth2/v2.0/token`, {
@@ -671,9 +704,14 @@ async function sendWheelsMail(to, cc, html, subject){
     body:new URLSearchParams({client_id:cid,client_secret:sec,scope:"https://graph.microsoft.com/.default",grant_type:"client_credentials"})
   }).then(r=>r.json());
   if(!tok.access_token) throw new Error("token: "+(tok.error_description||tok.error||"failed"));
-  const msg={ message:{ subject, body:{contentType:"HTML",content:html},
+  const message={ subject, body:{contentType:"HTML",content:html},
     toRecipients:(to||[]).map(a=>({emailAddress:{address:a}})),
-    ccRecipients:(cc||[]).map(a=>({emailAddress:{address:a}})) }, saveToSentItems:true };
+    ccRecipients:(cc||[]).map(a=>({emailAddress:{address:a}})) };
+  if(attach && attach.b64){
+    message.attachments=[{ "@odata.type":"#microsoft.graph.fileAttachment", name:attach.name,
+      contentType:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", contentBytes:attach.b64 }];
+  }
+  const msg={ message, saveToSentItems:true };
   const r = await fetch(`https://graph.microsoft.com/v1.0/users/${sender}/sendMail`, {
     method:"POST", headers:{Authorization:"Bearer "+tok.access_token,"Content-Type":"application/json"}, body:JSON.stringify(msg) });
   if(r.status!==202) throw new Error("sendMail HTTP "+r.status+" "+(await r.text()).slice(0,200));

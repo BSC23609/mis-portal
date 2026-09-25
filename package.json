@@ -2,5 +2,8 @@
   "name": "mis-portal",
   "private": true,
   "type": "module",
-  "dependencies": { "@neondatabase/serverless": "^0.10.4" }
+  "dependencies": {
+    "@neondatabase/serverless": "^0.10.4",
+    "xlsx": "^0.18.5"
+  }
 }
