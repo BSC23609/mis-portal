@@ -645,7 +645,7 @@ function esc2(s){ return String(s??"").replace(/[&<>]/g,c=>({"&":"&amp;","<":"&l
 async function renderWheelsHtml(baseUrl, wipSet, note){
   const csvRes = await fetch(baseUrl + "/wheels/wheels_stock.csv?t=" + Date.now());
   const rows = parseCsvSrv(csvRes.ok ? await csvRes.text() : "").map(r=>({...r, Quantity:parseFloat(r.Quantity)||0, form:wheelsFormOf(r.ItemName)})).filter(r=>!wipSet.has(String(r.BatchNum)));
-  const SEC=[["COIL","Coil Stock","#1367a6"],["PLATE","Plate Stock","#0e7a4b"],["STRIP","Strip / Blank Stock","#b5651d"],["SCRAP","Scrap","#8a1c1c"]];
+  const SEC=[["COIL","Coil Stock","#1367a6"],["PLATE","Plate Stock","#0e7a4b"],["STRIP","Strip / Blank Stock","#b5651d"]]; // scrap excluded from customer email
   let body="", gb=0, gq=0;
   for(const [k,t,c] of SEC){
     const rs=rows.filter(r=>r.form===k).sort((a,b)=>b.Quantity-a.Quantity); if(!rs.length)continue;
@@ -672,7 +672,7 @@ async function renderWheelsHtml(baseUrl, wipSet, note){
 async function buildWheelsXlsx(rows){
   let XLSX;
   try { XLSX = await import("xlsx"); } catch(e){ throw new Error("xlsx module not available on server: "+e.message); }
-  const SEC=[["COIL","Coil Stock"],["PLATE","Plate Stock"],["STRIP","Strip / Blank Stock"],["SCRAP","Scrap"]];
+  const SEC=[["COIL","Coil Stock"],["PLATE","Plate Stock"],["STRIP","Strip / Blank Stock"]]; // scrap excluded from customer email
   const aoa=[["BHARAT STEEL (CHENNAI) PRIVATE LIMITED"],
              ["Job Work Stock Statement — Wheels India Limited"],
              ["As on: "+new Date().toLocaleString("en-IN")+"   |   Customer: Wheels India Limited   |   Warehouse: Job Work (WH 45)"],
