@@ -87,7 +87,7 @@ function sectionTable(rows){
       const mill=(x.ItemName||'').split(' ')[0];
       html+=`<tr><td class="r" style="color:#888">${i+1}</td><td>${esc(mill)}</td><td>${esc(x.Grade)}</td>
         <td class="r">${fdim(x.Thick)}</td><td class="r">${fdim(x.Width)}</td><td class="r">${flen(x.Length)}</td>
-        <td class="mono">${esc(x.CoilNo||x.BatchNum)}</td><td class="mono" style="color:#999">${esc(x.Mothercoil||'—')}</td>
+        <td class="mono">${esc(x.CoilNo||x.BatchNum)}${(+x.BatchCount>1)?` <span style=\"color:#999\">(${x.BatchCount} batches)</span>`:''}</td><td class="mono" style="color:#999">${esc(x.Mothercoil||'—')}</td>
         <td class="r" style="font-weight:600">${x.Quantity.toFixed(3)}</td><td class="r" style="color:#888">${esc(x.AgeDays)}</td></tr>`;
     });
     html+=`<tr><td class="st" colspan="8">${title} total</td><td class="st r">${tq.toFixed(3)}</td><td class="st"></td></tr>`;

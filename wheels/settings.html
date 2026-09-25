@@ -149,7 +149,6 @@ async function sendTest(){
     // save current settings first so the test reflects what's on screen
     const split=v=>v.split(/[\n,;]+/).map(s=>s.trim()).filter(Boolean);
     await post({mail_to:split($('mailTo').value),mail_cc:split($('mailCc').value),send_time:$('sendTime').value,enabled:$('enabled').checked,mail_subject:$('mailSubject').value,mail_body:$('mailBody').value,wip:[...WIP]});
-    const split=v=>v.split(/[\n,;]+/).map(x=>x.trim()).filter(Boolean);
     const r=await post({send:true,test_to:to,mail_body:$('mailBody').value,mail_subject:$('mailSubject').value});
     msg.style.color='var(--good)'; msg.textContent=`✓ Sent to ${to} · ${r.items} items · ${r.mt} MT`;
   }catch(e){ msg.style.color='var(--red)'; msg.textContent='✗ '+e.message; }
