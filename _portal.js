@@ -137,4 +137,6 @@
     $('pStale').style.display=(d&&Date.now()-d.getTime()>3*3600e3)?'':'none';
   };
   window.BASE=BASE;
+  // data CSVs live in a SEPARATE repo Vercel does not watch (avoids a deploy per refresh)
+  window.DATA_BASE="https://raw.githubusercontent.com/BSC23609/bsc-stock-data/main";
 })();

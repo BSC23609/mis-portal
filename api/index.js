@@ -643,7 +643,8 @@ function lenS(v){ const n=parseFloat(v); return (n&&n>0)?(""+ +n.toFixed(0)):"â€
 function esc2(s){ return String(s??"").replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
 
 async function renderWheelsHtml(baseUrl, wipSet, note){
-  const csvRes = await fetch(baseUrl + "/wheels/wheels_stock.csv?t=" + Date.now());
+  const DATA_BASE = process.env.DATA_BASE || "https://raw.githubusercontent.com/BSC23609/bsc-stock-data/main";
+  const csvRes = await fetch(DATA_BASE + "/wheels_stock.csv?t=" + Date.now());
   const rows = parseCsvSrv(csvRes.ok ? await csvRes.text() : "").map(r=>({...r, Quantity:parseFloat(r.Quantity)||0, form:wheelsFormOf(r.ItemName)})).filter(r=>!wipSet.has(String(r.BatchNum)));
   const SEC=[["COIL","Coil Stock","#1367a6"],["PLATE","Plate Stock","#0e7a4b"],["STRIP","Strip / Blank Stock","#b5651d"]]; // scrap excluded from customer email
   let body="", gb=0, gq=0;

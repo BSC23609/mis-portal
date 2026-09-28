@@ -76,12 +76,12 @@ function monthPivot(rows,elId,fy){
 
   // --- SALES / PURCHASE (month × category, current FY) ---
   const now=new Date(), fy=(now.getMonth()+1)>=4?now.getFullYear():now.getFullYear()-1;
-  monthPivot(await loadTx('mis_sales.csv'),'salesRep',fy);
-  monthPivot(await loadTx('mis_purchase.csv'),'purRep',fy);
+  monthPivot(await loadTx(DATA_BASE+'/mis_sales.csv'),'salesRep',fy);
+  monthPivot(await loadTx(DATA_BASE+'/mis_purchase.csv'),'purRep',fy);
 
   // --- WAREHOUSEWISE STOCK: category × warehouse (needs mis_stock category col) ---
   // mis_stock.csv already carries Category (server CASE). Read it raw for that.
-  const raw=parseCSV(await fetch('mis_stock.csv?t='+Date.now()).then(r=>r.text()));
+  const raw=parseCSV(await fetch(DATA_BASE+'/mis_stock.csv?t='+Date.now()).then(r=>r.text()));
   const wd={},ws=new Set(),wt={};
   raw.filter(r=>SHOWN.includes(r.WhsCode)).forEach(r=>{const q=num(r.OnHand);const c=r.Category||'8. OTHERS';
     (wd[c]??={})[r.WhsCode]=(wd[c][r.WhsCode]||0)+q;ws.add(r.WhsCode);wt[r.WhsCode]=(wt[r.WhsCode]||0)+q;});

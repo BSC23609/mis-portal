@@ -7,10 +7,10 @@ window.brandOf=function brandOf(name){const n=(name||'').toUpperCase();for(const
 window.loadStock=async function loadStock(){
   const b='?t='+Date.now();
   const [s,c,p,me]=await Promise.all([
-    fetch('mis_stock.csv'+b).then(r=>r.ok?r.text():''),
-    fetch('coils.csv'+b).then(r=>r.ok?r.text():''),
-    fetch('plates.csv'+b).then(r=>r.ok?r.text():''),
-    fetch(BASE+'/stock/mis_meta.json'+b).then(r=>r.ok?r.json():{}).catch(()=>({}))
+    fetch(DATA_BASE+'/mis_stock.csv'+b).then(r=>r.ok?r.text():''),
+    fetch(DATA_BASE+'/coils.csv'+b).then(r=>r.ok?r.text():''),
+    fetch(DATA_BASE+'/plates.csv'+b).then(r=>r.ok?r.text():''),
+    fetch(DATA_BASE+'/mis_meta.json'+b).then(r=>r.ok?r.json():{}).catch(()=>({}))
   ]);
   const STOCK=parseCSV(s).filter(r=>SHOWN.includes(r.WhsCode)).map(r=>({
     ItemCode:r.ItemCode,ItemName:r.ItemName,Group:r.ItemGroup,WhsCode:r.WhsCode,

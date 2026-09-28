@@ -95,7 +95,7 @@ async function load(){
   try{
     const b='?t='+Date.now();
     const [csv,set]=await Promise.all([
-      fetch('wheels_stock.csv'+b).then(r=>r.ok?r.text():''),
+      fetch(DATA_BASE+'/wheels_stock.csv'+b).then(r=>r.ok?r.text():''),
       fetch(BASE+'/api/wheels?route=settings'+b).then(r=>r.ok?r.json():{}).catch(()=>({}))
     ]);
     ROWS=parseCSV(csv).map(r=>({...r,Quantity:gnum(r.Quantity),form:formOf(r.ItemName)}));

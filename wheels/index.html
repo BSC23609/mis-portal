@@ -63,12 +63,12 @@ async function load(){
   try{
     const b='?t='+Date.now();
     const [csv,set] = await Promise.all([
-      fetch('wheels_stock.csv'+b).then(r=>{if(!r.ok)throw 0;return r.text();}),
+      fetch(DATA_BASE+'/wheels_stock.csv'+b).then(r=>{if(!r.ok)throw 0;return r.text();}),
       fetch(BASE+'/api/wheels?route=settings'+b).then(r=>r.ok?r.json():{wip:[],meta:{}}).catch(()=>({wip:[],meta:{}}))
     ]);
     ROWS=parseCSV(csv).map(r=>({...r,Quantity:gnum(r.Quantity)||0,form:formOf(r.ItemName)}));
     WIP=new Set((set.wip||[]).map(String));
-    const metaRaw=await fetch(BASE+'/wheels/wheels_meta.json'+b).then(r=>r.ok?r.json():{}).catch(()=>({}));
+    const metaRaw=await fetch(DATA_BASE+'/wheels_meta.json'+b).then(r=>r.ok?r.json():{}).catch(()=>({}));
     META=metaRaw; setStamp(META.generated);
     draw();
     $('foot').textContent=`${ROWS.length} WH45 batches for Wheels India · WIP-excluded: ${ROWS.filter(r=>WIP.has(r.BatchNum)).length}`;
