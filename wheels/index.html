@@ -40,6 +40,33 @@
     </div>
   </div>
 
+  <!-- A: current stock by brand -->
+  <div class="card">
+    <h3>Material held by brand <span class="r" id="byBrandSub"></span></h3>
+    <div class="tblwrap" id="byBrand"></div>
+  </div>
+
+  <!-- B: worked (dispatched back) by brand -->
+  <div class="card">
+    <h3>Material worked for Wheels India <span class="r">dispatched back · MT</span></h3>
+    <div class="filters" style="margin:0 0 10px">
+      <label>Period
+        <select id="workedPeriod" onchange="renderWorked()">
+          <option value="fy">This FY</option>
+          <option value="all">All time</option>
+        </select>
+      </label>
+      <label>View
+        <select id="workedView" onchange="renderWorked()">
+          <option value="total">Total by brand</option>
+          <option value="month">Month-wise by brand</option>
+        </select>
+      </label>
+      <span class="fcount" id="workedSub"></span>
+    </div>
+    <div class="tblwrap" id="workedTbl"></div>
+  </div>
+
   <div class="sheet" id="sheet"></div>
   <div class="wipbox" id="wipCard" style="display:none"></div>
 
@@ -48,7 +75,7 @@
 <script src="../_portal.js"></script>
 <script>
 const SEC=[['COIL','Coil Stock','#1367a6'],['PLATE','Plate Stock','#0e7a4b'],['STRIP','Strip / Blank Stock','#b5651d'],['SCRAP','Scrap','#8a1c1c']];
-let ROWS=[], WIP=new Set(), META={};
+let ROWS=[], WIP=new Set(), META={}, WORKED=[];
 function formOf(name){const n=(name||'').toUpperCase();
   if(n.includes('SCRAP'))return 'SCRAP';
   if(n.includes('BLANK')||n.includes('FLAT')||n.includes('STRIP'))return 'STRIP';
@@ -56,16 +83,20 @@ function formOf(name){const n=(name||'').toUpperCase();
   if(n.includes('COIL'))return 'COIL';
   return 'OTHER';}
 const gnum=v=>{const n=parseFloat(v);return isNaN(n)?null:n;};
+const KNOWN_BRANDS=new Set(['JSW','WUHAN','AMNS','JSOL','HYUNDAI','TATA','SAIL','NMDC','POSCO','JINDAL']);
+function brandNorm(name){const w=(name||'').trim().split(/\s+/)[0].toUpperCase();return KNOWN_BRANDS.has(w)?w:'Others';}
 const fdim=v=>{const n=gnum(v);return n!==null?(''+ +n.toFixed(2)).replace(/\.00$/,''):'';};
 const flen=v=>{const n=gnum(v);return (n&&n>0)?(''+ +n.toFixed(0)):'—';};
 
 async function load(){
   try{
     const b='?t='+Date.now();
-    const [csv,set] = await Promise.all([
+    const [csv,set,wk] = await Promise.all([
       fetch(DATA_BASE+'/wheels_stock.csv'+b).then(r=>{if(!r.ok)throw 0;return r.text();}),
-      fetch(BASE+'/api/wheels?route=settings'+b).then(r=>r.ok?r.json():{wip:[],meta:{}}).catch(()=>({wip:[],meta:{}}))
+      fetch(BASE+'/api/wheels?route=settings'+b).then(r=>r.ok?r.json():{wip:[],meta:{}}).catch(()=>({wip:[],meta:{}})),
+      fetch(DATA_BASE+'/wheels_worked.csv'+b).then(r=>r.ok?r.text():'').catch(()=>'')
     ]);
+    WORKED=parseCSV(wk).map(r=>({Brand:brandNorm(r.Brand),Yr:+r.Yr,Mth:+r.Mth,Qty:gnum(r.Qty)||0}));
     ROWS=parseCSV(csv).map(r=>({...r,Quantity:gnum(r.Quantity)||0,form:formOf(r.ItemName)}));
     WIP=new Set((set.wip||[]).map(String));
     const metaRaw=await fetch(DATA_BASE+'/wheels_meta.json'+b).then(r=>r.ok?r.json():{}).catch(()=>({}));
@@ -96,6 +127,49 @@ function sectionTable(rows){
   return {html,gb,gq};
 }
 
+function fyOf(y,m){return m>=4?y:y-1;}
+function renderByBrand(){
+  const visible=ROWS.filter(r=>!WIP.has(r.BatchNum));
+  const forms=['COIL','PLATE','STRIP','SCRAP'];
+  const b={};
+  visible.forEach(r=>{const br=brandNorm(r.ItemName);(b[br]??={COIL:0,PLATE:0,STRIP:0,SCRAP:0,tot:0});b[br][r.form]+=r.Quantity;b[br].tot+=r.Quantity;});
+  const brands=Object.keys(b).sort((x,y)=>b[y].tot-b[x].tot);
+  const gt=brands.reduce((a,k)=>a+b[k].tot,0);
+  $('byBrandSub').textContent=`${brands.length} brands · ${gt.toFixed(3)} MT`;
+  $('byBrand').innerHTML=brands.length?`<table class="x" style="width:100%;border-collapse:collapse"><thead><tr><th style="text-align:left;padding:6px 10px">Brand</th><th style="text-align:right;padding:6px 10px">Coil</th><th style="text-align:right;padding:6px 10px">Plate</th><th style="text-align:right;padding:6px 10px">Strip</th><th style="text-align:right;padding:6px 10px">Scrap</th><th style="text-align:right;padding:6px 10px">Total (MT)</th></tr></thead><tbody>
+    ${brands.map(k=>`<tr><td style="padding:5px 10px;border-top:1px solid #eef1f3"><b>${esc(k)}</b></td>${forms.map(f=>`<td style="padding:5px 10px;text-align:right;border-top:1px solid #eef1f3">${b[k][f]?b[k][f].toFixed(3):''}</td>`).join('')}<td style="padding:5px 10px;text-align:right;font-weight:700;border-top:1px solid #eef1f3">${b[k].tot.toFixed(3)}</td></tr>`).join('')}
+    <tr><td style="padding:6px 10px;border-top:2px solid #333;font-weight:700">Total</td>${forms.map(f=>`<td style="padding:6px 10px;text-align:right;border-top:2px solid #333;font-weight:700">${brands.reduce((a,k)=>a+b[k][f],0).toFixed(3)}</td>`).join('')}<td style="padding:6px 10px;text-align:right;border-top:2px solid #333;font-weight:700">${gt.toFixed(3)}</td></tr>
+    </tbody></table>`:'<div class="empty">No stock.</div>';
+}
+const MONTHS=['Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec','Jan','Feb','Mar'];
+function renderWorked(){
+  const period=$('workedPeriod').value, view=$('workedView').value;
+  const now=new Date(), curFy=fyOf(now.getFullYear(),now.getMonth()+1);
+  let rows=WORKED;
+  if(period==='fy') rows=rows.filter(r=>fyOf(r.Yr,r.Mth)===curFy);
+  const brands=[...new Set(rows.map(r=>r.Brand))];
+  const brandTot={}; rows.forEach(r=>brandTot[r.Brand]=(brandTot[r.Brand]||0)+r.Qty);
+  const ordered=Object.keys(brandTot).sort((a,b)=>brandTot[b]-brandTot[a]);
+  const gt=ordered.reduce((a,k)=>a+brandTot[k],0);
+  $('workedSub').textContent=`${gt.toFixed(3)} MT dispatched`;
+  if(!ordered.length){$('workedTbl').innerHTML='<div class="empty">No dispatch history.</div>';return;}
+  if(view==='total'){
+    $('workedTbl').innerHTML=`<table class="x" style="width:100%;border-collapse:collapse"><thead><tr><th style="text-align:left;padding:6px 10px">Brand</th><th style="text-align:right;padding:6px 10px">Dispatched (MT)</th><th style="text-align:right;padding:6px 10px">Share</th></tr></thead><tbody>
+      ${ordered.map(k=>`<tr><td style="padding:5px 10px;border-top:1px solid #eef1f3"><b>${esc(k)}</b></td><td style="padding:5px 10px;text-align:right;border-top:1px solid #eef1f3">${brandTot[k].toFixed(3)}</td><td style="padding:5px 10px;text-align:right;border-top:1px solid #eef1f3">${gt?(brandTot[k]/gt*100).toFixed(1):0}%</td></tr>`).join('')}
+      <tr><td style="padding:6px 10px;border-top:2px solid #333;font-weight:700">Total</td><td style="padding:6px 10px;text-align:right;border-top:2px solid #333;font-weight:700">${gt.toFixed(3)}</td><td style="border-top:2px solid #333"></td></tr></tbody></table>`;
+  } else {
+    // month-wise: for the FY, columns Apr..Mar; for all-time, group by Yr-Mon labels present
+    let cols;
+    if(period==='fy'){ cols=MONTHS.map((m,i)=>({key:i,label:m})); }
+    else { const set=new Set(rows.map(r=>r.Yr*100+r.Mth)); cols=[...set].sort().map(v=>({key:v,label:MONTHS[((Math.floor(v%100))+8)%12]+' '+String(Math.floor(v/100)).slice(2)})); }
+    const cell={}; rows.forEach(r=>{const k=period==='fy'?((r.Mth+8)%12):(r.Yr*100+r.Mth);(cell[r.Brand]??={})[k]=(cell[r.Brand][k]||0)+r.Qty;});
+    const colTot={};
+    $('workedTbl').innerHTML=`<div style="overflow-x:auto"><table class="x" style="border-collapse:collapse;font-size:12px"><thead><tr><th style="text-align:left;padding:5px 8px">Brand</th>${cols.map(c=>`<th style="text-align:right;padding:5px 8px">${c.label}</th>`).join('')}<th style="text-align:right;padding:5px 8px">Total</th></tr></thead><tbody>
+      ${ordered.map(k=>{const rt=brandTot[k];return `<tr><td style="padding:4px 8px;border-top:1px solid #eef1f3"><b>${esc(k)}</b></td>${cols.map(c=>{const v=(cell[k]||{})[c.key]||0;colTot[c.key]=(colTot[c.key]||0)+v;return `<td style="padding:4px 8px;text-align:right;border-top:1px solid #eef1f3">${v?v.toFixed(1):''}</td>`;}).join('')}<td style="padding:4px 8px;text-align:right;font-weight:700;border-top:1px solid #eef1f3">${rt.toFixed(1)}</td></tr>`;}).join('')}
+      <tr><td style="padding:5px 8px;border-top:2px solid #333;font-weight:700">Total</td>${cols.map(c=>`<td style="padding:5px 8px;text-align:right;border-top:2px solid #333;font-weight:700">${(colTot[c.key]||0).toFixed(1)}</td>`).join('')}<td style="padding:5px 8px;text-align:right;border-top:2px solid #333;font-weight:700">${gt.toFixed(1)}</td></tr>
+      </tbody></table></div>`;
+  }
+}
 function draw(){
   const showWip=$('showWip').checked;
   const visible=ROWS.filter(r=>!WIP.has(r.BatchNum));
@@ -112,6 +186,7 @@ function draw(){
     <div class="sfoot"><b>Bharat Steel (Chennai) Pvt. Ltd.</b> · No.147, Survey No.133, Thirunilai Village, Ponneri Taluk, Chennai 600103 · 044 6791 7800 · info@bharatsteels.in<br>
       System-generated statement of your material held at BSC as on the date/time shown. Figures drawn live from our ERP. For queries contact your account manager.</div>`;
   // internal WIP card
+  renderByBrand(); renderWorked();
   const wipRows=ROWS.filter(r=>WIP.has(r.BatchNum));
   if(showWip && wipRows.length){
     const tq=wipRows.reduce((a,r)=>a+r.Quantity,0);
