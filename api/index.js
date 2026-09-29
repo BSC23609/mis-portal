@@ -651,14 +651,15 @@ async function renderWheelsHtml(baseUrl, wipSet, note){
   for(const [k,t,c] of SEC){
     const rs=rows.filter(r=>r.form===k).sort((a,b)=>b.Quantity-a.Quantity); if(!rs.length)continue;
     const tq=rs.reduce((a,r)=>a+r.Quantity,0); gb+=rs.length; gq+=tq;
-    body+=`<tr><td colspan="10" style="background:${c};color:#fff;font-weight:700;padding:7px 10px;font-size:13px">${t}<span style="float:right">${rs.length} items &middot; ${tq.toFixed(3)} MT</span></td></tr>`+
-      `<tr style="background:#eef3f7"><th style="width:24px">#</th><th style="text-align:left">Mill</th><th style="text-align:left">Grade</th><th>Thk</th><th>Width</th><th>Length</th><th style="text-align:left">Coil / Batch No</th><th style="text-align:left">Mother Coil</th><th>Qty (MT)</th><th>Age (d)</th></tr>`;
+    body+=`<tr><td colspan="9" style="background:${c};color:#fff;font-weight:700;padding:7px 10px;font-size:13px">${t}<span style="float:right">${rs.length} items &middot; ${tq.toFixed(3)} MT</span></td></tr>`+
+      `<tr style="background:#eef3f7"><th>#</th><th>Mill</th><th>Grade</th><th>Thk</th><th>Width</th><th>Length</th><th>Coil / Batch No</th><th>Qty (MT)</th><th>Age (d)</th></tr>`;
     rs.forEach((x,i)=>{ const mill=(x.ItemName||"").split(" ")[0];
-      body+=`<tr><td style="text-align:center;color:#888">${i+1}</td><td>${esc2(mill)}</td><td>${esc2(x.Grade)}</td><td style="text-align:right">${dimS(x.Thick)}</td><td style="text-align:right">${dimS(x.Width)}</td><td style="text-align:right">${lenS(x.Length)}</td><td style="font-family:monospace;font-size:11px">${esc2(x.CoilNo||x.BatchNum)}</td><td style="font-family:monospace;font-size:11px;color:#999">${esc2(x.Mothercoil||"—")}</td><td style="text-align:right;font-weight:600">${x.Quantity.toFixed(3)}</td><td style="text-align:right;color:#888">${esc2(x.AgeDays)}</td></tr>`; });
+      const bc=(+x.BatchCount>1)?` <span style="color:#999">(${x.BatchCount} batches)</span>`:"";
+      body+=`<tr><td style="text-align:center;color:#888">${i+1}</td><td style="text-align:center">${esc2(mill)}</td><td style="text-align:center">${esc2(x.Grade)}</td><td style="text-align:center">${dimS(x.Thick)}</td><td style="text-align:center">${dimS(x.Width)}</td><td style="text-align:center">${lenS(x.Length)}</td><td style="text-align:center;font-family:monospace;font-size:11px">${esc2(x.CoilNo||x.BatchNum)}${bc}</td><td style="text-align:center;font-weight:600">${x.Quantity.toFixed(3)}</td><td style="text-align:center;color:#888">${esc2(x.AgeDays)}</td></tr>`; });
     body+=`<tr><td colspan="8" style="text-align:right;font-weight:700;padding:6px 10px;border-top:2px solid #333">${t} total</td><td style="text-align:right;font-weight:700;border-top:2px solid #333">${tq.toFixed(3)}</td><td style="border-top:2px solid #333"></td></tr>`;
   }
   const asof=new Date().toLocaleString("en-IN",{day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"});
-  const noteHtml = note && note.trim() ? `<div style="padding:14px 22px 0;font-size:13px;color:#222;line-height:1.6;white-space:pre-wrap">${esc2(note)}</div>` : "";
+  const noteHtml = note && note.trim() ? `<div style="padding:14px 22px 0;font-size:13px;color:#222;line-height:1.6">${esc2(note).replace(/\n/g,"<br>")}</div>` : "";
   const html=`<div style="font-family:Arial,Helvetica,sans-serif;color:#1a1a1a;max-width:920px;margin:auto;border:1px solid #d0d7dd">
     <div style="background:#0e2a47;color:#fff;padding:14px 22px"><div style="font-size:18px;font-weight:700">Job Work Stock Statement &mdash; Wheels India Limited</div><div style="font-size:12px;opacity:.85;margin-top:3px">Bharat Steel (Chennai) Pvt. Ltd. &middot; Material held at BSC on customer's account</div></div>
     ${noteHtml}
@@ -666,7 +667,7 @@ async function renderWheelsHtml(baseUrl, wipSet, note){
     <div style="padding:14px 22px 4px"><table style="width:100%;border-collapse:collapse;font-size:12px">${body}</table></div>
     <div style="margin:14px 22px;padding:12px 16px;background:#0e2a47;color:#fff;border-radius:5px;display:flex;justify-content:space-between;font-size:15px;font-weight:700"><span>TOTAL MATERIAL HELD</span><span>${gb} items &middot; ${gq.toFixed(3)} MT</span></div>
     <div style="margin:0 22px 14px;padding:9px 13px;background:#fff8e1;border:1px solid #f0dc9a;color:#6b5200;font-size:11px;border-radius:5px">Plates currently under process (awaiting shearing) are excluded from this statement.</div>
-    <div style="padding:16px 22px;font-size:11px;color:#667;border-top:1px solid #e3e8ec;line-height:1.6"><b>Bharat Steel (Chennai) Pvt. Ltd.</b> &middot; No.147, Survey No.133, Thirunilai Village, Ponneri Taluk, Chennai 600103 &middot; 044 6791 7800 &middot; info@bharatsteels.in<br>System-generated statement of your material held at BSC as on the date/time shown.</div></div>`;
+    <div style="padding:6px 22px;font-size:9px;color:#aaa;font-style:italic">Computer generated Statement - may contain mistakes</div><div style="padding:16px 22px;font-size:11px;color:#667;border-top:1px solid #e3e8ec;line-height:1.6"><b>Bharat Steel (Chennai) Pvt. Ltd.</b> &middot; No.147, Survey No.133, Thirunilai Village, Ponneri Taluk, Chennai 600103 &middot; 044 6791 7800 &middot; info@bharatsteels.in<br>System-generated statement of your material held at BSC as on the date/time shown.</div></div>`;
   return { html, gb, gq, rows };
 }
 
