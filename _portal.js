@@ -18,6 +18,7 @@
         {id:'report',   label:'Stock Statement', href:BASE+'/wheels/index.html'},
         {id:'settings', label:'Settings', href:BASE+'/wheels/settings.html'},
     ]},
+    { id:'worktracker', label:'Work Tracker', href:'https://tasks.bharatsteels.in', external:true, screens:[] },
   ];
 
 
@@ -28,7 +29,7 @@
     bar.setAttribute('style','position:sticky;top:0;z-index:99999;display:flex;align-items:center;gap:14px;'+
       'background:linear-gradient(180deg,#1367a6,#0e4d7d);color:#fff;padding:8px 16px;'+
       'font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;font-size:14px;box-shadow:0 1px 4px rgba(0,0,0,.15)');
-    const link=(m)=>`<a href="${m.href}" style="color:#fff;text-decoration:none;font-weight:600;font-size:13px;padding:6px 13px;border-radius:7px;${m.id===P.module?'background:rgba(255,255,255,.18)':'opacity:.75'}">${m.label}</a>`;
+    const link=(m)=>`<a href="${m.href}"${m.external?' target="_blank" rel="noopener"':''} style="color:#fff;text-decoration:none;font-weight:600;font-size:13px;padding:6px 13px;border-radius:7px;${m.id===P.module?'background:rgba(255,255,255,.18)':'opacity:.75'}">${m.label}</a>`;
     bar.innerHTML='<span style="font-weight:700;font-size:15px">Bharat Steel MIS</span>'+
       '<nav style="display:flex;gap:2px">'+MODULES.map(link).join('')+'</nav>';
     document.body.insertBefore(bar, document.body.firstChild);
@@ -98,7 +99,7 @@
   document.head.insertAdjacentHTML('beforeend','<style>'+css+'</style>');
   if(!(P.module==='dispatch'||P.module==='nmdc')) document.body.classList.add('portalskin');
   const mod = MODULES.find(m=>m.id===P.module) || MODULES[0];
-  const modLinks = MODULES.map(m=>`<a href="${m.href}" class="${m.id===P.module?'on':''}">${m.label}</a>`).join('');
+  const modLinks = MODULES.map(m=>`<a href="${m.href}"${m.external?' target="_blank" rel="noopener"':''} class="${m.id===P.module?'on':''}">${m.label}</a>`).join('');
   const subLinks = (mod.screens||[]).map(s=>`<a href="${s.href}" class="${s.id===P.screen?'on':''}">${s.label}</a>`).join('');
   document.body.insertAdjacentHTML('afterbegin',
     `<div class="ptop"><div class="row">
