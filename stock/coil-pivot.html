@@ -2,6 +2,26 @@
 <meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>Coil Stock — Bharat Steel MIS</title><link rel="icon" type="image/png" href="BSC.png"/>
 <script>window.PORTAL={module:'stock',screen:'pivot'}</script>
+<style>
+  /* Compact one-page layout: the five grade pivots sit side by side, no scrolling */
+  #blocks.gradegrid{display:flex;gap:10px;align-items:flex-start;flex-wrap:nowrap;overflow-x:auto}
+  .gradegrid .card{margin:10px 0;padding:8px 10px;flex:0 0 auto}
+  .gradegrid .card h3{margin:0 0 6px;font-size:11px;letter-spacing:.06em}
+  .gradegrid .card h3 .r{font-size:10px}
+  .gradegrid .tblwrap{overflow:visible}
+  .gradegrid table.pivot{font-size:11px}
+  .gradegrid .pivot th{padding:4px 6px;font-size:9px}
+  .gradegrid .pivot td{padding:2px 6px;line-height:1.25}
+  .gradegrid .pivot td.num{white-space:nowrap}
+  /* let the two big grades (more widths) breathe, keep small ones tight */
+  @media (max-width:1100px){ #blocks.gradegrid{flex-wrap:wrap} }
+  @media print{
+    @page{size:landscape;margin:8mm}
+    #blocks.gradegrid{flex-wrap:nowrap;overflow:visible}
+    .gradegrid .card{box-shadow:none;break-inside:avoid}
+    footer{display:none}
+  }
+</style>
 </head><body>
 <div class="pw">
   <div id="errbox"></div>
@@ -15,7 +35,7 @@
     <label><input type="checkbox" id="allW" onchange="draw()"/> all widths (incl. slit)</label>
     <span class="fcount" id="fcount"></span>
   </div>
-  <div id="blocks"></div>
+  <div id="blocks" class="gradegrid"></div>
   <div class="card" id="drillCard" style="display:none"><h3>Items in <span class="r" id="drillSub"></span></h3><div class="tblwrap" id="drill"></div></div>
   <footer id="foot"></footer>
 </div>
