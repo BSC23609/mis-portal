@@ -29,6 +29,9 @@
   <div id="errbox"></div>
 
   <div class="toolbar">
+    <label style="font-size:12px;color:var(--gray);display:flex;align-items:center;gap:6px">
+      <input type="checkbox" id="hideSmall" onchange="onHideSmall()"/> hide plate &amp; strip under 0.1 MT
+    </label>
     <div class="sp">
       <button class="pbtn" style="background:var(--blue);border-color:var(--blue)" onclick="window.print()">Print / Save PDF</button>
       <a class="pbtn" style="background:var(--blue);border-color:var(--blue);text-decoration:none" href="settings.html">Settings</a>
@@ -69,7 +72,17 @@
 <script src="../_portal.js"></script>
 <script>
 const SEC=[['COIL','Coil Stock','#1367a6'],['PLATE','Plate Stock','#0e7a4b'],['STRIP','Strip / Blank Stock','#b5651d'],['SCRAP','Scrap','#8a1c1c']];
+const SMALL_MT=0.1;   // plate & strip below this are hidden when the filter is on
 let ROWS=[], META={}, WORKED=[];
+// rows to display: optionally drop plate/strip under 0.1 MT
+function viewRows(){
+  if(!$('hideSmall').checked) return ROWS;
+  return ROWS.filter(r=>!((r.form==='PLATE'||r.form==='STRIP') && r.Quantity<SMALL_MT));
+}
+function onHideSmall(){
+  try{ localStorage.setItem('wheelsHideSmall', $('hideSmall').checked?'1':'0'); }catch(e){}
+  draw();
+}
 function formOf(name){const n=(name||'').toUpperCase();
   if(n.includes('SCRAP'))return 'SCRAP';
   if(n.includes('BLANK')||n.includes('FLAT')||n.includes('STRIP'))return 'STRIP';
@@ -83,6 +96,9 @@ const fdim=v=>{const n=gnum(v);return n!==null?(''+ +n.toFixed(2)).replace(/\.00
 const flen=v=>{const n=gnum(v);return (n&&n>0)?(''+ +n.toFixed(0)):'—';};
 
 async function load(){
+  // default ON (hide sub-0.1 MT plate/strip); remember the user's choice per browser
+  try{ $('hideSmall').checked = (localStorage.getItem('wheelsHideSmall') ?? '1') !== '0'; }
+  catch(e){ $('hideSmall').checked = true; }
   try{
     const b='?t='+Date.now();
     const [csv,wk] = await Promise.all([
@@ -121,7 +137,7 @@ function sectionTable(rows){
 
 function fyOf(y,m){return m>=4?y:y-1;}
 function renderByBrand(){
-  const visible=ROWS;
+  const visible=viewRows();
   const forms=['COIL','PLATE','STRIP','SCRAP'];
   const b={};
   visible.forEach(r=>{const br=brandNorm(r.ItemName);(b[br]??={COIL:0,PLATE:0,STRIP:0,SCRAP:0,tot:0});b[br][r.form]+=r.Quantity;b[br].tot+=r.Quantity;});
@@ -163,7 +179,7 @@ function renderWorked(){
   }
 }
 function draw(){
-  const {html,gb,gq}=sectionTable(ROWS);
+  const {html,gb,gq}=sectionTable(viewRows());
   const asof=$('pStamp').textContent.replace('as of ','') || new Date().toLocaleString('en-IN');
   $('sheet').innerHTML=`
     <div class="shdr"><img src="BSC.png" alt="BSC" onerror="this.style.display='none'"/>
