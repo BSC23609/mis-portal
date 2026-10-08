@@ -588,9 +588,9 @@ async function handlerWheels(req, res){
       if (Array.isArray(body.wip)) await sql`update wheels_settings set wip=${body.wip.map(String)} where id=1`;
       // test send: render from the last CSV and email to the given address (or configured To)
       if (body.send) {
-        const rows = await sql`select mail_to, mail_cc, wip from wheels_settings where id=1`;
+        const rows = await sql`select mail_to, mail_cc from wheels_settings where id=1`;
         const s2 = rows[0] || {};
-        const wipSet = new Set((s2.wip||[]).map(String));
+        const wipSet = new Set();   // WIP exclusion removed — all stock is shown
         const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
         const note = typeof body.mail_body === "string" ? body.mail_body : (s2.mail_body||"");
         const { html, gb, gq, rows: wrows } = await renderWheelsHtml(base, wipSet, note);
