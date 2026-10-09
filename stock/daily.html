@@ -17,6 +17,8 @@
   .asof{text-align:right;font-weight:700;background:#ffe08a;display:inline-block;padding:3px 10px;border:1px solid #e6c65a;float:right}
   .jwnote{font-size:11px;color:#5a6b78;background:#f3f7fa;border:1px solid #d7e2ea;border-radius:6px;padding:5px 9px;margin:4px 0 8px;line-height:1.4}
   .jwnote b{color:#0e4f86}
+  .wtp{font-size:11px;color:#1f3a4d;background:#eef6ef;border:1px solid #cfe3d2;border-left:3px solid #0e7a4b;border-radius:6px;padding:6px 9px;margin:4px 0 10px;line-height:1.6}
+  .wtp b{color:#0e5a37}
 </style>
 </head><body>
 <div class="pw">
@@ -32,7 +34,10 @@
       <div>
         <div class="panel-h">BHARAT SALES REPORT</div>
         <div class="tblwrap" id="salesRep"></div>
-        <div class="jwnote" id="salesJw"></div>
+        <div class="panel-h">JOB WORK — CUSTOMER MATERIAL PROCESSED <span style="font-weight:400;font-size:10px;text-transform:none">(excluded from the sales above)</span></div>
+        <div class="tblwrap" id="jwRep"></div>
+        <div class="jwnote" id="jwGross"></div>
+        <div class="wtp" id="wtp"></div>
         <div class="panel-h">BHARAT PURCHASE REPORT</div>
         <div class="tblwrap" id="purRep"></div>
         <div class="panel-h">WAREHOUSEWISE STOCK</div>
@@ -53,9 +58,9 @@ function whsCat(g){
   return '';
 }
 async function loadTx(f){const t=await fetch(f+'?t='+Date.now()).then(r=>r.ok?r.text():'').catch(()=>'');return parseCSV(t).map(r=>({...r,Yr:+r.Yr,Mth:+r.Mth,Qty:num(r.Qty)}));}
-function monthPivot(rows,elId,fy){
+function monthPivot(rows,elId,fy,onlyJw){
   const data={},tot={};let latest=-1;
-  rows.forEach(r=>{if(r.JW==='Y')return;if(fyOf(r.Yr,r.Mth)!==fy)return;const i=idx(r.Mth);
+  rows.forEach(r=>{const isJw=r.JW==='Y';if(onlyJw?!isJw:isJw)return;if(fyOf(r.Yr,r.Mth)!==fy)return;const i=idx(r.Mth);
     (data[r.Category]??={})[i]=(data[r.Category][i]||0)+r.Qty;tot[i]=(tot[i]||0)+r.Qty;if(i>latest)latest=i;});
   const cats=Object.keys(data).sort(), months=MONTHS.map((_,i)=>i).filter(i=>i<=latest);
   if(!cats.length){$(elId).innerHTML='<div class="empty">No data.</div>';return;}
@@ -81,12 +86,30 @@ function monthPivot(rows,elId,fy){
   const now=new Date(), fy=(now.getMonth()+1)>=4?now.getFullYear():now.getFullYear()-1;
   const salesRows=await loadTx(DATA_BASE+'/mis_sales.csv');
   monthPivot(salesRows,'salesRep',fy);
-  // job work is excluded from the sales pivot above (own-material only); surface it so the
-  // page reconciles to a gross SAP sales pivot (own material + job work).
+  // job work (customer-owned material processed & invoiced) is excluded from the sales pivot
+  // above; show it as its own month-wise table so the page reconciles to a gross SAP pivot.
+  monthPivot(salesRows,'jwRep',fy,true);
   const inFy=r=>fyOf(r.Yr,r.Mth)===fy;
   const ownMt=salesRows.filter(r=>r.JW!=='Y'&&inFy(r)).reduce((a,r)=>a+r.Qty,0);
   const jwMt =salesRows.filter(r=>r.JW==='Y'&&inFy(r)).reduce((a,r)=>a+r.Qty,0);
-  $('salesJw').innerHTML=`Job work (customer material processed — <b>excluded</b> from the sales above): <b>${f0(jwMt)} MT</b>&nbsp; ·&nbsp; gross incl. job work: <b>${f0(ownMt+jwMt)} MT</b>`;
+  $('jwGross').innerHTML=`Gross (sales + job work): <b>${f0(ownMt+jwMt)} MT</b>&nbsp; = &nbsp;own material <b>${f0(ownMt)}</b> + job work <b>${f0(jwMt)}</b>`;
+
+  // Wheels India throughput — the invoiced figure above is only what's been billed; show the
+  // fuller picture: coil received to process, processed/returned, and their stock still at WH45.
+  try{
+    const isW=s=>/WHEELS INDIA/i.test(s||'');
+    const flow=parseCSV(await fetch(DATA_BASE+'/mis_jobwork_flow.csv?t='+Date.now()).then(r=>r.ok?r.text():'').catch(()=>''));
+    const wstk=parseCSV(await fetch(DATA_BASE+'/wheels_stock.csv?t='+Date.now()).then(r=>r.ok?r.text():'').catch(()=>''));
+    let recv=0,disp=0;
+    flow.forEach(r=>{ if(fyOf(+r.Yr,+r.Mth)!==fy)return;
+      if(isW(r.CardName)&&/VENDOR/i.test(r.CardName)&&/^Received/.test(r.Kind)) recv+=num(r.InQty);
+      if(isW(r.CardName)&&/CUSTOMER/i.test(r.CardName)&&/^Dispatched/.test(r.Kind)) disp+=num(r.OutQty);
+    });
+    const held=wstk.reduce((a,r)=>a+num(r.Quantity),0);
+    const wInv=salesRows.filter(r=>r.JW==='Y'&&isW(r.CardName)&&inFy(r)).reduce((a,r)=>a+r.Qty,0);
+    if(recv||disp||held||wInv)
+      $('wtp').innerHTML=`<b>Wheels India job-work throughput (this FY):</b>&nbsp; received <b>${f0(recv)}</b> &nbsp;→&nbsp; processed / returned <b>${f0(disp)}</b> &nbsp;→&nbsp; invoiced <b>${f0(wInv)}</b> MT&nbsp; ·&nbsp; their stock at WH45 now <b>${f0(held)}</b> MT`;
+  }catch(e){}
   monthPivot(await loadTx(DATA_BASE+'/mis_purchase.csv'),'purRep',fy);
 
   // --- WAREHOUSEWISE STOCK: category × warehouse (needs mis_stock category col) ---
