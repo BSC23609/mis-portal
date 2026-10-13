@@ -44,6 +44,8 @@
         <div class="tblwrap" id="whsRep"></div>
       </div>
     </div>
+    <div class="panel-h">PRODUCTION — TODAY &amp; MONTH-TO-DATE <span style="font-weight:400;font-size:10px;text-transform:none">(Nos = pieces · Qty in MT)</span></div>
+    <div class="tblwrap" id="prodRep"></div>
   </div>
   <footer id="foot"></footer>
 </div>
@@ -68,6 +70,29 @@ function monthPivot(rows,elId,fy,onlyJw){
   cats.forEach(c=>{h+=`<tr><td>${esc(c)}</td>${months.map(i=>`<td class="n">${data[c][i]?f0(data[c][i]):''}</td>`).join('')}<td class="n"><b>${f0(Object.values(data[c]).reduce((a,b)=>a+b,0))}</b></td></tr>`;});
   h+=`<tr class="gt"><td>Grand Total</td>${months.map(i=>`<td class="n">${f0(tot[i]||0)}</td>`).join('')}<td class="n">${f0(Object.values(tot).reduce((a,b)=>a+b,0))}</td></tr></tbody></table>`;
   $(elId).innerHTML=h;
+}
+async function renderProduction(){
+  const el=$('prodRep'); if(!el) return;
+  let rows=[];
+  try{ rows=parseCSV(await fetch(DATA_BASE+'/production.csv?t='+Date.now()).then(r=>r.ok?r.text():'').catch(()=>'')); }catch(e){}
+  if(!rows.length){ el.innerHTML='<div class="empty">No production entries.</div>'; return; }
+  const C=['Today Prime Nos','Today Defective Nos','Today Scrap Nos','Today Prime Qty','Today Defective Qty','Today Scrap Qty',
+           'Month Prime Nos','Month Defective Nos','Month Scrap Nos','Month Prime Qty','Month Defective Qty','Month Scrap Qty'];
+  const isNos=i=>(i%6)<3;                                  // first 3 of each 6-group are piece counts
+  const fmt=(v,i)=>v?(isNos(i)?f0(v):f3(v)):'';
+  const tot=C.map(()=>0);
+  let body='';
+  rows.forEach(r=>{
+    const vals=C.map(c=>num(r[c])); vals.forEach((v,i)=>tot[i]+=v);
+    body+=`<tr><td>${esc(r['Machine Name']||r['Machine Code']||'')}</td>${vals.map((v,i)=>`<td class="n">${fmt(v,i)}</td>`).join('')}</tr>`;
+  });
+  const sub=['Prime Nos','Def Nos','Scrap Nos','Prime Qty','Def Qty','Scrap Qty'];
+  el.innerHTML=`<table class="x"><thead>
+    <tr><th rowspan="2" style="text-align:left">Machine</th><th colspan="6">TODAY</th><th colspan="6">MONTH TO DATE</th></tr>
+    <tr>${sub.concat(sub).map(s=>`<th>${s}</th>`).join('')}</tr></thead><tbody>
+    ${body}
+    <tr class="gt"><td>Grand Total</td>${tot.map((v,i)=>`<td class="n">${isNos(i)?f0(v):f3(v)}</td>`).join('')}</tr>
+    </tbody></table>`;
 }
 (async function(){
   let S;
@@ -122,6 +147,8 @@ function monthPivot(rows,elId,fy,onlyJw){
   $('whsRep').innerHTML=cats.length?`<table class="x"><thead><tr><th style="text-align:left">Category</th>${whs.map(w=>`<th>${w}</th>`).join('')}<th>Grand Total</th></tr></thead><tbody>
     ${cats.map(c=>`<tr><td>${esc(c)}</td>${whs.map(w=>`<td class="n">${wd[c][w]?f0(wd[c][w]):''}</td>`).join('')}<td class="n"><b>${f0(Object.values(wd[c]).reduce((a,b)=>a+b,0))}</b></td></tr>`).join('')}
     <tr class="gt"><td>Grand Total</td>${whs.map(w=>`<td class="n">${f0(wt[w])}</td>`).join('')}<td class="n">${f0(Object.values(wt).reduce((a,b)=>a+b,0))}</td></tr></tbody></table>`:'<div class="empty">No stock.</div>';
+
+  await renderProduction();
 
   $('foot').textContent=`WH 38 coil stock ${f3(t38)} MT · sales/purchase = current FY (own material, excl. job work)`;
 })();
