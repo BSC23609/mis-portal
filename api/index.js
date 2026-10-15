@@ -605,7 +605,7 @@ async function handlerWheels(req, res){
         const nums = (s3.wa_to || []).map(String).map(x => x.trim()).filter(Boolean);
         if (!nums.length) return json(res, 200, { ok: true, skipped: "no whatsapp recipients" });
         const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
-        const pdfLink = base + "/api/wheels?fmt=pdf";
+        const pdfLink = base + "/wheels.pdf";   // clean .pdf URL (rewrites to the PDF endpoint)
         const sent = [];
         for (const num of nums) {
           try { const r = await send(num, tmpl, [{ name: "pdfLink", value: pdfLink }]); sent.push({ num, ...(r || { ok: true }) }); }
