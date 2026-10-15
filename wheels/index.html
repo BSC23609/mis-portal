@@ -30,7 +30,7 @@
 
   <div class="toolbar">
     <label style="font-size:12px;color:var(--gray);display:flex;align-items:center;gap:6px">
-      <input type="checkbox" id="hideSmall" onchange="onHideSmall()"/> hide plate &amp; strip under 0.1 MT
+      <input type="checkbox" id="hideSmall" onchange="onHideSmall()"/> hide plate &lt;0.1 &amp; strip &lt;0.011 MT
     </label>
     <div class="sp">
       <button class="pbtn" style="background:var(--blue);border-color:var(--blue)" onclick="window.print()">Print / Save PDF</button>
@@ -71,13 +71,13 @@
 </div>
 <script src="../_portal.js"></script>
 <script>
-const SEC=[['COIL','Coil Stock','#1367a6'],['PLATE','Plate Stock (WIP/FG)','#0e7a4b'],['STRIP','Strip / Blank Stock','#b5651d'],['SCRAP','Scrap','#8a1c1c']];
-const SMALL_MT=0.1;   // plate & strip below this are hidden when the filter is on
+const SEC=[['COIL','Coil Stock','#1367a6'],['PLATE','Plate Stock (WIP / FG)','#0e7a4b'],['STRIP','Strip / Blank Stock','#b5651d'],['SCRAP','Scrap','#8a1c1c']];
+const SMALL_PLATE=0.1, SMALL_STRIP=0.011;   // plate below 0.1 MT & strip below 0.011 MT hidden when the filter is on
 let ROWS=[], META={}, WORKED=[];
 // rows to display: optionally drop plate/strip under 0.1 MT
 function viewRows(){
   if(!$('hideSmall').checked) return ROWS;
-  return ROWS.filter(r=>!((r.form==='PLATE'||r.form==='STRIP') && r.Quantity<SMALL_MT));
+  return ROWS.filter(r=>!((r.form==='PLATE'&&r.Quantity<SMALL_PLATE)||(r.form==='STRIP'&&r.Quantity<SMALL_STRIP)));
 }
 function onHideSmall(){
   try{ localStorage.setItem('wheelsHideSmall', $('hideSmall').checked?'1':'0'); }catch(e){}

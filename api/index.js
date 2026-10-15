@@ -647,8 +647,8 @@ async function renderWheelsHtml(baseUrl, wipSet, note){
   const csvRes = await fetch(DATA_BASE + "/wheels_stock.csv?t=" + Date.now());
   const rows = parseCsvSrv(csvRes.ok ? await csvRes.text() : "").map(r=>({...r, Quantity:parseFloat(r.Quantity)||0, form:wheelsFormOf(r.ItemName)}))
     .filter(r=>!wipSet.has(String(r.BatchNum)))
-    .filter(r=>!((r.form==="PLATE"||r.form==="STRIP") && r.Quantity<0.1)); // plate/strip under 0.1 MT not listed
-  const SEC=[["COIL","Coil Stock","#1367a6"],["PLATE","Plate Stock (WIP/FG)","#0e7a4b"],["STRIP","Strip / Blank Stock","#b5651d"]]; // scrap excluded from customer email
+    .filter(r=>!((r.form==="PLATE"&&r.Quantity<0.1)||(r.form==="STRIP"&&r.Quantity<0.011))); // plate <0.1 MT, strip <0.011 MT not listed
+  const SEC=[["COIL","Coil Stock","#1367a6"],["PLATE","Plate Stock (WIP / FG)","#0e7a4b"],["STRIP","Strip / Blank Stock","#b5651d"]]; // scrap excluded from customer email
   let body="", gb=0, gq=0;
   for(const [k,t,c] of SEC){
     const rs=rows.filter(r=>r.form===k).sort((a,b)=>b.Quantity-a.Quantity); if(!rs.length)continue;
@@ -662,21 +662,22 @@ async function renderWheelsHtml(baseUrl, wipSet, note){
   }
   const asof=new Date().toLocaleString("en-IN",{day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"});
   const noteHtml = note && note.trim() ? `<div style="padding:14px 22px 0;font-size:13px;color:#222;line-height:1.6">${esc2(note).replace(/\n/g,"<br>")}</div>` : "";
-  const html=`<div style="font-family:Arial,Helvetica,sans-serif;color:#1a1a1a;max-width:920px;margin:auto;border:1px solid #d0d7dd">
+  const html=`<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>@media only screen and (max-width:600px){.wk-tbl{font-size:10px !important}.wk-tbl th,.wk-tbl td{padding:2px 3px !important}.wk-pad{padding:12px 8px 4px !important}.wk-hd{padding:12px 12px !important}}</style></head><body style="margin:0;padding:0;background:#fff;-webkit-text-size-adjust:100%">`+
+    `<div style="font-family:Arial,Helvetica,sans-serif;color:#1a1a1a;max-width:920px;width:100%;margin:auto;border:1px solid #d0d7dd;box-sizing:border-box">
     <div style="background:#0e2a47;color:#fff;padding:14px 22px"><div style="font-size:18px;font-weight:700">Job Work Stock Statement &mdash; Wheels India Limited</div><div style="font-size:12px;opacity:.85;margin-top:3px">Bharat Steel (Chennai) Pvt. Ltd. &middot; Material held at BSC on customer's account</div></div>
     ${noteHtml}
     <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;padding:11px 22px;background:#f7f9fb;border-bottom:1px solid #e3e8ec;font-size:13px"><div>Customer: <b>Wheels India Limited</b></div><div>As on: <b>${asof}</b></div><div>Warehouse: <b>Job Work (WH 45)</b></div></div>
-    <div style="padding:14px 22px 4px"><table style="width:100%;border-collapse:collapse;font-size:12px">${body}</table></div>
+    <div class="wk-pad" style="padding:14px 22px 4px;overflow-x:auto;-webkit-overflow-scrolling:touch"><table class="wk-tbl" style="width:100%;border-collapse:collapse;font-size:12px">${body}</table></div>
     <div style="margin:14px 22px;padding:12px 16px;background:#0e2a47;color:#fff;border-radius:5px;display:flex;justify-content:space-between;font-size:15px;font-weight:700"><span>TOTAL MATERIAL HELD</span><span>${gb} items &middot; ${gq.toFixed(3)} MT</span></div>
     <div style="margin:0 22px 14px;padding:9px 13px;background:#fff8e1;border:1px solid #f0dc9a;color:#6b5200;font-size:11px;border-radius:5px">Plates currently under process (awaiting shearing) are excluded from this statement.</div>
-    <div style="padding:6px 22px;font-size:9px;color:#aaa;font-style:italic">Computer generated Statement - may contain mistakes</div><div style="padding:16px 22px;font-size:11px;color:#667;border-top:1px solid #e3e8ec;line-height:1.6"><b>Bharat Steel (Chennai) Pvt. Ltd.</b> &middot; No.147, Survey No.133, Thirunilai Village, Ponneri Taluk, Chennai 600103 &middot; 044 6791 7800 &middot; info@bharatsteels.in<br>System-generated statement of your material held at BSC as on the date/time shown.</div></div>`;
+    <div style="padding:6px 22px;font-size:9px;color:#aaa;font-style:italic">Computer generated Statement - may contain mistakes</div><div style="padding:16px 22px;font-size:11px;color:#667;border-top:1px solid #e3e8ec;line-height:1.6"><b>Bharat Steel (Chennai) Pvt. Ltd.</b> &middot; No.147, Survey No.133, Thirunilai Village, Ponneri Taluk, Chennai 600103 &middot; 044 6791 7800 &middot; info@bharatsteels.in<br>System-generated statement of your material held at BSC as on the date/time shown.</div></div></body></html>`;
   return { html, gb, gq, rows };
 }
 
 async function buildWheelsXlsx(rows){
   let XLSX;
   try { XLSX = await import("xlsx"); } catch(e){ throw new Error("xlsx module not available on server: "+e.message); }
-  const SEC=[["COIL","Coil Stock"],["PLATE","Plate Stock (WIP/FG)"],["STRIP","Strip / Blank Stock"]]; // scrap excluded from customer email
+  const SEC=[["COIL","Coil Stock"],["PLATE","Plate Stock (WIP / FG)"],["STRIP","Strip / Blank Stock"]]; // scrap excluded from customer email
   const aoa=[["BHARAT STEEL (CHENNAI) PRIVATE LIMITED"],
              ["Job Work Stock Statement — Wheels India Limited"],
              ["As on: "+new Date().toLocaleString("en-IN")+"   |   Customer: Wheels India Limited   |   Warehouse: Job Work (WH 45)"],
