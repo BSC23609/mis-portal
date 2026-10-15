@@ -569,15 +569,50 @@ async function ensureWheelsTable(){
   await sql`insert into wheels_settings (id) values (1) on conflict (id) do nothing`;
   await sql`alter table wheels_settings add column if not exists mail_subject text default ''`;
   await sql`alter table wheels_settings add column if not exists mail_body text default ''`;
+  await sql`alter table wheels_settings add column if not exists wa_to text[] default '{}'`;
+  await sql`alter table wheels_settings add column if not exists wa_enabled boolean default true`;
 }
 async function handlerWheels(req, res){
   if (cors(req, res)) return;
   try{
     await ensureWheelsTable();
+    // GET /api/wheels?fmt=pdf  ->  the statement as a PDF (same data/structure as the email).
+    // Public, no-auth: this is the URL WATI fetches for the WhatsApp document template.
+    const wantPdf = /[?&]fmt=pdf\b/.test(req.url || "") || (req.query && req.query.fmt === "pdf");
+    if (req.method === "GET" && wantPdf){
+      const pdf = await buildWheelsPdf();
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", 'inline; filename="WheelsIndia_Stock_' + new Date().toISOString().slice(0,10).replace(/-/g,"") + '.pdf"');
+      res.setHeader("Cache-Control", "no-store");
+      return res.status(200).end(pdf);
+    }
     if (req.method === "POST"){
       let body = req.body;
       if (typeof body === "string") { try { body = JSON.parse(body); } catch { body = {}; } }
       body = body || {};
+      // WhatsApp send trigger (fired by the daily script after the email). Guarded by CRON_SECRET.
+      // Creds + template come from Vercel env (WATI_API_URL, WATI_API_KEY, WHEELS_WA_TEMPLATE);
+      // recipient numbers come from the in-app settings (wa_to). PDF is served at /api/wheels?fmt=pdf.
+      if (body.whatsapp) {
+        const auth = req.headers.authorization || "";
+        if (!process.env.CRON_SECRET) return json(res, 503, { error: "CRON_SECRET not set" });
+        if (auth !== "Bearer " + process.env.CRON_SECRET) return json(res, 401, { error: "unauthorized" });
+        const tmpl = process.env.WHEELS_WA_TEMPLATE;
+        if (!tmpl) return json(res, 400, { error: "WHEELS_WA_TEMPLATE not set" });
+        const r3 = await sql`select wa_to, wa_enabled from wheels_settings where id=1`;
+        const s3 = r3[0] || {};
+        if (s3.wa_enabled === false) return json(res, 200, { ok: true, skipped: "whatsapp disabled in settings" });
+        const nums = (s3.wa_to || []).map(String).map(x => x.trim()).filter(Boolean);
+        if (!nums.length) return json(res, 200, { ok: true, skipped: "no whatsapp recipients" });
+        const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
+        const pdfLink = base + "/api/wheels?fmt=pdf";
+        const sent = [];
+        for (const num of nums) {
+          try { const r = await send(num, tmpl, [{ name: "pdfLink", value: pdfLink }]); sent.push({ num, ...(r || { ok: true }) }); }
+          catch (e) { sent.push({ num, error: String(e.message || e) }); }
+        }
+        return json(res, 200, { ok: true, pdf: pdfLink, template: tmpl, sent });
+      }
       // update only the keys provided (settings save and WIP save are separate posts)
       if (Array.isArray(body.mail_to)) await sql`update wheels_settings set mail_to=${body.mail_to} where id=1`;
       if (Array.isArray(body.mail_cc)) await sql`update wheels_settings set mail_cc=${body.mail_cc} where id=1`;
@@ -586,6 +621,8 @@ async function handlerWheels(req, res){
       if (typeof body.mail_subject === "string") await sql`update wheels_settings set mail_subject=${body.mail_subject} where id=1`;
       if (typeof body.mail_body === "string") await sql`update wheels_settings set mail_body=${body.mail_body} where id=1`;
       if (Array.isArray(body.wip)) await sql`update wheels_settings set wip=${body.wip.map(String)} where id=1`;
+      if (Array.isArray(body.wa_to)) await sql`update wheels_settings set wa_to=${body.wa_to.map(String)} where id=1`;
+      if (typeof body.wa_enabled === "boolean") await sql`update wheels_settings set wa_enabled=${body.wa_enabled} where id=1`;
       // test send: render from the last CSV and email to the given address (or configured To)
       if (body.send) {
         const rows = await sql`select mail_to, mail_cc from wheels_settings where id=1`;
@@ -611,12 +648,13 @@ async function handlerWheels(req, res){
       await sql`update wheels_settings set updated_at=now() where id=1`;
       return json(res, 200, { ok: true });
     }
-    const rows = await sql`select mail_to, mail_cc, send_time, enabled, wip, mail_subject, mail_body from wheels_settings where id=1`;
+    const rows = await sql`select mail_to, mail_cc, send_time, enabled, wip, mail_subject, mail_body, wa_to, wa_enabled from wheels_settings where id=1`;
     const s = rows[0] || {};
     return json(res, 200, {
       mail_to: s.mail_to || [], mail_cc: s.mail_cc || [],
       send_time: s.send_time || "10:00", enabled: s.enabled !== false,
-      wip: s.wip || [], mail_subject: s.mail_subject || "", mail_body: s.mail_body || ""
+      wip: s.wip || [], mail_subject: s.mail_subject || "", mail_body: s.mail_body || "",
+      wa_to: s.wa_to || [], wa_enabled: s.wa_enabled !== false
     });
   }catch(e){
     return json(res, 500, { error: String(e.message || e) });
@@ -700,6 +738,99 @@ async function buildWheelsXlsx(rows){
   ws["!cols"]=[{wch:4},{wch:10},{wch:16},{wch:7},{wch:8},{wch:9},{wch:22},{wch:22},{wch:11},{wch:7}];
   const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,"Stock Statement");
   return XLSX.write(wb,{type:"base64",bookType:"xlsx"});
+}
+// Build the statement as a PDF (same sections/columns as the email). Pure pdfkit,
+// no headless browser — safe on Vercel Hobby. Served at /api/wheels?fmt=pdf.
+async function buildWheelsPdf(){
+  let PDFDocument;
+  try { PDFDocument = (await import("pdfkit")).default; } catch(e){ throw new Error("pdfkit module not available on server: "+e.message); }
+  const DATA_BASE = process.env.DATA_BASE || "https://raw.githubusercontent.com/BSC23609/bsc-stock-data/main";
+  const csvRes = await fetch(DATA_BASE + "/wheels_stock.csv?t=" + Date.now());
+  const rows = parseCsvSrv(csvRes.ok ? await csvRes.text() : "").map(r=>({...r, Quantity:parseFloat(r.Quantity)||0, form:wheelsFormOf(r.ItemName)}))
+    .filter(r=>!((r.form==="PLATE"&&r.Quantity<0.1)||(r.form==="STRIP"&&r.Quantity<0.011))); // plate <0.1 MT, strip <0.011 MT not listed
+  const SEC=[["COIL","Coil Stock","#1367a6"],["PLATE","Plate Stock (WIP / FG)","#0e7a4b"],["STRIP","Strip / Blank Stock","#b5651d"]];
+
+  const doc = new PDFDocument({ size:"A4", margin:28 });
+  const chunks=[]; doc.on("data",c=>chunks.push(c));
+  const done = new Promise(r=>doc.on("end",r));
+
+  const L=28, R=567, W=R-L;                        // A4 = 595pt wide, 28pt margins
+  const cols=[
+    {k:"n",   t:"#",              w:22, a:"center"},
+    {k:"mill",t:"Mill",           w:50, a:"center"},
+    {k:"grade",t:"Grade",         w:92, a:"left"},
+    {k:"thk", t:"Thk",            w:38, a:"center"},
+    {k:"wid", t:"Width",          w:44, a:"center"},
+    {k:"len", t:"Length",         w:48, a:"center"},
+    {k:"coil",t:"Coil / Batch No",w:118,a:"left"},
+    {k:"qty", t:"Qty (MT)",       w:56, a:"right"},
+    {k:"age", t:"Age",            w:34, a:"center"}
+  ];
+  const sumW=cols.reduce((a,c)=>a+c.w,0), scale=W/sumW; let cx=L;
+  cols.forEach(c=>{ c.w=c.w*scale; c.x=cx; cx+=c.w; });
+  const qtyCol=cols.find(c=>c.k==="qty");
+
+  const asof=new Date().toLocaleString("en-IN",{day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"});
+  const rowH=13.5, headH=15;
+  let y=28;
+
+  // top band
+  doc.rect(L,y,W,42).fill("#0e2a47");
+  doc.fillColor("#fff").font("Helvetica-Bold").fontSize(14).text("Job Work Stock Statement — Wheels India Limited", L+10, y+9, {width:W-20});
+  doc.font("Helvetica").fontSize(8).fillColor("#cfe0ef").text("Bharat Steel (Chennai) Pvt. Ltd.  ·  Material held at BSC on customer's account", L+10, y+28, {width:W-20});
+  y+=50;
+  doc.fillColor("#333").font("Helvetica").fontSize(8.5)
+     .text("Customer: Wheels India Limited        As on: "+asof+"        Warehouse: Job Work (WH 45)", L, y, {width:W});
+  y+=16;
+
+  function drawHeadRow(){
+    doc.rect(L,y,W,headH).fill("#eef3f7");
+    doc.fillColor("#1a2a3a").font("Helvetica-Bold").fontSize(7.5);
+    cols.forEach(c=>doc.text(c.t, c.x+2, y+4, {width:c.w-4, align:c.a, lineBreak:false}));
+    y+=headH;
+  }
+  function ensure(h){ if(y+h>812){ doc.addPage(); y=28; return true; } return false; }
+
+  let gb=0, gq=0;
+  for(const [k,t,hex] of SEC){
+    const rs=rows.filter(r=>r.form===k).sort((a,b)=>b.Quantity-a.Quantity); if(!rs.length) continue;
+    const tq=rs.reduce((a,r)=>a+r.Quantity,0); gb+=rs.length; gq+=tq;
+    ensure(16+headH+rowH*2);
+    doc.rect(L,y,W,16).fill(hex);
+    doc.fillColor("#fff").font("Helvetica-Bold").fontSize(9).text(t, L+8, y+4, {lineBreak:false});
+    doc.font("Helvetica").fontSize(8).text(rs.length+" items · "+tq.toFixed(3)+" MT", L, y+4, {width:W-8, align:"right"});
+    y+=16;
+    drawHeadRow();
+    rs.forEach((x,i)=>{
+      if(ensure(rowH)) drawHeadRow();
+      if(i%2){ doc.rect(L,y,W,rowH).fill("#f7fafc"); }
+      doc.fillColor("#222").font("Helvetica").fontSize(7.5);
+      const mill=(x.ItemName||"").split(" ")[0];
+      const vals={ n:String(i+1), mill, grade:x.Grade||"", thk:dimS(x.Thick), wid:dimS(x.Width), len:lenS(x.Length), coil:(x.CoilNo||x.BatchNum||""), qty:x.Quantity.toFixed(3), age:(x.AgeDays||"") };
+      cols.forEach(c=>doc.text(String(vals[c.k]), c.x+2, y+3.3, {width:c.w-4, align:c.a, lineBreak:false, ellipsis:true}));
+      y+=rowH;
+    });
+    ensure(rowH+4);
+    doc.moveTo(L,y).lineWidth(1).lineTo(R,y).strokeColor("#333").stroke();
+    doc.fillColor("#000").font("Helvetica-Bold").fontSize(8);
+    doc.text(t+" total", L, y+3, {width:qtyCol.x-L-4, align:"right", lineBreak:false});
+    doc.text(tq.toFixed(3), qtyCol.x+2, y+3, {width:qtyCol.w-4, align:"right", lineBreak:false});
+    y+=rowH+8;
+  }
+
+  ensure(30);
+  doc.rect(L,y,W,22).fill("#0e2a47");
+  doc.fillColor("#fff").font("Helvetica-Bold").fontSize(10).text("TOTAL MATERIAL HELD", L+10, y+6, {lineBreak:false});
+  doc.text(gb+" items · "+gq.toFixed(3)+" MT", L, y+6, {width:W-10, align:"right"});
+  y+=30;
+  ensure(26);
+  doc.fillColor("#6b5200").font("Helvetica").fontSize(7).text("Plates currently under process (awaiting shearing) are excluded from this statement.", L, y, {width:W});
+  y+=11;
+  doc.fillColor("#999").font("Helvetica-Oblique").fontSize(6.5).text("Computer generated statement — may contain mistakes.  Bharat Steel (Chennai) Pvt. Ltd. · No.147, Survey No.133, Thirunilai Village, Ponneri Taluk, Chennai 600103 · 044 6791 7800 · info@bharatsteels.in", L, y, {width:W});
+
+  doc.end();
+  await done;
+  return Buffer.concat(chunks);
 }
 async function sendWheelsMail(to, cc, html, subject, attach){
   const tenant=process.env.TENANT_ID, cid=process.env.CLIENT_ID, sec=process.env.CLIENT_SECRET;
