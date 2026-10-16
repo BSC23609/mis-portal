@@ -723,7 +723,7 @@ async function renderWheelsHtml(baseUrl, wipSet, note){
   const rows = parseCsvSrv(csvRes.ok ? await csvRes.text() : "").map(r=>({...r, Quantity:parseFloat(r.Quantity)||0, form:wheelsFormOf(r.ItemName)}))
     .filter(r=>!wipSet.has(String(r.BatchNum)))
     .filter(r=>!((r.form==="PLATE"&&r.Quantity<0.1)||(r.form==="STRIP"&&r.Quantity<0.011))); // plate <0.1 MT, strip <0.011 MT not listed
-  const SEC=[["COIL","Coil Stock","#1367a6"],["PLATE","Plate Stock (WIP / FG)","#0e7a4b"],["STRIP","Strip / Blank Stock","#b5651d"]]; // scrap excluded from customer email
+  const SEC=[["PLATE","Plate Stock (WIP / FG)","#0e7a4b"],["STRIP","Strip / Blank Stock","#b5651d"],["COIL","Coil Stock","#1367a6"]]; // WIP/FG (plate+strip) first, coil last
   let body="", gb=0, gq=0;
   for(const [k,t,c] of SEC){
     const rs=rows.filter(r=>r.form===k).sort((a,b)=>b.Quantity-a.Quantity); if(!rs.length)continue;
@@ -752,7 +752,7 @@ async function renderWheelsHtml(baseUrl, wipSet, note){
 async function buildWheelsXlsx(rows){
   let XLSX;
   try { XLSX = await import("xlsx"); } catch(e){ throw new Error("xlsx module not available on server: "+e.message); }
-  const SEC=[["COIL","Coil Stock"],["PLATE","Plate Stock (WIP / FG)"],["STRIP","Strip / Blank Stock"]]; // scrap excluded from customer email
+  const SEC=[["PLATE","Plate Stock (WIP / FG)"],["STRIP","Strip / Blank Stock"],["COIL","Coil Stock"]]; // WIP/FG (plate+strip) first, coil last
   const aoa=[["BHARAT STEEL (CHENNAI) PRIVATE LIMITED"],
              ["Job Work Stock Statement — Wheels India Limited"],
              ["As on: "+new Date().toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})+"   |   Customer: Wheels India Limited   |   Warehouse: Job Work (WH 45)"],
@@ -789,7 +789,16 @@ async function buildWheelsPdf(){
   let PDFDocument;
   try { PDFDocument = (await import("pdfkit")).default; } catch(e){ throw new Error("pdfkit module not available on server: "+e.message); }
   const rows = await wheelsRows();
-  const SEC=[["COIL","Coil Stock","#1367a6"],["PLATE","Plate Stock (WIP / FG)","#0e7a4b"],["STRIP","Strip / Blank Stock","#b5651d"]];
+  const SECDEF = {
+    COIL:  ["Coil Stock","#1367a6"],
+    PLATE: ["Plate Stock (WIP / FG)","#0e7a4b"],
+    STRIP: ["Strip / Blank Stock","#b5651d"]
+  };
+  // Page 1 = WIP / FG (plate + strip) ; Page 2 = Coil Stock
+  const PAGES = [
+    { title:"WIP / FG Stock", forms:["PLATE","STRIP"] },
+    { title:"Coil Stock",     forms:["COIL"] }
+  ];
 
   const doc = new PDFDocument({ size:"A4", margin:28 });
   const chunks=[]; doc.on("data",c=>chunks.push(c));
@@ -815,15 +824,6 @@ async function buildWheelsPdf(){
   const rowH=13.5, headH=15;
   let y=28;
 
-  // top band
-  doc.rect(L,y,W,42).fill("#0e2a47");
-  doc.fillColor("#fff").font("Helvetica-Bold").fontSize(14).text("Job Work Stock Statement — Wheels India Limited", L+10, y+9, {width:W-20});
-  doc.font("Helvetica").fontSize(8).fillColor("#cfe0ef").text("Bharat Steel (Chennai) Pvt. Ltd.  ·  Material held at BSC on customer's account", L+10, y+28, {width:W-20});
-  y+=50;
-  doc.fillColor("#333").font("Helvetica").fontSize(8.5)
-     .text("Customer: Wheels India Limited        As on: "+asof+"        Warehouse: Job Work (WH 45)", L, y, {width:W});
-  y+=16;
-
   function drawHeadRow(){
     doc.rect(L,y,W,headH).fill("#eef3f7");
     doc.fillColor("#1a2a3a").font("Helvetica-Bold").fontSize(7.5);
@@ -832,10 +832,25 @@ async function buildWheelsPdf(){
   }
   function ensure(h){ if(y+h>812){ doc.addPage(); y=28; return true; } return false; }
 
-  let gb=0, gq=0;
-  for(const [k,t,hex] of SEC){
-    const rs=rows.filter(r=>r.form===k).sort((a,b)=>b.Quantity-a.Quantity); if(!rs.length) continue;
-    const tq=rs.reduce((a,r)=>a+r.Quantity,0); gb+=rs.length; gq+=tq;
+  function drawBrandHeader(pageTitle){
+    y=28;
+    doc.rect(L,y,W,42).fill("#0e2a47");
+    doc.fillColor("#fff").font("Helvetica-Bold").fontSize(14).text("Job Work Stock Statement — Wheels India Limited", L+10, y+9, {width:W-20});
+    doc.font("Helvetica").fontSize(8).fillColor("#cfe0ef").text("Bharat Steel (Chennai) Pvt. Ltd.  ·  Material held at BSC on customer's account", L+10, y+28, {width:W-20});
+    y+=50;
+    doc.fillColor("#333").font("Helvetica").fontSize(8.5)
+       .text("Customer: Wheels India Limited        As on: "+asof+"        Warehouse: Job Work (WH 45)", L, y, {width:W});
+    y+=16;
+    doc.rect(L,y,W,20).fill("#0e2a47");
+    doc.fillColor("#fff").font("Helvetica-Bold").fontSize(11).text(pageTitle, L+8, y+5, {lineBreak:false});
+    y+=26;
+  }
+
+  function drawSection(form){
+    const [t,hex]=SECDEF[form];
+    const rs=rows.filter(r=>r.form===form).sort((a,b)=>b.Quantity-a.Quantity);
+    if(!rs.length) return { n:0, q:0 };
+    const tq=rs.reduce((a,r)=>a+r.Quantity,0);
     ensure(16+headH+rowH*2);
     doc.rect(L,y,W,16).fill(hex);
     doc.fillColor("#fff").font("Helvetica-Bold").fontSize(9).text(t, L+8, y+4, {lineBreak:false});
@@ -857,17 +872,32 @@ async function buildWheelsPdf(){
     doc.text(t+" total", L, y+3, {width:qtyCol.x-L-4, align:"right", lineBreak:false});
     doc.text(tq.toFixed(3), qtyCol.x+2, y+3, {width:qtyCol.w-4, align:"right", lineBreak:false});
     y+=rowH+8;
+    return { n:rs.length, q:tq };
   }
 
-  ensure(30);
-  doc.rect(L,y,W,22).fill("#0e2a47");
-  doc.fillColor("#fff").font("Helvetica-Bold").fontSize(10).text("TOTAL MATERIAL HELD", L+10, y+6, {lineBreak:false});
-  doc.text(gb+" items · "+gq.toFixed(3)+" MT", L, y+6, {width:W-10, align:"right"});
-  y+=30;
-  ensure(26);
-  doc.fillColor("#6b5200").font("Helvetica").fontSize(7).text("Plates currently under process (awaiting shearing) are excluded from this statement.", L, y, {width:W});
-  y+=11;
-  doc.fillColor("#999").font("Helvetica-Oblique").fontSize(6.5).text("Computer generated statement — may contain mistakes.  Bharat Steel (Chennai) Pvt. Ltd. · No.147, Survey No.133, Thirunilai Village, Ponneri Taluk, Chennai 600103 · 044 6791 7800 · info@bharatsteels.in", L, y, {width:W});
+  function pageTotal(label, n, q){
+    ensure(30);
+    doc.rect(L,y,W,22).fill("#0e2a47");
+    doc.fillColor("#fff").font("Helvetica-Bold").fontSize(10).text(label, L+10, y+6, {lineBreak:false});
+    doc.text(n+" items · "+q.toFixed(3)+" MT", L, y+6, {width:W-10, align:"right"});
+    y+=30;
+  }
+
+  function footerNote(){
+    ensure(26);
+    doc.fillColor("#6b5200").font("Helvetica").fontSize(7).text("Plates currently under process (awaiting shearing) are excluded from this statement.", L, y, {width:W});
+    y+=11;
+    doc.fillColor("#999").font("Helvetica-Oblique").fontSize(6.5).text("Computer generated statement — may contain mistakes.  Bharat Steel (Chennai) Pvt. Ltd. · No.147, Survey No.133, Thirunilai Village, Ponneri Taluk, Chennai 600103 · 044 6791 7800 · info@bharatsteels.in", L, y, {width:W});
+  }
+
+  PAGES.forEach((pg, idx)=>{
+    if(idx>0) doc.addPage();
+    drawBrandHeader(pg.title);
+    let pn=0, pq=0;
+    pg.forms.forEach(f=>{ const r=drawSection(f); pn+=r.n; pq+=r.q; });
+    pageTotal(pg.title+" — Total", pn, pq);
+    footerNote();
+  });
 
   doc.end();
   await done;
