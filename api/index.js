@@ -164,8 +164,10 @@ var serial = (iso) => iso ? Math.round(Date.parse(String(iso).slice(0, 10) + "T0
 var fromSerial = (v) => typeof v === "number" && v > 2e4 ? new Date(Math.round((v - 25569) * 864e5)).toISOString().slice(0, 10) : typeof v === "string" && /^\d{4}-\d{2}-\d{2}/.test(v) ? v.slice(0, 10) : null;
 
 // lib/wati.js
+function watiBase(){ return process.env.WATI_API_URL || process.env.WATI_ENDPOINT || process.env.WATI_BASE_URL || ""; }
+function watiKey(){ return (process.env.WATI_API_KEY || process.env.WATI_ACCESS_TOKEN || process.env.WATI_TOKEN || "").replace(/^Bearer\s+/i, ""); }
 async function send(mobile, template, parameters) {
-  const base = process.env.WATI_API_URL, key = process.env.WATI_API_KEY;
+  const base = watiBase(), key = watiKey();
   if (!base || !key) return { skipped: "WATI not configured" };
   const num = String(mobile).replace(/\D/g, "").replace(/^0+/, "");
   const wa = num.length === 10 ? "91" + num : num;
@@ -624,7 +626,7 @@ async function handlerWheels(req, res){
       if (body.whatsapp_test) {
         const tmpl = process.env.WHEELS_WA_TEMPLATE;
         if (!tmpl) return json(res, 200, { ok: true, skipped: "WHEELS_WA_TEMPLATE not set on server" });
-        if (!process.env.WATI_API_URL || !process.env.WATI_API_KEY) return json(res, 200, { ok: true, skipped: "WATI not configured on server" });
+        if (!watiBase() || !watiKey()) return json(res, 200, { ok: true, skipped: "WATI not configured on server (need WATI_API_URL + token)" });
         let num = String(body.wa_test_to || "").trim();
         if (!num) {
           const r4 = await sql`select wa_to from wheels_settings where id=1`;
