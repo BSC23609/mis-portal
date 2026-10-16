@@ -578,13 +578,20 @@ async function handlerWheels(req, res){
     await ensureWheelsTable();
     // GET /api/wheels?fmt=pdf  ->  the statement as a PDF (same data/structure as the email).
     // Public, no-auth: this is the URL WATI fetches for the WhatsApp document template.
-    const wantPdf = /[?&]fmt=pdf\b/.test(req.url || "") || (req.query && req.query.fmt === "pdf");
-    if (req.method === "GET" && wantPdf){
+    const fmt = (req.query && req.query.fmt) || ((/[?&]fmt=(pdf|xlsx)\b/.exec(req.url || "")) || [])[1] || "";
+    if (req.method === "GET" && fmt === "pdf"){
       const pdf = await buildWheelsPdf();
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader("Content-Disposition", 'inline; filename="WheelsIndia_Stock_' + new Date().toISOString().slice(0,10).replace(/-/g,"") + '.pdf"');
       res.setHeader("Cache-Control", "no-store");
       return res.status(200).end(pdf);
+    }
+    if (req.method === "GET" && fmt === "xlsx"){
+      const b64 = await buildWheelsXlsx(await wheelsRows());
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      res.setHeader("Content-Disposition", 'attachment; filename="WheelsIndia_Stock_' + new Date().toISOString().slice(0,10).replace(/-/g,"") + '.xlsx"');
+      res.setHeader("Cache-Control", "no-store");
+      return res.status(200).end(Buffer.from(b64, "base64"));
     }
     if (req.method === "POST"){
       let body = req.body;
@@ -605,13 +612,12 @@ async function handlerWheels(req, res){
         const nums = (s3.wa_to || []).map(String).map(x => x.trim()).filter(Boolean);
         if (!nums.length) return json(res, 200, { ok: true, skipped: "no whatsapp recipients" });
         const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
-        const pdfLink = base + "/wheels.pdf";   // clean .pdf URL (rewrites to the PDF endpoint)
         const sent = [];
         for (const num of nums) {
-          try { const r = await send(num, tmpl, [{ name: "pdfLink", value: pdfLink }]); sent.push({ num, ...(r || { ok: true }) }); }
+          try { const r = await send(num, tmpl, []); sent.push({ num, ...(r || { ok: true }) }); }   // static URL buttons -> no params
           catch (e) { sent.push({ num, error: String(e.message || e) }); }
         }
-        return json(res, 200, { ok: true, pdf: pdfLink, template: tmpl, sent });
+        return json(res, 200, { ok: true, pdf: base + "/wheels.pdf", xlsx: base + "/wheels.xlsx", template: tmpl, sent });
       }
       // WhatsApp test send (triggered from the settings page, like the email test — no CRON_SECRET).
       // Sends to wa_test_to if given, else the first saved number. Uses the same env creds/template.
@@ -626,11 +632,10 @@ async function handlerWheels(req, res){
         }
         if (!num) return json(res, 200, { ok: true, skipped: "no test number (enter one or save a number first)" });
         const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
-        const pdfLink = base + "/wheels.pdf";
         const sent = [];
-        try { const r = await send(num, tmpl, [{ name: "pdfLink", value: pdfLink }]); sent.push({ num, ...(r || { ok: true }) }); }
+        try { const r = await send(num, tmpl, []); sent.push({ num, ...(r || { ok: true }) }); }   // static URL buttons -> no params
         catch (e) { sent.push({ num, error: String(e.message || e) }); }
-        return json(res, 200, { ok: true, pdf: pdfLink, template: tmpl, sent });
+        return json(res, 200, { ok: true, pdf: base + "/wheels.pdf", xlsx: base + "/wheels.xlsx", template: tmpl, sent });
       }
       // update only the keys provided (settings save and WIP save are separate posts)
       if (Array.isArray(body.mail_to)) await sql`update wheels_settings set mail_to=${body.mail_to} where id=1`;
@@ -758,15 +763,19 @@ async function buildWheelsXlsx(rows){
   const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,"Stock Statement");
   return XLSX.write(wb,{type:"base64",bookType:"xlsx"});
 }
+// Fetch + filter the current Wheels India stock rows from the data repo (shared by PDF/XLSX).
+async function wheelsRows(){
+  const DATA_BASE = process.env.DATA_BASE || "https://raw.githubusercontent.com/BSC23609/bsc-stock-data/main";
+  const csvRes = await fetch(DATA_BASE + "/wheels_stock.csv?t=" + Date.now());
+  return parseCsvSrv(csvRes.ok ? await csvRes.text() : "").map(r=>({...r, Quantity:parseFloat(r.Quantity)||0, form:wheelsFormOf(r.ItemName)}))
+    .filter(r=>!((r.form==="PLATE"&&r.Quantity<0.1)||(r.form==="STRIP"&&r.Quantity<0.011))); // plate <0.1 MT, strip <0.011 MT not listed
+}
 // Build the statement as a PDF (same sections/columns as the email). Pure pdfkit,
-// no headless browser — safe on Vercel Hobby. Served at /api/wheels?fmt=pdf.
+// no headless browser — safe on Vercel Hobby. Served at /api/wheels?fmt=pdf (and /wheels.pdf).
 async function buildWheelsPdf(){
   let PDFDocument;
   try { PDFDocument = (await import("pdfkit")).default; } catch(e){ throw new Error("pdfkit module not available on server: "+e.message); }
-  const DATA_BASE = process.env.DATA_BASE || "https://raw.githubusercontent.com/BSC23609/bsc-stock-data/main";
-  const csvRes = await fetch(DATA_BASE + "/wheels_stock.csv?t=" + Date.now());
-  const rows = parseCsvSrv(csvRes.ok ? await csvRes.text() : "").map(r=>({...r, Quantity:parseFloat(r.Quantity)||0, form:wheelsFormOf(r.ItemName)}))
-    .filter(r=>!((r.form==="PLATE"&&r.Quantity<0.1)||(r.form==="STRIP"&&r.Quantity<0.011))); // plate <0.1 MT, strip <0.011 MT not listed
+  const rows = await wheelsRows();
   const SEC=[["COIL","Coil Stock","#1367a6"],["PLATE","Plate Stock (WIP / FG)","#0e7a4b"],["STRIP","Strip / Blank Stock","#b5651d"]];
 
   const doc = new PDFDocument({ size:"A4", margin:28 });

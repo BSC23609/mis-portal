@@ -1,6 +1,7 @@
 {
   "rewrites": [
     { "source": "/wheels.pdf", "destination": "/api/index?route=wheels&fmt=pdf" },
+    { "source": "/wheels.xlsx", "destination": "/api/index?route=wheels&fmt=xlsx" },
     { "source": "/api/:route", "destination": "/api/index?route=:route" }
   ]
 }
