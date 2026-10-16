@@ -613,6 +613,25 @@ async function handlerWheels(req, res){
         }
         return json(res, 200, { ok: true, pdf: pdfLink, template: tmpl, sent });
       }
+      // WhatsApp test send (triggered from the settings page, like the email test — no CRON_SECRET).
+      // Sends to wa_test_to if given, else the first saved number. Uses the same env creds/template.
+      if (body.whatsapp_test) {
+        const tmpl = process.env.WHEELS_WA_TEMPLATE;
+        if (!tmpl) return json(res, 200, { ok: true, skipped: "WHEELS_WA_TEMPLATE not set on server" });
+        if (!process.env.WATI_API_URL || !process.env.WATI_API_KEY) return json(res, 200, { ok: true, skipped: "WATI not configured on server" });
+        let num = String(body.wa_test_to || "").trim();
+        if (!num) {
+          const r4 = await sql`select wa_to from wheels_settings where id=1`;
+          num = ((r4[0]?.wa_to) || []).map(String)[0] || "";
+        }
+        if (!num) return json(res, 200, { ok: true, skipped: "no test number (enter one or save a number first)" });
+        const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
+        const pdfLink = base + "/wheels.pdf";
+        const sent = [];
+        try { const r = await send(num, tmpl, [{ name: "pdfLink", value: pdfLink }]); sent.push({ num, ...(r || { ok: true }) }); }
+        catch (e) { sent.push({ num, error: String(e.message || e) }); }
+        return json(res, 200, { ok: true, pdf: pdfLink, template: tmpl, sent });
+      }
       // update only the keys provided (settings save and WIP save are separate posts)
       if (Array.isArray(body.mail_to)) await sql`update wheels_settings set mail_to=${body.mail_to} where id=1`;
       if (Array.isArray(body.mail_cc)) await sql`update wheels_settings set mail_cc=${body.mail_cc} where id=1`;

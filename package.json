@@ -4,7 +4,7 @@
   "type": "module",
   "dependencies": {
     "@neondatabase/serverless": "^0.10.4",
-    "pdfkit": "^0.20.2",
+    "pdfkit": "^0.15.0",
     "xlsx": "^0.18.5"
   }
 }

@@ -49,6 +49,32 @@
   </div>
 
   <div class="card">
+    <h3>WhatsApp — daily stock statement (PDF)</h3>
+    <div class="hint" style="margin-bottom:10px">The same statement is sent on WhatsApp as a PDF, right after the daily email, via WATI. Enter the recipient numbers below. (WATI credentials and the approved template are configured on the server.)</div>
+    <div class="fld">
+      <label>WhatsApp numbers</label>
+      <textarea id="waTo" rows="2" placeholder="919500680093, 9144xxxxxxx"></textarea>
+      <div class="hint">One number per line or comma-separated. Indian 10-digit numbers get 91 added automatically.</div>
+    </div>
+    <div class="fld"><label>Daily WhatsApp</label>
+      <div class="toggle"><input type="checkbox" id="waEnabled"/> <span>enabled</span></div>
+      <div class="hint">Turn off to pause the WhatsApp send without removing numbers. The email is unaffected.</div>
+    </div>
+    <div class="saverow">
+      <button class="pbtn" style="background:var(--blue);border-color:var(--blue)" onclick="saveSettings()">Save settings</button>
+      <span class="saved" id="savedW">✓ Saved</span>
+    </div>
+    <div style="border-top:1px solid #e3e8ec;margin-top:14px;padding-top:14px">
+      <div class="hint" style="margin-bottom:10px">Send a test WhatsApp with the current statement PDF to one number (leave blank to use the first saved number). Needs the WATI template approved and the portal deployed.</div>
+      <div class="fld" style="max-width:420px"><label>Test WhatsApp number</label><input type="text" id="waTestTo" placeholder="919500680093"/></div>
+      <div class="saverow">
+        <button class="pbtn" style="background:#128c7e;border-color:#128c7e" id="waTestBtn" onclick="sendWaTest()">Send test WhatsApp now</button>
+        <span class="saved" id="savedWT"></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
     <h3>Send a test email</h3>
     <div class="hint" style="margin-bottom:10px">Sends the current statement (from the latest stock refresh) to one address so you can check branding and delivery. Uses the configured sender. Does not affect the daily schedule.</div>
     <div class="fld" style="max-width:420px"><label>Test recipient</label><input type="text" id="testTo" placeholder="you@bharatsteels.in"/></div>
@@ -75,6 +101,8 @@ async function load(){
     $('enabled').checked=SET.enabled!==false;
     $('mailSubject').value=SET.mail_subject||'';
     $('mailBody').value=SET.mail_body||'';
+    $('waTo').value=(SET.wa_to||[]).join('\n');
+    $('waEnabled').checked=SET.wa_enabled!==false;
     $('foot').textContent='Settings loaded';
   }catch(e){ $('errbox').innerHTML='<div class="err">Couldn\'t load settings.</div>'; }
 }
@@ -88,8 +116,8 @@ function flash(id){const e=$(id);e.style.display='inline';setTimeout(()=>e.style
 async function saveSettings(){
   try{
     const split=v=>v.split(/[\n,;]+/).map(s=>s.trim()).filter(Boolean);
-    await post({mail_to:split($('mailTo').value),mail_cc:split($('mailCc').value),send_time:$('sendTime').value,enabled:$('enabled').checked,mail_subject:$('mailSubject').value,mail_body:$('mailBody').value});
-    flash('savedS');
+    await post({mail_to:split($('mailTo').value),mail_cc:split($('mailCc').value),send_time:$('sendTime').value,enabled:$('enabled').checked,mail_subject:$('mailSubject').value,mail_body:$('mailBody').value,wa_to:split($('waTo').value),wa_enabled:$('waEnabled').checked});
+    flash('savedS'); flash('savedW');
   }catch(e){ alert(e.message); }
 }
 async function sendTest(){
@@ -105,6 +133,24 @@ async function sendTest(){
     msg.style.color='var(--good)'; msg.textContent=`✓ Sent to ${to} · ${r.items} items · ${r.mt} MT`;
   }catch(e){ msg.style.color='var(--red)'; msg.textContent='✗ '+e.message; }
   finally{ b.disabled=false; b.textContent='Send test now'; }
+}
+async function sendWaTest(){
+  const to=$('waTestTo').value.trim();
+  const b=$('waTestBtn'); b.disabled=true; b.textContent='Sending…';
+  const msg=$('savedWT'); msg.style.display='inline'; msg.style.color='var(--gray)'; msg.textContent='sending…';
+  try{
+    // save current numbers first so a blank test uses the latest saved list
+    const split=v=>v.split(/[\n,;]+/).map(s=>s.trim()).filter(Boolean);
+    await post({wa_to:split($('waTo').value),wa_enabled:$('waEnabled').checked});
+    const r=await post({whatsapp_test:true, wa_test_to:to});
+    if(r.skipped){ msg.style.color='var(--gray)'; msg.textContent='• '+r.skipped; }
+    else{
+      const s=(r.sent||[])[0]||{};
+      if(s.error){ msg.style.color='var(--red)'; msg.textContent='✗ '+s.error; }
+      else{ msg.style.color='var(--good)'; msg.textContent='✓ Sent to '+(s.num||to); }
+    }
+  }catch(e){ msg.style.color='var(--red)'; msg.textContent='✗ '+e.message; }
+  finally{ b.disabled=false; b.textContent='Send test WhatsApp now'; }
 }
 load();
 </script>
