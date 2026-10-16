@@ -595,6 +595,17 @@ async function handlerWheels(req, res){
       res.setHeader("Cache-Control", "no-store");
       return res.status(200).end(Buffer.from(b64, "base64"));
     }
+    // Diagnostic: which WhatsApp env vars does this deployment actually see? (names/booleans only, no secrets)
+    if (req.method === "GET" && fmt === "wadiag"){
+      return json(res, 200, {
+        WHEELS_WA_TEMPLATE: process.env.WHEELS_WA_TEMPLATE || null,
+        WATI_API_URL: !!watiBase(),
+        WATI_key_present: !!watiKey(),
+        CRON_SECRET_present: !!process.env.CRON_SECRET,
+        wati_url_names: { WATI_API_URL: !!process.env.WATI_API_URL, WATI_ENDPOINT: !!process.env.WATI_ENDPOINT, WATI_BASE_URL: !!process.env.WATI_BASE_URL },
+        wati_key_names: { WATI_API_KEY: !!process.env.WATI_API_KEY, WATI_ACCESS_TOKEN: !!process.env.WATI_ACCESS_TOKEN, WATI_TOKEN: !!process.env.WATI_TOKEN }
+      });
+    }
     if (req.method === "POST"){
       let body = req.body;
       if (typeof body === "string") { try { body = JSON.parse(body); } catch { body = {}; } }
@@ -724,7 +735,7 @@ async function renderWheelsHtml(baseUrl, wipSet, note){
       body+=`<tr><td style="text-align:center;color:#888">${i+1}</td><td style="text-align:center">${esc2(mill)}</td><td style="text-align:center">${esc2(x.Grade)}</td><td style="text-align:center">${dimS(x.Thick)}</td><td style="text-align:center">${dimS(x.Width)}</td><td style="text-align:center">${lenS(x.Length)}</td><td style="text-align:center;font-family:monospace;font-size:11px">${esc2(x.CoilNo||x.BatchNum)}${bc}</td><td style="text-align:center;font-weight:600">${x.Quantity.toFixed(3)}</td><td style="text-align:center;color:#888">${esc2(x.AgeDays)}</td></tr>`; });
     body+=`<tr><td colspan="8" style="text-align:right;font-weight:700;padding:6px 10px;border-top:2px solid #333">${t} total</td><td style="text-align:right;font-weight:700;border-top:2px solid #333">${tq.toFixed(3)}</td><td style="border-top:2px solid #333"></td></tr>`;
   }
-  const asof=new Date().toLocaleString("en-IN",{day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"});
+  const asof=new Date().toLocaleString("en-IN",{timeZone:"Asia/Kolkata",day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"});
   const noteHtml = note && note.trim() ? `<div style="padding:14px 22px 0;font-size:13px;color:#222;line-height:1.6">${esc2(note).replace(/\n/g,"<br>")}</div>` : "";
   const html=`<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>@media only screen and (max-width:600px){.wk-tbl{font-size:10px !important}.wk-tbl th,.wk-tbl td{padding:2px 3px !important}.wk-pad{padding:12px 8px 4px !important}.wk-hd{padding:12px 12px !important}}</style></head><body style="margin:0;padding:0;background:#fff;-webkit-text-size-adjust:100%">`+
     `<div style="font-family:Arial,Helvetica,sans-serif;color:#1a1a1a;max-width:920px;width:100%;margin:auto;border:1px solid #d0d7dd;box-sizing:border-box">
@@ -744,7 +755,7 @@ async function buildWheelsXlsx(rows){
   const SEC=[["COIL","Coil Stock"],["PLATE","Plate Stock (WIP / FG)"],["STRIP","Strip / Blank Stock"]]; // scrap excluded from customer email
   const aoa=[["BHARAT STEEL (CHENNAI) PRIVATE LIMITED"],
              ["Job Work Stock Statement — Wheels India Limited"],
-             ["As on: "+new Date().toLocaleString("en-IN")+"   |   Customer: Wheels India Limited   |   Warehouse: Job Work (WH 45)"],
+             ["As on: "+new Date().toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})+"   |   Customer: Wheels India Limited   |   Warehouse: Job Work (WH 45)"],
              []];
   const hdr=["#","Mill","Grade","Thk","Width","Length","Coil / Batch No","Mother Coil","Qty (MT)","Age (d)"];
   let gGrand=0, secRanges=[];
@@ -800,7 +811,7 @@ async function buildWheelsPdf(){
   cols.forEach(c=>{ c.w=c.w*scale; c.x=cx; cx+=c.w; });
   const qtyCol=cols.find(c=>c.k==="qty");
 
-  const asof=new Date().toLocaleString("en-IN",{day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"});
+  const asof=new Date().toLocaleString("en-IN",{timeZone:"Asia/Kolkata",day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"});
   const rowH=13.5, headH=15;
   let y=28;
 
