@@ -222,7 +222,6 @@ function renderProdPeriods(){
   const cols=[
     {k:'Daily Production Qty',               t:'Today',       s:pdDD(today)},
     {k:'Yesterday Production Qty',           t:'Yesterday',   s:pdDD(yday)},
-    {k:'Last Month Upto Today Qty',          t:'Last Mo. upto today',     s:pdDD(lmToday)},
     {k:'Last Month Upto Yesterday Qty',      t:'Last Mo. upto yesterday', s:pdDD(lmYday)},
     {k:'Monthly Production Qty',             t:'Monthly',     s:PMON[today.getMonth()]+'-'+today.getFullYear()},
     {k:'Yearly Production Qty',              t:'Yearly',      s:''+today.getFullYear()}

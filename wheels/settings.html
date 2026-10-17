@@ -75,6 +75,45 @@
   </div>
 
   <div class="card">
+    <h3>Production report — internal (mail + WhatsApp)</h3>
+    <div class="hint" style="margin-bottom:10px">The Wheels India production report (Plate / Strip output) sent to internal recipients only — not the customer. Goes out with the daily run as a PDF or an image.</div>
+    <div class="fld">
+      <label>Format</label>
+      <select id="prodFormat" style="max-width:220px"><option value="image">Image (PNG)</option><option value="pdf">PDF</option></select>
+      <div class="hint">Image shows inline for quick viewing; PDF is a document. WhatsApp needs a matching approved template.</div>
+    </div>
+    <div class="fld">
+      <label>Email recipients (internal)</label>
+      <textarea id="prodMailTo" rows="2" placeholder="one address per line or comma-separated"></textarea>
+    </div>
+    <div class="fld">
+      <label>WhatsApp numbers (internal)</label>
+      <textarea id="prodWaTo" rows="2" placeholder="919500680093, 9144xxxxxxx"></textarea>
+      <div class="hint">One per line or comma-separated. 10-digit numbers get 91 added automatically.</div>
+    </div>
+    <div class="fld"><label>Daily send</label>
+      <div class="toggle"><input type="checkbox" id="prodEnabled"/> <span>enabled</span></div>
+      <div class="hint">Turn off to pause the production report (mail + WhatsApp) without removing recipients.</div>
+    </div>
+    <div class="saverow">
+      <button class="pbtn" style="background:var(--blue);border-color:var(--blue)" onclick="saveSettings()">Save settings</button>
+      <span class="saved" id="savedP">✓ Saved</span>
+    </div>
+    <div style="border-top:1px solid #e3e8ec;margin-top:14px;padding-top:14px;display:flex;gap:24px;flex-wrap:wrap">
+      <div style="flex:1;min-width:260px">
+        <div class="fld"><label>Test email to</label><input type="text" id="prodTestTo" placeholder="you@bharatsteels.in"/></div>
+        <button class="pbtn" style="background:var(--blue);border-color:var(--blue)" id="prodMailBtn" onclick="sendProdMailTest()">Send test email</button>
+        <span class="saved" id="savedPM"></span>
+      </div>
+      <div style="flex:1;min-width:260px">
+        <div class="fld"><label>Test WhatsApp to</label><input type="text" id="prodWaTestTo" placeholder="919500680093"/></div>
+        <button class="pbtn" style="background:#128c7e;border-color:#128c7e" id="prodWaBtn" onclick="sendProdWaTest()">Send test WhatsApp</button>
+        <span class="saved" id="savedPW"></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
     <h3>Send a test email</h3>
     <div class="hint" style="margin-bottom:10px">Sends the current statement (from the latest stock refresh) to one address so you can check branding and delivery. Uses the configured sender. Does not affect the daily schedule.</div>
     <div class="fld" style="max-width:420px"><label>Test recipient</label><input type="text" id="testTo" placeholder="you@bharatsteels.in"/></div>
@@ -103,6 +142,10 @@ async function load(){
     $('mailBody').value=SET.mail_body||'';
     $('waTo').value=(SET.wa_to||[]).join('\n');
     $('waEnabled').checked=SET.wa_enabled!==false;
+    $('prodMailTo').value=(SET.prod_mail_to||[]).join('\n');
+    $('prodWaTo').value=(SET.prod_wa_to||[]).join('\n');
+    $('prodEnabled').checked=SET.prod_enabled!==false;
+    $('prodFormat').value=(SET.prod_format==='pdf')?'pdf':'image';
     $('foot').textContent='Settings loaded';
   }catch(e){ $('errbox').innerHTML='<div class="err">Couldn\'t load settings.</div>'; }
 }
@@ -116,8 +159,8 @@ function flash(id){const e=$(id);e.style.display='inline';setTimeout(()=>e.style
 async function saveSettings(){
   try{
     const split=v=>v.split(/[\n,;]+/).map(s=>s.trim()).filter(Boolean);
-    await post({mail_to:split($('mailTo').value),mail_cc:split($('mailCc').value),send_time:$('sendTime').value,enabled:$('enabled').checked,mail_subject:$('mailSubject').value,mail_body:$('mailBody').value,wa_to:split($('waTo').value),wa_enabled:$('waEnabled').checked});
-    flash('savedS'); flash('savedW');
+    await post({mail_to:split($('mailTo').value),mail_cc:split($('mailCc').value),send_time:$('sendTime').value,enabled:$('enabled').checked,mail_subject:$('mailSubject').value,mail_body:$('mailBody').value,wa_to:split($('waTo').value),wa_enabled:$('waEnabled').checked,prod_mail_to:split($('prodMailTo').value),prod_wa_to:split($('prodWaTo').value),prod_enabled:$('prodEnabled').checked,prod_format:$('prodFormat').value});
+    flash('savedS'); flash('savedW'); flash('savedP');
   }catch(e){ alert(e.message); }
 }
 async function sendTest(){
@@ -151,6 +194,32 @@ async function sendWaTest(){
     }
   }catch(e){ msg.style.color='var(--red)'; msg.textContent='✗ '+e.message; }
   finally{ b.disabled=false; b.textContent='Send test WhatsApp now'; }
+}
+async function sendProdMailTest(){
+  const to=$('prodTestTo').value.trim();
+  const b=$('prodMailBtn'); b.disabled=true; b.textContent='Sending…';
+  const msg=$('savedPM'); msg.style.display='inline'; msg.style.color='var(--gray)'; msg.textContent='sending…';
+  try{
+    const split=v=>v.split(/[\n,;]+/).map(s=>s.trim()).filter(Boolean);
+    await post({prod_mail_to:split($('prodMailTo').value),prod_format:$('prodFormat').value,prod_enabled:$('prodEnabled').checked});
+    const r=await post({prod_mail_test:true, test_to:to});
+    if(r.error){ msg.style.color='var(--red)'; msg.textContent='✗ '+r.error; }
+    else{ msg.style.color='var(--good)'; msg.textContent='✓ Sent ('+r.format+') to '+(r.sent_to||[]).join(', '); }
+  }catch(e){ msg.style.color='var(--red)'; msg.textContent='✗ '+e.message; }
+  finally{ b.disabled=false; b.textContent='Send test email'; }
+}
+async function sendProdWaTest(){
+  const to=$('prodWaTestTo').value.trim();
+  const b=$('prodWaBtn'); b.disabled=true; b.textContent='Sending…';
+  const msg=$('savedPW'); msg.style.display='inline'; msg.style.color='var(--gray)'; msg.textContent='sending…';
+  try{
+    const split=v=>v.split(/[\n,;]+/).map(s=>s.trim()).filter(Boolean);
+    await post({prod_wa_to:split($('prodWaTo').value),prod_format:$('prodFormat').value,prod_enabled:$('prodEnabled').checked});
+    const r=await post({prod_whatsapp_test:true, prod_wa_test_to:to});
+    if(r.skipped){ msg.style.color='var(--gray)'; msg.textContent='• '+r.skipped; }
+    else{ const s=(r.sent||[])[0]||{}; if(s.error){ msg.style.color='var(--red)'; msg.textContent='✗ '+s.error; } else { msg.style.color='var(--good)'; msg.textContent='✓ Sent to '+(s.num||to); } }
+  }catch(e){ msg.style.color='var(--red)'; msg.textContent='✗ '+e.message; }
+  finally{ b.disabled=false; b.textContent='Send test WhatsApp'; }
 }
 load();
 </script>

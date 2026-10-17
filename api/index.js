@@ -3,6 +3,9 @@
 
 // lib/db.js
 import { neon } from "@neondatabase/serverless";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 var sql = neon(process.env.DATABASE_URL);
 var STATUSES = ["Under Loading", "Loaded", "In-Transit", "Arrived"];
 function json(res, status, body) {
@@ -573,6 +576,10 @@ async function ensureWheelsTable(){
   await sql`alter table wheels_settings add column if not exists mail_body text default ''`;
   await sql`alter table wheels_settings add column if not exists wa_to text[] default '{}'`;
   await sql`alter table wheels_settings add column if not exists wa_enabled boolean default true`;
+  await sql`alter table wheels_settings add column if not exists prod_mail_to text[] default '{}'`;
+  await sql`alter table wheels_settings add column if not exists prod_wa_to text[] default '{}'`;
+  await sql`alter table wheels_settings add column if not exists prod_enabled boolean default true`;
+  await sql`alter table wheels_settings add column if not exists prod_format text default 'image'`;
 }
 async function handlerWheels(req, res){
   if (cors(req, res)) return;
@@ -580,7 +587,7 @@ async function handlerWheels(req, res){
     await ensureWheelsTable();
     // GET /api/wheels?fmt=pdf  ->  the statement as a PDF (same data/structure as the email).
     // Public, no-auth: this is the URL WATI fetches for the WhatsApp document template.
-    const fmt = (req.query && req.query.fmt) || ((/[?&]fmt=(pdf|xlsx)\b/.exec(req.url || "")) || [])[1] || "";
+    const fmt = (req.query && req.query.fmt) || ((/[?&]fmt=(pdf|xlsx|prodpdf|prodpng)\b/.exec(req.url || "")) || [])[1] || "";
     if (req.method === "GET" && fmt === "pdf"){
       const pdf = await buildWheelsPdf();
       res.setHeader("Content-Type", "application/pdf");
@@ -594,6 +601,20 @@ async function handlerWheels(req, res){
       res.setHeader("Content-Disposition", 'attachment; filename="WheelsIndia_Stock_' + new Date().toISOString().slice(0,10).replace(/-/g,"") + '.xlsx"');
       res.setHeader("Cache-Control", "no-store");
       return res.status(200).end(Buffer.from(b64, "base64"));
+    }
+    if (req.method === "GET" && fmt === "prodpdf"){
+      const pdf = await buildWheelsProdPdf();
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", 'inline; filename="WheelsIndia_Production_' + new Date().toISOString().slice(0,10).replace(/-/g,"") + '.pdf"');
+      res.setHeader("Cache-Control", "no-store");
+      return res.status(200).end(pdf);
+    }
+    if (req.method === "GET" && fmt === "prodpng"){
+      const png = await buildWheelsProdPng();
+      res.setHeader("Content-Type", "image/png");
+      res.setHeader("Content-Disposition", 'inline; filename="WheelsIndia_Production_' + new Date().toISOString().slice(0,10).replace(/-/g,"") + '.png"');
+      res.setHeader("Cache-Control", "no-store");
+      return res.status(200).end(png);
     }
     // Diagnostic: which WhatsApp env vars does this deployment actually see? (names/booleans only, no secrets)
     if (req.method === "GET" && fmt === "wadiag"){
@@ -650,6 +671,61 @@ async function handlerWheels(req, res){
         catch (e) { sent.push({ num, error: String(e.message || e) }); }
         return json(res, 200, { ok: true, pdf: base + "/wheels.pdf", xlsx: base + "/wheels.xlsx", template: tmpl, sent });
       }
+      // Production WhatsApp — daily trigger (CRON_SECRET). Template WHEELS_WA_PROD_TEMPLATE, numbers from prod_wa_to,
+      // media = /wheels-production.(png|pdf) per prod_format. Header variable must be named "report".
+      if (body.prod_whatsapp) {
+        const auth = req.headers.authorization || "";
+        if (!process.env.CRON_SECRET) return json(res, 503, { error: "CRON_SECRET not set" });
+        if (auth !== "Bearer " + process.env.CRON_SECRET) return json(res, 401, { error: "unauthorized" });
+        const tmpl = process.env.WHEELS_WA_PROD_TEMPLATE;
+        if (!tmpl) return json(res, 400, { error: "WHEELS_WA_PROD_TEMPLATE not set" });
+        const r5 = await sql`select prod_wa_to, prod_enabled, prod_format from wheels_settings where id=1`;
+        const s5 = r5[0] || {};
+        if (s5.prod_enabled === false) return json(res, 200, { ok: true, skipped: "production whatsapp disabled in settings" });
+        const nums = (s5.prod_wa_to || []).map(String).map(x => x.trim()).filter(Boolean);
+        if (!nums.length) return json(res, 200, { ok: true, skipped: "no production whatsapp recipients" });
+        const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
+        const url = base + (s5.prod_format === "pdf" ? "/wheels-production.pdf" : "/wheels-production.png");
+        const sent = [];
+        for (const num of nums) { try { const r = await send(num, tmpl, [{ name: "report", value: url }]); sent.push({ num, ...(r || { ok: true }) }); } catch (e) { sent.push({ num, error: String(e.message || e) }); } }
+        return json(res, 200, { ok: true, url, template: tmpl, sent });
+      }
+      // Production email — test send (and reused by nothing else). Renders the chosen format and emails it.
+      if (body.prod_mail_test) {
+        const r7 = await sql`select prod_mail_to, prod_format from wheels_settings where id=1`;
+        const s7 = r7[0] || {};
+        const to = body.test_to ? [String(body.test_to)] : (s7.prod_mail_to || []);
+        if (!to.length) return json(res, 400, { error: "no recipient" });
+        const fmtv = (s7.prod_format) || "image";
+        const stamp = new Date().toISOString().slice(0,10).replace(/-/g,"");
+        let attach, html;
+        if (fmtv === "pdf") {
+          attach = { name:"WheelsIndia_Production_"+stamp+".pdf", b64:(await buildWheelsProdPdf()).toString("base64"), contentType:"application/pdf" };
+          html = "<p>Dear Team,</p><p>Please find attached the Wheels India Production Report (PDF).</p><p>Bharat Steel (Chennai) Pvt. Ltd.</p>";
+        } else {
+          attach = { name:"WheelsIndia_Production_"+stamp+".png", b64:(await buildWheelsProdPng()).toString("base64"), contentType:"image/png" };
+          html = `<p>Dear Team,</p><p>Wheels India Production Report:</p><img src="cid:prodimg" style="max-width:100%;border:1px solid #d0d7dd"/><p>Bharat Steel (Chennai) Pvt. Ltd.</p>`;
+          attach.cid = "prodimg";
+        }
+        await sendWheelsMail(to, [], html, (body.test_to?"[TEST] ":"")+"Wheels India — Production Report — "+new Date().toLocaleDateString("en-IN"), attach);
+        return json(res, 200, { ok:true, sent_to:to, format:fmtv });
+      }
+      // Production WhatsApp — test send from the settings page (no CRON_SECRET)
+      if (body.prod_whatsapp_test) {
+        const tmpl = process.env.WHEELS_WA_PROD_TEMPLATE;
+        if (!tmpl) return json(res, 200, { ok: true, skipped: "WHEELS_WA_PROD_TEMPLATE not set on server" });
+        if (!watiBase() || !watiKey()) return json(res, 200, { ok: true, skipped: "WATI not configured on server (need WATI_API_URL + token)" });
+        const r6 = await sql`select prod_wa_to, prod_format from wheels_settings where id=1`;
+        const s6 = r6[0] || {};
+        let num = String(body.prod_wa_test_to || "").trim();
+        if (!num) num = (s6.prod_wa_to || []).map(String)[0] || "";
+        if (!num) return json(res, 200, { ok: true, skipped: "no test number (enter one or save a number first)" });
+        const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
+        const url = base + (s6.prod_format === "pdf" ? "/wheels-production.pdf" : "/wheels-production.png");
+        const sent = [];
+        try { const r = await send(num, tmpl, [{ name: "report", value: url }]); sent.push({ num, ...(r || { ok: true }) }); } catch (e) { sent.push({ num, error: String(e.message || e) }); }
+        return json(res, 200, { ok: true, url, template: tmpl, sent });
+      }
       // update only the keys provided (settings save and WIP save are separate posts)
       if (Array.isArray(body.mail_to)) await sql`update wheels_settings set mail_to=${body.mail_to} where id=1`;
       if (Array.isArray(body.mail_cc)) await sql`update wheels_settings set mail_cc=${body.mail_cc} where id=1`;
@@ -660,6 +736,10 @@ async function handlerWheels(req, res){
       if (Array.isArray(body.wip)) await sql`update wheels_settings set wip=${body.wip.map(String)} where id=1`;
       if (Array.isArray(body.wa_to)) await sql`update wheels_settings set wa_to=${body.wa_to.map(String)} where id=1`;
       if (typeof body.wa_enabled === "boolean") await sql`update wheels_settings set wa_enabled=${body.wa_enabled} where id=1`;
+      if (Array.isArray(body.prod_mail_to)) await sql`update wheels_settings set prod_mail_to=${body.prod_mail_to.map(String)} where id=1`;
+      if (Array.isArray(body.prod_wa_to)) await sql`update wheels_settings set prod_wa_to=${body.prod_wa_to.map(String)} where id=1`;
+      if (typeof body.prod_enabled === "boolean") await sql`update wheels_settings set prod_enabled=${body.prod_enabled} where id=1`;
+      if (body.prod_format==="pdf"||body.prod_format==="image") await sql`update wheels_settings set prod_format=${body.prod_format} where id=1`;
       // test send: render from the last CSV and email to the given address (or configured To)
       if (body.send) {
         const rows = await sql`select mail_to, mail_cc from wheels_settings where id=1`;
@@ -685,13 +765,15 @@ async function handlerWheels(req, res){
       await sql`update wheels_settings set updated_at=now() where id=1`;
       return json(res, 200, { ok: true });
     }
-    const rows = await sql`select mail_to, mail_cc, send_time, enabled, wip, mail_subject, mail_body, wa_to, wa_enabled from wheels_settings where id=1`;
+    const rows = await sql`select mail_to, mail_cc, send_time, enabled, wip, mail_subject, mail_body, wa_to, wa_enabled, prod_mail_to, prod_wa_to, prod_enabled, prod_format from wheels_settings where id=1`;
     const s = rows[0] || {};
     return json(res, 200, {
       mail_to: s.mail_to || [], mail_cc: s.mail_cc || [],
       send_time: s.send_time || "10:00", enabled: s.enabled !== false,
       wip: s.wip || [], mail_subject: s.mail_subject || "", mail_body: s.mail_body || "",
-      wa_to: s.wa_to || [], wa_enabled: s.wa_enabled !== false
+      wa_to: s.wa_to || [], wa_enabled: s.wa_enabled !== false,
+      prod_mail_to: s.prod_mail_to || [], prod_wa_to: s.prod_wa_to || [],
+      prod_enabled: s.prod_enabled !== false, prod_format: s.prod_format || "image"
     });
   }catch(e){
     return json(res, 500, { error: String(e.message || e) });
@@ -903,6 +985,109 @@ async function buildWheelsPdf(){
   await done;
   return Buffer.concat(chunks);
 }
+// ================= Wheels India PRODUCTION report (periods + monthly) =================
+async function wheelsProdData(){
+  const DATA_BASE = process.env.DATA_BASE || "https://raw.githubusercontent.com/BSC23609/bsc-stock-data/main";
+  const [pTxt,mTxt] = await Promise.all([
+    fetch(DATA_BASE+"/wheels_production.csv?t="+Date.now()).then(r=>r.ok?r.text():"").catch(()=>""),
+    fetch(DATA_BASE+"/wheels_production_monthly.csv?t="+Date.now()).then(r=>r.ok?r.text():"").catch(()=>"")
+  ]);
+  return { periods: parseCsvSrv(pTxt), monthly: parseCsvSrv(mTxt) };
+}
+function istYMD(){ const o={}; new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Kolkata",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(new Date()).forEach(x=>o[x.type]=x.value); return {y:+o.year,m:+o.month,d:+o.day}; }
+async function prodModel(){
+  const { periods, monthly } = await wheelsProdData();
+  const {y,m,d}=istYMD();
+  const base=new Date(Date.UTC(y,m-1,d,12));
+  const yd=new Date(base); yd.setUTCDate(base.getUTCDate()-1);
+  const lmT=new Date(base); lmT.setUTCMonth(base.getUTCMonth()-1);
+  const lmY=new Date(yd);   lmY.setUTCMonth(yd.getUTCMonth()-1);
+  const dd=x=>String(x.getUTCDate()).padStart(2,"0")+"-"+String(x.getUTCMonth()+1).padStart(2,"0")+"-"+x.getUTCFullYear();
+  const MON=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  const cols=[
+    {k:"Daily Production Qty",           t:"Today",                  s:dd(base)},
+    {k:"Yesterday Production Qty",       t:"Yesterday",              s:dd(yd)},
+    {k:"Last Month Upto Yesterday Qty",  t:"Last Mo. upto yesterday",s:dd(lmY)},
+    {k:"Monthly Production Qty",         t:"Monthly",                s:MON[base.getUTCMonth()]+"-"+base.getUTCFullYear()},
+    {k:"Yearly Production Qty",          t:"Yearly",                 s:""+base.getUTCFullYear()}
+  ];
+  const pick=t=>periods.find(r=>String(r["Production Type"]||"").toUpperCase()===t);
+  const q=(r,k)=>{ const n=parseFloat(r&&r[k]); return isNaN(n)?"":n.toFixed(3); };
+  const rows=[["Plate",pick("PLATE TOTAL")],["Strip",pick("STRIP TOTAL")],["Total",periods.find(r=>/GRAND TOTAL/i.test(r["Production Type"]||""))]]
+    .filter(x=>x[1]).map(([label,r])=>({label, cells: cols.map(c=>q(r,c.k))}));
+  const mrows=monthly.map(r=>({ month:String(r["Month With Year"]||""), qty:(parseFloat(r["Grand Production Qty"])||0).toFixed(3) }));
+  const mtot=monthly.reduce((a,r)=>a+(parseFloat(r["Grand Production Qty"])||0),0).toFixed(3);
+  const asof=new Date().toLocaleString("en-IN",{timeZone:"Asia/Kolkata",day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"});
+  return { cols, rows, mrows, mtot, asof };
+}
+function prodFontFiles(){
+  const dirs=[];
+  try{ dirs.push(path.join(process.cwd(),"api","fonts")); }catch(e){}
+  try{ dirs.push(path.join(path.dirname(fileURLToPath(import.meta.url)),"fonts")); }catch(e){}
+  for(const dir of dirs){ try{ if(fs.existsSync(path.join(dir,"DejaVuSans.ttf"))) return [path.join(dir,"DejaVuSans.ttf"), path.join(dir,"DejaVuSans-Bold.ttf")]; }catch(e){} }
+  return [];
+}
+function prodSvg(m){
+  const W=940, L=16, R=W-16, typeW=90, nC=m.cols.length, colW=(R-L-typeW)/nC;
+  const els=[]; let y=0;
+  const rect=(x,yy,w,h,fill)=>els.push(`<rect x="${x}" y="${yy}" width="${w}" height="${h}" fill="${fill}"/>`);
+  const txt=(x,yy,s,o={})=>els.push(`<text x="${x}" y="${yy}" font-family="DejaVu Sans" font-size="${o.size||12}"${o.bold?' font-weight="bold"':''} fill="${o.fill||'#222'}" text-anchor="${o.anchor||'start'}">${esc2(s)}</text>`);
+  rect(0,0,W,58,"#0e2a47");
+  txt(L,26,"Wheels India — Production Report",{size:18,bold:true,fill:"#fff"});
+  txt(L,46,"Bharat Steel (Chennai) Pvt. Ltd.  ·  Plate = MACHINE01 (MDS) · Strip = MACHINE15 (MDS) · Qty in MT",{size:10,fill:"#cfe0ef"});
+  y=58; txt(L,y+18,"As on: "+m.asof,{size:10,fill:"#445"}); y+=28;
+  rect(L,y,R-L,22,"#0e2a47"); txt(L+8,y+15,"Production — Plate / Strip",{size:12,bold:true,fill:"#fff"}); y+=22;
+  const hH=34; rect(L,y,R-L,hH,"#eef3f7"); txt(L+6,y+21,"Type",{size:10,bold:true,fill:"#1a2a3a"});
+  m.cols.forEach((c,i)=>{ const cx=L+typeW+i*colW+colW/2; txt(cx,y+14,c.t,{size:9,bold:true,fill:"#1a2a3a",anchor:"middle"}); txt(cx,y+28,c.s,{size:9,fill:"#7a8690",anchor:"middle"}); });
+  y+=hH;
+  const rH=24;
+  m.rows.forEach((r,ri)=>{ const tot=r.label==="Total"; rect(L,y,R-L,rH, tot?"#0e2a47":(ri%2?"#f7fafc":"#ffffff"));
+    txt(L+6,y+16,r.label,{size:11,bold:true,fill:tot?"#fff":"#222"});
+    r.cells.forEach((v,i)=>{ const cx=L+typeW+i*colW+colW-6; txt(cx,y+16,v,{size:11,bold:tot,fill:tot?"#fff":"#222",anchor:"end"}); }); y+=rH; });
+  y+=16;
+  const m2w=340;
+  rect(L,y,m2w,22,"#0e2a47"); txt(L+8,y+15,"Monthly Production (current year)",{size:12,bold:true,fill:"#fff"}); y+=22;
+  rect(L,y,m2w,22,"#eef3f7"); txt(L+6,y+15,"Month",{size:10,bold:true,fill:"#1a2a3a"}); txt(L+m2w-6,y+15,"Production (MT)",{size:10,bold:true,fill:"#1a2a3a",anchor:"end"}); y+=22;
+  m.mrows.forEach((r,ri)=>{ rect(L,y,m2w,20, ri%2?"#f7fafc":"#ffffff"); txt(L+6,y+14,r.month,{size:10}); txt(L+m2w-6,y+14,r.qty,{size:10,anchor:"end"}); y+=20; });
+  rect(L,y,m2w,22,"#0e2a47"); txt(L+6,y+15,"Total",{size:10,bold:true,fill:"#fff"}); txt(L+m2w-6,y+15,m.mtot,{size:10,bold:true,fill:"#fff",anchor:"end"}); y+=22;
+  y+=18; txt(L,y,"Computer-generated report — may contain mistakes.  Bharat Steel (Chennai) Pvt. Ltd. · info@bharatsteels.in",{size:8,fill:"#999"}); y+=10;
+  const H=y+6;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><rect width="${W}" height="${H}" fill="#ffffff"/>${els.join("")}</svg>`;
+}
+async function buildWheelsProdPng(){
+  let Resvg; try{ Resvg=(await import("@resvg/resvg-js")).Resvg; }catch(e){ throw new Error("resvg-js not available on server: "+e.message); }
+  const ff=prodFontFiles();
+  const svg=prodSvg(await prodModel());
+  const r=new Resvg(svg, { font:{ fontFiles:ff, loadSystemFonts: ff.length===0, defaultFontFamily:"DejaVu Sans" }, background:"#ffffff" });
+  return Buffer.from(r.render().asPng());
+}
+async function buildWheelsProdPdf(){
+  let PDFDocument; try{ PDFDocument=(await import("pdfkit")).default; }catch(e){ throw new Error("pdfkit not available on server: "+e.message); }
+  const m=await prodModel();
+  const doc=new PDFDocument({size:"A4",margin:28}); const chunks=[]; doc.on("data",c=>chunks.push(c)); const done=new Promise(r=>doc.on("end",r));
+  const L=28,R=567,W=R-L; let y=28;
+  doc.rect(L,y,W,44).fill("#0e2a47");
+  doc.fillColor("#fff").font("Helvetica-Bold").fontSize(15).text("Wheels India — Production Report",L+10,y+9);
+  doc.font("Helvetica").fontSize(8).fillColor("#cfe0ef").text("Bharat Steel (Chennai) Pvt. Ltd.  ·  Plate = MACHINE01 (MDS) · Strip = MACHINE15 (MDS) · Qty in MT",L+10,y+28,{width:W-20});
+  y+=52; doc.fillColor("#445").font("Helvetica").fontSize(9).text("As on: "+m.asof,L,y); y+=16;
+  const typeW=84, nC=m.cols.length, colW=(W-typeW)/nC;
+  doc.rect(L,y,W,18).fill("#0e2a47"); doc.fillColor("#fff").font("Helvetica-Bold").fontSize(10).text("Production — Plate / Strip",L+8,y+5,{lineBreak:false}); y+=18;
+  const hH=30; doc.rect(L,y,W,hH).fill("#eef3f7"); doc.fillColor("#1a2a3a").font("Helvetica-Bold").fontSize(8).text("Type",L+5,y+11,{lineBreak:false});
+  m.cols.forEach((c,i)=>{ const cx=L+typeW+i*colW; doc.font("Helvetica-Bold").fontSize(8).fillColor("#1a2a3a").text(c.t,cx+2,y+5,{width:colW-4,align:"center",lineBreak:false}); doc.font("Helvetica").fontSize(7).fillColor("#7a8690").text(c.s,cx+2,y+18,{width:colW-4,align:"center",lineBreak:false}); });
+  y+=hH;
+  const rH=20;
+  m.rows.forEach((r,ri)=>{ const tot=r.label==="Total"; if(tot){doc.rect(L,y,W,rH).fill("#0e2a47");} else if(ri%2){doc.rect(L,y,W,rH).fill("#f7fafc");}
+    doc.font(tot?"Helvetica-Bold":"Helvetica").fontSize(10).fillColor(tot?"#fff":"#222").text(r.label,L+5,y+6,{lineBreak:false});
+    r.cells.forEach((v,i)=>{ const cx=L+typeW+i*colW; doc.font(tot?"Helvetica-Bold":"Helvetica").fontSize(9).fillColor(tot?"#fff":"#222").text(v,cx+2,y+6,{width:colW-6,align:"right",lineBreak:false}); }); y+=rH; });
+  y+=16;
+  const m2w=300;
+  doc.rect(L,y,m2w,18).fill("#0e2a47"); doc.fillColor("#fff").font("Helvetica-Bold").fontSize(10).text("Monthly Production (current year)",L+8,y+5,{lineBreak:false}); y+=18;
+  doc.rect(L,y,m2w,18).fill("#eef3f7"); doc.fillColor("#1a2a3a").font("Helvetica-Bold").fontSize(8).text("Month",L+6,y+5,{lineBreak:false}); doc.text("Production (MT)",L,y+5,{width:m2w-6,align:"right",lineBreak:false}); y+=18;
+  m.mrows.forEach((r,ri)=>{ if(ri%2){doc.rect(L,y,m2w,16).fill("#f7fafc");} doc.font("Helvetica").fontSize(9).fillColor("#222").text(r.month,L+6,y+4,{lineBreak:false}); doc.text(r.qty,L,y+4,{width:m2w-6,align:"right",lineBreak:false}); y+=16; });
+  doc.rect(L,y,m2w,18).fill("#0e2a47"); doc.fillColor("#fff").font("Helvetica-Bold").fontSize(9).text("Total",L+6,y+5,{lineBreak:false}); doc.text(m.mtot,L,y+5,{width:m2w-6,align:"right",lineBreak:false}); y+=24;
+  doc.fillColor("#999").font("Helvetica-Oblique").fontSize(7).text("Computer-generated report — may contain mistakes. Bharat Steel (Chennai) Pvt. Ltd. · info@bharatsteels.in",L,y,{width:W});
+  doc.end(); await done; return Buffer.concat(chunks);
+}
 async function sendWheelsMail(to, cc, html, subject, attach){
   const tenant=process.env.TENANT_ID, cid=process.env.CLIENT_ID, sec=process.env.CLIENT_SECRET;
   const sender=process.env.WHEELS_SENDER || "pdqc@bharatsteels.in";
@@ -915,8 +1100,10 @@ async function sendWheelsMail(to, cc, html, subject, attach){
     toRecipients:(to||[]).map(a=>({emailAddress:{address:a}})),
     ccRecipients:(cc||[]).map(a=>({emailAddress:{address:a}})) };
   if(attach && attach.b64){
-    message.attachments=[{ "@odata.type":"#microsoft.graph.fileAttachment", name:attach.name,
-      contentType:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", contentBytes:attach.b64 }];
+    const a={ "@odata.type":"#microsoft.graph.fileAttachment", name:attach.name,
+      contentType:(attach.contentType||"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"), contentBytes:attach.b64 };
+    if(attach.cid){ a.contentId=attach.cid; a.isInline=true; }
+    message.attachments=[a];
   }
   const msg={ message, saveToSentItems:true };
   const r = await fetch(`https://graph.microsoft.com/v1.0/users/${sender}/sendMail`, {
