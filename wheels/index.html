@@ -210,22 +210,34 @@ function renderWorked(){
   }
 }
 const pnum3=v=>{const n=gnum(v);return n!==null?n.toFixed(3):'';};
-const pnum0=v=>{const n=gnum(v);return n!==null?Math.round(n).toLocaleString('en-IN'):'';};
+const pdDD=d=>{const p=n=>String(n).padStart(2,'0');return p(d.getDate())+'-'+p(d.getMonth()+1)+'-'+d.getFullYear();};
+const PMON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 function renderProdPeriods(){
   if(!PROD.length){$('prodPeriods').innerHTML='<div class="empty">No production data yet — the refresh job may not have pushed it.</div>';return;}
-  const per=[['Daily Production','Daily'],['Yesterday Production','Yesterday'],['Monthly Production','Monthly'],['Yearly Production','Yearly']];
-  let h='<div style="overflow-x:auto"><table class="x" style="border-collapse:collapse"><thead><tr><th class="l">Type</th><th class="l">Machine</th><th class="l">Grade</th>'
-    +per.map(p=>`<th>${p[1]} Qty</th><th>${p[1]} Nos</th>`).join('')+'</tr></thead><tbody>';
-  PROD.forEach(r=>{
-    const grand=/GRAND TOTAL/i.test(r['Production Type']||'');
-    const sub=!grand && (/TOTAL/i.test(r['Production Type']||'')||/TOTAL/i.test(r['Grade']||''));
-    const st=grand?'background:#0e2a47;color:#fff;font-weight:700':(sub?'background:#eef3f7;font-weight:700':'');
-    h+=`<tr style="${st}"><td class="l">${esc(r['Production Type']||'')}</td><td class="l">${esc(r['Machine Code']||'')}</td><td class="l">${esc(r['Grade']||'')}</td>`
-      +per.map(p=>`<td class="r">${pnum3(r[p[0]+' Qty'])}</td><td class="r">${pnum0(r[p[0]+' Nos'])}</td>`).join('')+'</tr>';
+  const today=new Date();
+  const yday=new Date(today); yday.setDate(today.getDate()-1);
+  const lmToday=new Date(today); lmToday.setMonth(today.getMonth()-1);
+  const lmYday=new Date(yday);   lmYday.setMonth(yday.getMonth()-1);
+  // Qty-only columns; header shows the period's date in the requested format
+  const cols=[
+    {k:'Daily Production Qty',               t:'Today',       s:pdDD(today)},
+    {k:'Yesterday Production Qty',           t:'Yesterday',   s:pdDD(yday)},
+    {k:'Last Month Upto Today Qty',          t:'Last Mo. upto today',     s:pdDD(lmToday)},
+    {k:'Last Month Upto Yesterday Qty',      t:'Last Mo. upto yesterday', s:pdDD(lmYday)},
+    {k:'Monthly Production Qty',             t:'Monthly',     s:PMON[today.getMonth()]+'-'+today.getFullYear()},
+    {k:'Yearly Production Qty',              t:'Yearly',      s:''+today.getFullYear()}
+  ];
+  const pick=t=>PROD.find(r=>(r['Production Type']||'').toUpperCase()===t);
+  const list=[['Plate',pick('PLATE TOTAL')],['Strip',pick('STRIP TOTAL')],['Total',PROD.find(r=>/GRAND TOTAL/i.test(r['Production Type']||''))]];
+  let h='<div style="overflow-x:auto"><table class="x" style="border-collapse:collapse"><thead><tr><th class="l">Type</th>'
+    +cols.map(c=>`<th>${c.t}<br><span style="font-weight:400;color:#889;text-transform:none">${c.s}</span></th>`).join('')+'</tr></thead><tbody>';
+  list.forEach(([label,r])=>{ if(!r) return;
+    const st=label==='Total'?'background:#0e2a47;color:#fff;font-weight:700':'font-weight:600';
+    h+=`<tr style="${st}"><td class="l">${label}</td>`+cols.map(c=>`<td class="r">${pnum3(r[c.k])}</td>`).join('')+'</tr>';
   });
   h+='</tbody></table></div>';
   $('prodPeriods').innerHTML=h;
-  $('prodSub').textContent='Plate = MACHINE01 (MDS) · Strip = MACHINE15 (MDS) · Qty in MT, Nos in pcs';
+  $('prodSub').textContent='Plate = MACHINE01 (MDS) · Strip = MACHINE15 (MDS) · Qty in MT';
 }
 function renderProdMonthly(){
   if(!PRODM.length){$('prodMonthly').innerHTML='<div class="empty">No monthly data yet.</div>';return;}
