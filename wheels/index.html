@@ -222,14 +222,17 @@ function renderProdPeriods(){
   const cols=[
     {k:'Daily Production Qty',               t:'Today',       s:pdDD(today)},
     {k:'Yesterday Production Qty',           t:'Yesterday',   s:pdDD(yday)},
-    {k:'Last Month Upto Yesterday Qty',      t:'Last Mo. upto yesterday', s:pdDD(lmYday)},
+    {k:'Last Month Upto Yesterday Qty',      t:'Last Month upto', s:pdDD(lmYday)},
     {k:'Monthly Production Qty',             t:'Monthly',     s:PMON[today.getMonth()]+'-'+today.getFullYear()},
     {k:'Yearly Production Qty',              t:'Yearly',      s:''+today.getFullYear()}
   ];
   const pick=t=>PROD.find(r=>(r['Production Type']||'').toUpperCase()===t);
   const list=[['Plate',pick('PLATE TOTAL')],['Strip',pick('STRIP TOTAL')],['Total',PROD.find(r=>/GRAND TOTAL/i.test(r['Production Type']||''))]];
-  let h='<div style="overflow-x:auto"><table class="x" style="border-collapse:collapse"><thead><tr><th class="l">Type</th>'
-    +cols.map(c=>`<th>${c.t}<br><span style="font-weight:400;color:#889;text-transform:none">${c.s}</span></th>`).join('')+'</tr></thead><tbody>';
+  const dw=(87/cols.length).toFixed(2);
+  let h='<div style="overflow-x:auto"><table class="x" style="width:100%;table-layout:fixed;border-collapse:collapse">'
+    +'<colgroup><col style="width:13%">'+cols.map(()=>`<col style="width:${dw}%">`).join('')+'</colgroup>'
+    +'<thead><tr><th class="l">Type</th>'
+    +cols.map(c=>`<th style="white-space:normal">${c.t}<br><span style="font-weight:400;color:#889;text-transform:none">${c.s}</span></th>`).join('')+'</tr></thead><tbody>';
   list.forEach(([label,r])=>{ if(!r) return;
     const st=label==='Total'?'background:#0e2a47;color:#fff;font-weight:700':'font-weight:600';
     h+=`<tr style="${st}"><td class="l">${label}</td>`+cols.map(c=>`<td class="r">${pnum3(r[c.k])}</td>`).join('')+'</tr>';

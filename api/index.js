@@ -1007,7 +1007,7 @@ async function prodModel(){
   const cols=[
     {k:"Daily Production Qty",           t:"Today",                  s:dd(base)},
     {k:"Yesterday Production Qty",       t:"Yesterday",              s:dd(yd)},
-    {k:"Last Month Upto Yesterday Qty",  t:"Last Mo. upto yesterday",s:dd(lmY)},
+    {k:"Last Month Upto Yesterday Qty",  t:"Last Month upto",s:dd(lmY)},
     {k:"Monthly Production Qty",         t:"Monthly",                s:MON[base.getUTCMonth()]+"-"+base.getUTCFullYear()},
     {k:"Yearly Production Qty",          t:"Yearly",                 s:""+base.getUTCFullYear()}
   ];
