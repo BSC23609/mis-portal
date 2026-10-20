@@ -1315,82 +1315,74 @@ async function dailyStockModel(){
   const PC=["Today Prime Nos","Today Defective Nos","Today Scrap Nos","Today Prime Qty","Today Defective Qty","Today Scrap Qty","Month Prime Nos","Month Defective Nos","Month Scrap Nos","Month Prime Qty","Month Defective Qty","Month Scrap Qty"];
   const prodRows=D.prod.map(r=>({ name:(r["Machine Name"]||r["Machine Code"]||""), vals:PC.map(c=>num(r[c])) }));
   const prodTot=PC.map((_,i)=>prodRows.reduce((a,r)=>a+r.vals[i],0));
-  const asof = D.meta.generated ? new Date(D.meta.generated).toLocaleString("en-IN",{day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit",timeZone:"Asia/Kolkata"}) : new Date().toLocaleString("en-IN",{timeZone:"Asia/Kolkata"});
-  return { fy, asof, coilArr, t38, salesP, jwP, purP, ownMt, jwMt, recv, disp, held, wInv, wd, whCats, whs, wt, whGrand, prodRows, prodTot };
+  const gen = D.meta.generated ? new Date(D.meta.generated) : new Date();
+  const asof = gen.toLocaleString("en-IN",{day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit",timeZone:"Asia/Kolkata"});
+  const dateDMY = gen.toLocaleDateString("en-GB",{day:"2-digit",month:"2-digit",year:"numeric",timeZone:"Asia/Kolkata"}); // DD/MM/YYYY
+  return { fy, asof, dateDMY, coilArr, t38, salesP, jwP, purP, ownMt, jwMt, recv, disp, held, wInv, wd, whCats, whs, wt, whGrand, prodRows, prodTot };
 }
 function dailyStockSvg(M){
-  const W=1180, L=16, R=W-16;
-  const els=[]; let y=0;
+  // Two-column layout (mirrors the BSC Excel pivot sheet):
+  //   LEFT  = HR Coil Stock (compact: Item | 38 | Grand Total)
+  //   RIGHT = date box, then Sales / Purchase / Warehousewise tables.
+  const W=1200, L=16, R=W-16;
+  const els=[];
   const rect=(x,yy,w,h,f)=>els.push(`<rect x="${x}" y="${yy}" width="${w}" height="${h}" fill="${f}"/>`);
-  const txt=(x,yy,s,o={})=>els.push(`<text x="${x}" y="${yy}" font-family="DejaVu Sans" font-size="${o.size||10}"${o.bold?' font-weight="bold"':''} fill="${o.fill||'#222'}" text-anchor="${o.anchor||'start'}">${esc2(s)}</text>`);
-  const cell=(c,yy,s,o)=>{ if(c.align==="r") txt(c.x+c.w-6,yy,s,{...o,anchor:"end"}); else if(c.align==="c") txt(c.x+c.w/2,yy,s,{...o,anchor:"middle"}); else txt(c.x+6,yy,s,{...o,anchor:"start"}); };
-  const place=cols=>{ let x=L; cols.forEach(c=>{ c.x=x; x+=c.w; }); return x-L; };
-  // header band
-  rect(0,0,W,52,"#0e2a47");
-  txt(L,24,"BHARAT STEEL (CHENNAI) PRIVATE LIMITED — Daily Stock Report",{size:17,bold:true,fill:"#fff"});
-  txt(L,42,"Company-wide daily stock, sales, purchase, job-work & production",{size:10,fill:"#cfe0ef"});
-  y=52; txt(R,y+16,"As on: "+M.asof,{size:10,fill:"#445",anchor:"end"}); y+=26;
-  function bar(t){ rect(L,y,R-L,20,"#2f6ea5"); txt(L+8,y+14,t,{size:11,bold:true,fill:"#fff"}); y+=20; }
-  // generic table: cols=[{t,w,align,sub}], rows=[{v:[],gt}]
-  function table(cols, rows, headH){
-    place(cols); const hH=headH||20;
-    rect(L,y,R-L,hH,"#dbeaf5");
-    cols.forEach(c=>{ if(c.sub){ txt(c.x+c.w/2,y+9,c.t,{size:8,bold:true,fill:"#1a2a3a",anchor:"middle"}); txt(c.x+c.w/2,y+hH-4,c.sub,{size:8,bold:true,fill:"#1a2a3a",anchor:"middle"}); } else cell(c,y+hH/2+4,c.t,{size:9,bold:true,fill:"#1a2a3a"}); });
+  const txt=(x,yy,s,o={})=>els.push(`<text x="${x}" y="${yy}" font-family="DejaVu Sans" font-size="${o.size||9}"${o.bold?' font-weight="bold"':''} fill="${o.fill||'#222'}" text-anchor="${o.anchor||'start'}">${esc2(s)}</text>`);
+  const put=(c,yy,s,o)=>{ if(c.align==="r") txt(c.x+c.w-5,yy,s,{...o,anchor:"end"}); else if(c.align==="c") txt(c.x+c.w/2,yy,s,{...o,anchor:"middle"}); else txt(c.x+5,yy,s,{...o,anchor:"start"}); };
+  // draw a table with its own origin x0/y0; returns the y after the table.
+  function drawTable(ox, oy, title, cols, rows, headH){
+    let x=ox; cols.forEach(c=>{ c.x=x; x+=c.w; }); const tw=x-ox; let y=oy;
+    rect(ox,y,tw,18,"#ffe08a"); txt(ox+6,y+13,title,{size:10,bold:true,fill:"#5a4500"}); y+=18;
+    const hH=headH||18; rect(ox,y,tw,hH,"#dbeaf5");
+    cols.forEach(c=>{ if(c.sub){ put(c,y+9,c.t,{size:7.5,bold:true,fill:"#1a2a3a"}); put(c,y+hH-3,c.sub,{size:7.5,bold:true,fill:"#1a2a3a"}); } else put(c,y+hH/2+3.5,c.t,{size:8.5,bold:true,fill:"#1a2a3a"}); });
     y+=hH;
-    const rH=18;
-    rows.forEach((r,ri)=>{ rect(L,y,R-L,rH, r.gt?"#dbeaf5":(ri%2?"#f7fafc":"#ffffff"));
-      cols.forEach((c,ci)=>cell(c,y+13,r.v[ci]==null?"":String(r.v[ci]),{size:9,bold:!!r.gt,fill:"#1a2233"})); y+=rH; });
+    const rH=16;
+    rows.forEach((r,ri)=>{ if(r.gt) rect(ox,y,tw,rH,"#dbeaf5"); else if(ri%2) rect(ox,y,tw,rH,"#f7fafc");
+      cols.forEach((c,ci)=>put(c,y+11,r.v[ci]==null?"":String(r.v[ci]),{size:8.5,bold:!!r.gt,fill:"#1a2233"})); y+=rH; });
+    els.push(`<rect x="${ox}" y="${oy}" width="${tw}" height="${y-oy}" fill="none" stroke="#cdd7df" stroke-width="1"/>`);
+    return y;
   }
-  function note(txtStr){ rect(L,y,R-L,20,"#f3f7fa"); txt(L+8,y+14,txtStr,{size:9,fill:"#33505f"}); y+=24; }
-  // 1. HR coil stock
-  bar("BHARAT HR COIL STOCK (Warehouse 38)");
-  table(
-    [{t:"Item",w:R-L-260,align:"l"},{t:"38",w:130,align:"r"},{t:"Grand Total",w:130,align:"r"}],
-    M.coilArr.map(([n,q])=>({v:[n,f3IN(q),f3IN(q)]})).concat([{v:["Grand Total",f3IN(M.t38),f3IN(M.t38)],gt:true}])
-  ); y+=10;
-  // pivot renderer
-  function pivot(title, P, note0){
-    bar(title);
-    if(!P.cats.length){ note("No data."); return; }
-    const gcolW=110, catW=240, mw=Math.max(58,(R-L-catW-gcolW)/Math.max(1,P.months.length));
-    const cols=[{t:"Category",w:catW,align:"l"}].concat(P.months.map(i=>({t:DS_FYMON[i],w:mw,align:"r"}))).concat([{t:"Grand Total",w:gcolW,align:"r"}]);
+  // title bar
+  rect(0,0,W,30,"#2f9fe0"); txt(W/2,20,"BHARAT STEEL (CHENNAI) PRIVATE LIMITED",{size:15,bold:true,fill:"#ffffff",anchor:"middle"});
+  const startY=44;
+  // ---- LEFT: HR coil stock ----
+  const coilCols=[{t:"Row Labels",w:250,align:"l"},{t:"38",w:90,align:"r"},{t:"Grand Total",w:100,align:"r"}];
+  const coilRows=M.coilArr.map(([n,q])=>({v:[n,f3IN(q),f3IN(q)]})).concat([{v:["Grand Total",f3IN(M.t38),f3IN(M.t38)],gt:true}]);
+  const LW=250+90+100;
+  const leftY=drawTable(L, startY, "BHARAT HR COIL STOCK (Warehouse 38 · MT)", coilCols, coilRows);
+  // ---- RIGHT column ----
+  const xR = L + LW + 30, rightW = R - xR;
+  let ry = startY;
+  rect(xR, ry, 200, 22, "#ffe08a"); txt(xR+100, ry+15, M.dateDMY, {size:12,bold:true,fill:"#5a4500",anchor:"middle"}); ry += 34;
+  function pivotCols(months, catW, grandW){
+    const mw=Math.max(46,(rightW-catW-grandW)/Math.max(1,months.length));
+    return [{t:"Row Labels",w:catW,align:"l"}].concat(months.map(i=>({t:DS_FYMON[i],w:mw,align:"r"}))).concat([{t:"Grand Total",w:grandW,align:"r"}]);
+  }
+  function pivotRows(P){
     const rows=P.cats.map(c=>{ const rt=P.months.reduce((a,i)=>a+(P.data[c][i]||0),0);
       return {v:[c].concat(P.months.map(i=>P.data[c][i]?f0IN(P.data[c][i]):"")).concat([f0IN(rt)])}; });
-    const gt={v:["Grand Total"].concat(P.months.map(i=>f0IN(P.tot[i]||0))).concat([f0IN(Object.values(P.tot).reduce((a,b)=>a+b,0))]), gt:true};
-    table(cols, rows.concat([gt]));
-    if(note0){ note(note0); } else { y+=10; }
+    rows.push({v:["Grand Total"].concat(P.months.map(i=>f0IN(P.tot[i]||0))).concat([f0IN(Object.values(P.tot).reduce((a,b)=>a+b,0))]), gt:true});
+    return rows;
   }
-  pivot("BHARAT SALES REPORT (current FY · own material, excl. job work · MT)", M.salesP);
-  pivot("JOB WORK — CUSTOMER MATERIAL PROCESSED (excluded from sales above · MT)", M.jwP,
-    `Gross (sales + job work): ${f0IN(M.ownMt+M.jwMt)} MT  =  own material ${f0IN(M.ownMt)} + job work ${f0IN(M.jwMt)}`);
-  note(`Wheels India job-work throughput (this FY):  received ${f0IN(M.recv)}  ->  processed / returned ${f0IN(M.disp)}  ->  invoiced ${f0IN(M.wInv)} MT   ·   their stock at WH45 now ${f0IN(M.held)} MT`);
-  pivot("BHARAT PURCHASE REPORT (current FY · MT)", M.purP);
-  // warehouse-wise
-  bar("WAREHOUSEWISE STOCK (MT)");
+  // Sales
+  if(M.salesP.cats.length) ry=drawTable(xR, ry, "BHARAT SALES REPORT (own material, excl. job work · MT)", pivotCols(M.salesP.months,150,80), pivotRows(M.salesP));
+  else ry=drawTable(xR, ry, "BHARAT SALES REPORT (MT)", [{t:"Row Labels",w:rightW,align:"l"}], [{v:["No data."]}]);
+  ry+=16;
+  // Purchase
+  if(M.purP.cats.length) ry=drawTable(xR, ry, "BHARAT PURCHASE REPORT (MT)", pivotCols(M.purP.months,150,80), pivotRows(M.purP));
+  else ry=drawTable(xR, ry, "BHARAT PURCHASE REPORT (MT)", [{t:"Row Labels",w:rightW,align:"l"}], [{v:["No data."]}]);
+  ry+=16;
+  // Warehousewise
   {
-    const gcolW=110, catW=240, mw=Math.max(70,(R-L-catW-gcolW)/Math.max(1,M.whs.length));
-    const cols=[{t:"Category",w:catW,align:"l"}].concat(M.whs.map(w=>({t:w,w:mw,align:"r"}))).concat([{t:"Grand Total",w:gcolW,align:"r"}]);
+    const catW=150, grandW=80, mw=Math.max(44,(rightW-catW-grandW)/Math.max(1,M.whs.length));
+    const cols=[{t:"Row Labels",w:catW,align:"l"}].concat(M.whs.map(w=>({t:w,w:mw,align:"r"}))).concat([{t:"Grand Total",w:grandW,align:"r"}]);
     const rows=M.whCats.map(c=>{ const rt=M.whs.reduce((a,w)=>a+(M.wd[c][w]||0),0);
       return {v:[c].concat(M.whs.map(w=>M.wd[c][w]?f0IN(M.wd[c][w]):"")).concat([f0IN(rt)])}; });
-    const gt={v:["Grand Total"].concat(M.whs.map(w=>f0IN(M.wt[w]||0))).concat([f0IN(M.whGrand)]), gt:true};
-    table(cols, rows.concat([gt]));
-  } y+=10;
-  // production
-  bar("PRODUCTION — TODAY & MONTH-TO-DATE (Nos = pieces · Qty in MT)");
-  {
-    const sub=["Prime Nos","Def Nos","Scrap Nos","Prime Qty","Def Qty","Scrap Qty"];
-    const mcW=180, dw=(R-L-mcW)/12;
-    const cols=[{t:"Machine",w:mcW,align:"l"}];
-    sub.forEach(s=>cols.push({t:"TODAY",sub:s,w:dw,align:"r"}));
-    sub.forEach(s=>cols.push({t:"MTD",sub:s,w:dw,align:"r"}));
-    const isNos=i=>(i%6)<3;
-    const fmtp=(v,i)=>v?(isNos(i)?f0IN(v):f3IN(v)):"";
-    const rows=M.prodRows.map(r=>({v:[r.name].concat(r.vals.map((v,i)=>fmtp(v,i)))}));
-    const gt={v:["Grand Total"].concat(M.prodTot.map((v,i)=>isNos(i)?f0IN(v):f3IN(v))), gt:true};
-    table(cols, M.prodRows.length?rows.concat([gt]):[{v:["No production entries."].concat(Array(12).fill(""))}], 30);
+    rows.push({v:["Grand Total"].concat(M.whs.map(w=>f0IN(M.wt[w]||0))).concat([f0IN(M.whGrand)]), gt:true});
+    ry=drawTable(xR, ry, "WAREHOUSEWISE STOCK (MT)", cols, rows);
   }
-  y+=14; txt(L,y,"Computer-generated report - may contain mistakes.  Bharat Steel (Chennai) Pvt. Ltd. · info@bharatsteels.in",{size:8,fill:"#999"}); y+=10;
-  const H=y+6;
+  const H=Math.max(leftY, ry)+28;
+  txt(L, H-10, "Computer-generated report - may contain mistakes.  Bharat Steel (Chennai) Pvt. Ltd. · info@bharatsteels.in  ·  As on "+M.asof, {size:8,fill:"#999"});
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><rect width="${W}" height="${H}" fill="#ffffff"/>${els.join("")}</svg>`;
 }
 async function buildDailyStockPng(){
