@@ -592,7 +592,7 @@ async function handlerWheels(req, res){
     await ensureWheelsTable();
     // GET /api/wheels?fmt=pdf  ->  the statement as a PDF (same data/structure as the email).
     // Public, no-auth: this is the URL WATI fetches for the WhatsApp document template.
-    const fmt = (req.query && req.query.fmt) || ((/[?&]fmt=(pdf|xlsx|prodpdf|prodpng|dailypng|wadiag)\b/.exec(req.url || "")) || [])[1] || "";
+    const fmt = (req.query && req.query.fmt) || ((/[?&]fmt=(pdf|xlsx|stockpng|prodpdf|prodpng|dailypng|wadiag)\b/.exec(req.url || "")) || [])[1] || "";
     if (req.method === "GET" && fmt === "pdf"){
       const pdf = await buildWheelsPdf();
       res.setHeader("Content-Type", "application/pdf");
@@ -606,6 +606,13 @@ async function handlerWheels(req, res){
       res.setHeader("Content-Disposition", 'attachment; filename="WheelsIndia_Stock_' + new Date().toISOString().slice(0,10).replace(/-/g,"") + '.xlsx"');
       res.setHeader("Cache-Control", "no-store");
       return res.status(200).end(Buffer.from(b64, "base64"));
+    }
+    if (req.method === "GET" && fmt === "stockpng"){
+      const png = await buildWheelsStockPng();
+      res.setHeader("Content-Type", "image/png");
+      res.setHeader("Content-Disposition", 'inline; filename="WheelsIndia_Stock_' + new Date().toISOString().slice(0,10).replace(/-/g,"") + '.png"');
+      res.setHeader("Cache-Control", "no-store");
+      return res.status(200).end(png);
     }
     if (req.method === "GET" && fmt === "prodpdf"){
       const pdf = await buildWheelsProdPdf();
@@ -677,11 +684,12 @@ async function handlerWheels(req, res){
         if (!nums.length) return json(res, 200, { ok: true, skipped: "no whatsapp recipients (client/management/production all empty or disabled)" });
         const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
         const sent = [];
+        const img = base + "/wheels.png";
         for (const num of nums) {
-          try { const r = await send(num, tmpl, []); sent.push({ num, ...(r || { ok: true }) }); }   // static URL buttons -> no params
+          try { const r = await send(num, tmpl, [{ name: "report", value: img }]); sent.push({ num, ...(r || { ok: true }) }); }   // image header "report" + static URL buttons
           catch (e) { sent.push({ num, error: String(e.message || e) }); }
         }
-        return json(res, 200, { ok: true, pdf: base + "/wheels.pdf", xlsx: base + "/wheels.xlsx", template: tmpl, sent });
+        return json(res, 200, { ok: true, image: img, pdf: base + "/wheels.pdf", xlsx: base + "/wheels.xlsx", template: tmpl, sent });
       }
       // WhatsApp test send (triggered from the settings page, like the email test — no CRON_SECRET).
       // Sends to wa_test_to if given, else the first saved number. Uses the same env creds/template.
@@ -696,10 +704,11 @@ async function handlerWheels(req, res){
         }
         if (!num) return json(res, 200, { ok: true, skipped: "no test number (enter one or save a number first)" });
         const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
+        const img = base + "/wheels.png";
         const sent = [];
-        try { const r = await send(num, tmpl, []); sent.push({ num, ...(r || { ok: true }) }); }   // static URL buttons -> no params
+        try { const r = await send(num, tmpl, [{ name: "report", value: img }]); sent.push({ num, ...(r || { ok: true }) }); }   // image header "report" + static URL buttons
         catch (e) { sent.push({ num, error: String(e.message || e) }); }
-        return json(res, 200, { ok: true, pdf: base + "/wheels.pdf", xlsx: base + "/wheels.xlsx", template: tmpl, sent });
+        return json(res, 200, { ok: true, image: img, pdf: base + "/wheels.pdf", xlsx: base + "/wheels.xlsx", template: tmpl, sent });
       }
       // Production WhatsApp — daily trigger (CRON_SECRET). Template WHEELS_WA_PROD_TEMPLATE, numbers from prod_wa_to,
       // media = /wheels-production.(png|pdf) per prod_format. Header variable must be named "report".
@@ -720,7 +729,7 @@ async function handlerWheels(req, res){
         const nums = [...new Set(prodSet)];
         if (!nums.length) return json(res, 200, { ok: true, skipped: "no production whatsapp recipients (management/production empty or disabled)" });
         const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
-        const url = base + (s5.prod_format === "pdf" ? "/wheels-production.pdf" : "/wheels-production.png");
+        const url = base + "/wheels-production.png"; // WhatsApp always image (template header is Image); email respects the pdf/image toggle
         const sent = [];
         for (const num of nums) { try { const r = await send(num, tmpl, [{ name: "report", value: url }]); sent.push({ num, ...(r || { ok: true }) }); } catch (e) { sent.push({ num, error: String(e.message || e) }); } }
         return json(res, 200, { ok: true, url, template: tmpl, sent });
@@ -756,7 +765,7 @@ async function handlerWheels(req, res){
         if (!num) num = (s6.prod_wa_to || []).map(String)[0] || "";
         if (!num) return json(res, 200, { ok: true, skipped: "no test number (enter one or save a number first)" });
         const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
-        const url = base + (s6.prod_format === "pdf" ? "/wheels-production.pdf" : "/wheels-production.png");
+        const url = base + "/wheels-production.png"; // WhatsApp always image
         const sent = [];
         try { const r = await send(num, tmpl, [{ name: "report", value: url }]); sent.push({ num, ...(r || { ok: true }) }); } catch (e) { sent.push({ num, error: String(e.message || e) }); }
         return json(res, 200, { ok: true, url, template: tmpl, sent });
@@ -1073,6 +1082,50 @@ async function buildWheelsPdf(){
   doc.end();
   await done;
   return Buffer.concat(chunks);
+}
+// Stock statement as a PNG (for the WhatsApp image header). Same sections/columns as the PDF/email.
+function wheelsStockSvg(rows, asof){
+  const W=960, L=16, R=W-16;
+  const SEC=[["PLATE","Plate Stock (WIP / FG)","#0e7a4b"],["STRIP","Strip / Blank Stock","#b5651d"],["COIL","Coil Stock","#1367a6"]];
+  const cols=[{k:"n",t:"#",w:26,a:"c"},{k:"mill",t:"Mill",w:64,a:"c"},{k:"grade",t:"Grade",w:120,a:"l"},{k:"thk",t:"Thk",w:52,a:"c"},{k:"wid",t:"Width",w:58,a:"c"},{k:"len",t:"Length",w:58,a:"c"},{k:"coil",t:"Coil / Batch No",w:200,a:"l"},{k:"qty",t:"Qty (MT)",w:84,a:"r"},{k:"age",t:"Age",w:40,a:"c"}];
+  const sumW=cols.reduce((a,c)=>a+c.w,0), scale=(R-L)/sumW; let cx=L; cols.forEach(c=>{ c.w*=scale; c.x=cx; cx+=c.w; });
+  const qtyCol=cols.find(c=>c.k==="qty");
+  const els=[];
+  const rect=(x,y,w,h,f)=>els.push(`<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${f}"/>`);
+  const txt=(x,y,s,o={})=>els.push(`<text x="${x}" y="${y}" font-family="DejaVu Sans" font-size="${o.size||9}"${o.bold?' font-weight="bold"':''} fill="${o.fill||'#222'}" text-anchor="${o.anchor||'start'}">${esc2(s)}</text>`);
+  const put=(c,y,s,o)=>{ if(c.a==="r") txt(c.x+c.w-5,y,s,{...o,anchor:"end"}); else if(c.a==="c") txt(c.x+c.w/2,y,s,{...o,anchor:"middle"}); else txt(c.x+5,y,s,{...o,anchor:"start"}); };
+  let y=0;
+  rect(0,0,W,58,"#0e2a47");
+  txt(L,24,"Job Work Stock Statement - Wheels India Limited",{size:16,bold:true,fill:"#fff"});
+  txt(L,44,"Bharat Steel (Chennai) Pvt. Ltd.  ·  Material held at BSC on customer's account",{size:10,fill:"#cfe0ef"});
+  y=58; txt(L,y+16,"Customer: Wheels India Limited      As on: "+asof+"      Warehouse: Job Work (WH 45)",{size:10,fill:"#445"}); y+=26;
+  let gb=0, gq=0;
+  for(const [form,title,hex] of SEC){
+    const rs=rows.filter(r=>r.form===form).sort((a,b)=>b.Quantity-a.Quantity);
+    if(!rs.length) continue;
+    const tq=rs.reduce((a,r)=>a+r.Quantity,0); gb+=rs.length; gq+=tq;
+    rect(L,y,R-L,20,hex); txt(L+8,y+14,title,{size:11,bold:true,fill:"#fff"}); txt(R-6,y+14,rs.length+" items · "+tq.toFixed(3)+" MT",{size:9,fill:"#fff",anchor:"end"}); y+=20;
+    rect(L,y,R-L,18,"#eef3f7"); cols.forEach(c=>put(c,y+12,c.t,{size:8,bold:true,fill:"#1a2a3a"})); y+=18;
+    const rH=16;
+    rs.forEach((xr,i)=>{ if(i%2) rect(L,y,R-L,rH,"#f7fafc");
+      const mill=(xr.ItemName||"").split(" ")[0];
+      const v={n:String(i+1),mill,grade:xr.Grade||"",thk:dimS(xr.Thick),wid:dimS(xr.Width),len:lenS(xr.Length),coil:(xr.CoilNo||xr.BatchNum||""),qty:xr.Quantity.toFixed(3),age:(xr.AgeDays||"")};
+      cols.forEach(c=>put(c,y+11,String(v[c.k]),{size:8,fill:"#222"})); y+=rH; });
+    rect(L,y,R-L,18,"#e7eef4"); txt(qtyCol.x-6,y+12,title+" total",{size:8.5,bold:true,fill:"#1a2233",anchor:"end"}); put(qtyCol,y+12,tq.toFixed(3),{size:8.5,bold:true,fill:"#1a2233"}); y+=22;
+  }
+  rect(L,y,R-L,24,"#0e2a47"); txt(L+10,y+16,"TOTAL MATERIAL HELD",{size:11,bold:true,fill:"#fff"}); txt(R-8,y+16,gb+" items · "+gq.toFixed(3)+" MT",{size:11,bold:true,fill:"#fff",anchor:"end"}); y+=30;
+  txt(L,y,"Computer-generated statement - may contain mistakes.  Bharat Steel (Chennai) Pvt. Ltd. · info@bharatsteels.in",{size:8,fill:"#999"}); y+=10;
+  const H=y+6;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><rect width="${W}" height="${H}" fill="#ffffff"/>${els.join("")}</svg>`;
+}
+async function buildWheelsStockPng(){
+  let Resvg; try{ Resvg=(await import("@resvg/resvg-js")).Resvg; }catch(e){ throw new Error("resvg-js not available on server: "+e.message); }
+  const ff=prodFontFiles();
+  const rows=await wheelsRows();
+  const asof=new Date().toLocaleString("en-IN",{timeZone:"Asia/Kolkata",day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"});
+  const svg=wheelsStockSvg(rows, asof);
+  const r=new Resvg(svg, { font:{ fontFiles:ff, loadSystemFonts: ff.length===0, defaultFontFamily:"DejaVu Sans" }, background:"#ffffff" });
+  return Buffer.from(r.render().asPng());
 }
 // ================= Wheels India PRODUCTION report (machine-wise, 3 sections) =================
 // Machines (MDS) in display order.
