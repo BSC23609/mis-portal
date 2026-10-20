@@ -643,6 +643,7 @@ async function handlerWheels(req, res){
         // --- env (names/booleans only, no secrets) ---
         WHEELS_WA_TEMPLATE: process.env.WHEELS_WA_TEMPLATE || null,
         WHEELS_WA_PROD_TEMPLATE: process.env.WHEELS_WA_PROD_TEMPLATE || null,
+        WHEELS_WA_DAILY_TEMPLATE: process.env.WHEELS_WA_DAILY_TEMPLATE || null,
         WATI_API_URL: !!watiBase(),
         WATI_key_present: !!watiKey(),
         CRON_SECRET_present: !!process.env.CRON_SECRET,
@@ -684,7 +685,7 @@ async function handlerWheels(req, res){
         if (!nums.length) return json(res, 200, { ok: true, skipped: "no whatsapp recipients (client/management/production all empty or disabled)" });
         const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
         const sent = [];
-        const img = base + "/wheels.png";
+        const img = base + "/wheels.png?d=" + imgStamp();
         for (const num of nums) {
           try { const r = await send(num, tmpl, [{ name: "report", value: img }]); sent.push({ num, ...(r || { ok: true }) }); }   // image header "report" + static URL buttons
           catch (e) { sent.push({ num, error: String(e.message || e) }); }
@@ -704,7 +705,7 @@ async function handlerWheels(req, res){
         }
         if (!num) return json(res, 200, { ok: true, skipped: "no test number (enter one or save a number first)" });
         const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
-        const img = base + "/wheels.png";
+        const img = base + "/wheels.png?d=" + imgStamp();
         const sent = [];
         try { const r = await send(num, tmpl, [{ name: "report", value: img }]); sent.push({ num, ...(r || { ok: true }) }); }   // image header "report" + static URL buttons
         catch (e) { sent.push({ num, error: String(e.message || e) }); }
@@ -729,7 +730,7 @@ async function handlerWheels(req, res){
         const nums = [...new Set(prodSet)];
         if (!nums.length) return json(res, 200, { ok: true, skipped: "no production whatsapp recipients (management/production empty or disabled)" });
         const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
-        const url = base + "/wheels-production.png"; // WhatsApp always image (template header is Image); email respects the pdf/image toggle
+        const url = base + "/wheels-production.png?d=" + imgStamp(); // WhatsApp always image (dated to force fresh fetch); email respects the pdf/image toggle
         const sent = [];
         for (const num of nums) { try { const r = await send(num, tmpl, [{ name: "report", value: url }]); sent.push({ num, ...(r || { ok: true }) }); } catch (e) { sent.push({ num, error: String(e.message || e) }); } }
         return json(res, 200, { ok: true, url, template: tmpl, sent });
@@ -765,7 +766,7 @@ async function handlerWheels(req, res){
         if (!num) num = (s6.prod_wa_to || []).map(String)[0] || "";
         if (!num) return json(res, 200, { ok: true, skipped: "no test number (enter one or save a number first)" });
         const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
-        const url = base + "/wheels-production.png"; // WhatsApp always image
+        const url = base + "/wheels-production.png?d=" + imgStamp(); // WhatsApp always image
         const sent = [];
         try { const r = await send(num, tmpl, [{ name: "report", value: url }]); sent.push({ num, ...(r || { ok: true }) }); } catch (e) { sent.push({ num, error: String(e.message || e) }); }
         return json(res, 200, { ok: true, url, template: tmpl, sent });
@@ -784,7 +785,7 @@ async function handlerWheels(req, res){
         const nums = [...new Set((sd.mgmt_wa_to || []).map(String).map(x => x.trim()).filter(Boolean))];
         if (!nums.length) return json(res, 200, { ok: true, skipped: "no management whatsapp recipients" });
         const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
-        const url = base + "/daily-stock.png";
+        const url = base + "/daily-stock.png?d=" + imgStamp();
         const sent = [];
         for (const num of nums) { try { const r = await send(num, tmpl, [{ name: "report", value: url }]); sent.push({ num, ...(r || { ok: true }) }); } catch (e) { sent.push({ num, error: String(e.message || e) }); } }
         return json(res, 200, { ok: true, url, template: tmpl, sent });
@@ -800,7 +801,7 @@ async function handlerWheels(req, res){
         if (!num) num = (sd.mgmt_wa_to || []).map(String)[0] || "";
         if (!num) return json(res, 200, { ok: true, skipped: "no test number (enter one or save a management number first)" });
         const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
-        const url = base + "/daily-stock.png";
+        const url = base + "/daily-stock.png?d=" + imgStamp();
         const sent = [];
         try { const r = await send(num, tmpl, [{ name: "report", value: url }]); sent.push({ num, ...(r || { ok: true }) }); } catch (e) { sent.push({ num, error: String(e.message || e) }); }
         return json(res, 200, { ok: true, url, template: tmpl, sent });
@@ -1145,6 +1146,8 @@ async function prodHolidays(){
   catch(e){ return []; }
 }
 function istYMD(){ const o={}; new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Kolkata",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(new Date()).forEach(x=>o[x.type]=x.value); return {y:+o.year,m:+o.month,d:+o.day}; }
+// daily cache-buster for WhatsApp image URLs (YYYYMMDD, IST) so Meta/WATI re-fetches a fresh image each day
+function imgStamp(){ const {y,m,d}=istYMD(); return ""+y+String(m).padStart(2,"0")+String(d).padStart(2,"0"); }
 function isoUTC(dt){ return dt.getUTCFullYear()+"-"+String(dt.getUTCMonth()+1).padStart(2,"0")+"-"+String(dt.getUTCDate()).padStart(2,"0"); }
 function ddmmUTC(dt){ return String(dt.getUTCDate()).padStart(2,"0")+"-"+String(dt.getUTCMonth()+1).padStart(2,"0")+"-"+dt.getUTCFullYear(); }
 // last working day strictly before `today`, skipping Sundays and holidays (array of 'YYYY-MM-DD').
