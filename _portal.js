@@ -5,6 +5,31 @@
   const P = window.PORTAL || {};
   const BASE = location.pathname.includes('/stock/')||location.pathname.includes('/dispatch/')||location.pathname.includes('/nmdc/')||location.pathname.includes('/wheels/') ? '..' : '.';
 
+  // ---- client-side auth gate (opt-in: the server returns gate:true only when AUTH_SECRET is set) ----
+  // Fail-open: on any network/parse error the page is shown, so auth can never hard-break the portal.
+  const GATED_MODS=['stock','wheels','dispatch','nmdc'];
+  (function authGate(){
+    const G=id=>document.getElementById(id);
+    try{ document.documentElement.style.visibility='hidden'; }catch(e){}
+    const show=()=>{ try{ document.documentElement.style.visibility=''; }catch(e){} };
+    const modOf=p=>{ for(const k of GATED_MODS){ if(p.indexOf('/'+k+'/')>=0 || p.endsWith('/'+k)) return k; } return null; };
+    fetch(BASE+'/api/auth?action=me',{credentials:'same-origin'}).then(r=>r.json()).then(d=>{
+      const path=location.pathname;
+      if(d && d.gate && !d.user){ location.replace(BASE+'/login.html?next='+encodeURIComponent(path)); return; }
+      if(d && d.gate && d.user && !d.user.admin){
+        if(path.indexOf('/users')>=0){ location.replace(BASE+'/login.html?denied=admin'); return; }
+        const mod=modOf(path); if(mod && !((d.user.modules||[]).includes(mod))){ location.replace(BASE+'/login.html?denied='+mod); return; }
+      }
+      show();
+      const u=d&&d.user; if(u){
+        const ue=G('pUser'); if(ue) ue.textContent=u.email;
+        const lo=G('pLogout'); if(lo){ lo.style.display=''; lo.onclick=()=>{ fetch(BASE+'/api/auth',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({action:'logout'})}).then(()=>location.href=BASE+'/login.html'); }; }
+        if(u.admin){ const us=G('pUsers'); if(us) us.style.display=''; }
+        else document.querySelectorAll('.pmods a[data-mod]').forEach(a=>{ const m=a.getAttribute('data-mod'); if(GATED_MODS.includes(m)&&!((u.modules||[]).includes(m))) a.style.display='none'; });
+      }
+    }).catch(()=>show());
+  })();
+
   const MODULES = [
     { id:'stock', label:'Stock', href:BASE+'/stock/daily.html', screens:[
         {id:'daily',  label:'Daily Stock Report', href:BASE+'/stock/daily.html'},
@@ -99,7 +124,7 @@
   document.head.insertAdjacentHTML('beforeend','<style>'+css+'</style>');
   if(!(P.module==='dispatch'||P.module==='nmdc')) document.body.classList.add('portalskin');
   const mod = MODULES.find(m=>m.id===P.module) || MODULES[0];
-  const modLinks = MODULES.map(m=>`<a href="${m.href}"${m.external?' target="_blank" rel="noopener"':''} class="${m.id===P.module?'on':''}">${m.label}</a>`).join('');
+  const modLinks = MODULES.map(m=>`<a data-mod="${m.id}" href="${m.href}"${m.external?' target="_blank" rel="noopener"':''} class="${m.id===P.module?'on':''}">${m.label}</a>`).join('');
   const subLinks = (mod.screens||[]).map(s=>`<a href="${s.href}" class="${s.id===P.screen?'on':''}">${s.label}</a>`).join('');
   document.body.insertAdjacentHTML('afterbegin',
     `<div class="ptop"><div class="row">
@@ -109,6 +134,9 @@
        <div class="pright">
          <span class="pstale" id="pStale" style="display:none">STALE</span>
          <span class="pstamp" id="pStamp">—</span>
+         <span class="pstamp" id="pUser"></span>
+         <a class="pbtn" id="pUsers" href="${BASE}/users.html" style="display:none">Users</a>
+         <a class="pbtn" id="pLogout" style="display:none">Logout</a>
        </div>
      </div></div>
      ${subLinks?`<div class="psub"><div class="row">${subLinks}</div></div>`:''}`);

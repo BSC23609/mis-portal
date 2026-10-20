@@ -1473,6 +1473,116 @@ async function sendWheelsMail(to, cc, html, subject, attach){
   if(r.status!==202) throw new Error("sendMail HTTP "+r.status+" "+(await r.text()).slice(0,200));
 }
 
+// ================= Portal authentication (login + admin user management) =================
+const PORTAL_MODULES = ["stock","wheels","dispatch","nmdc"];
+const AUTH_COOKIE = "bsc_session";
+const AUTH_DAYS = 7;
+function authSecret(){ return process.env.AUTH_SECRET || process.env.CRON_SECRET || ""; }
+const _b64u = buf => Buffer.from(buf).toString("base64").replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
+const _b64uToBuf = s => Buffer.from(String(s).replace(/-/g,"+").replace(/_/g,"/"), "base64");
+async function _authHmac(bodyStr, secret){
+  const key = await globalThis.crypto.subtle.importKey("raw", new TextEncoder().encode(secret), {name:"HMAC",hash:"SHA-256"}, false, ["sign"]);
+  const sig = await globalThis.crypto.subtle.sign("HMAC", key, new TextEncoder().encode(bodyStr));
+  return _b64u(new Uint8Array(sig));
+}
+async function authSign(payload){ const s=authSecret(); if(!s) return ""; const body=_b64u(new TextEncoder().encode(JSON.stringify(payload))); return body+"."+await _authHmac(body,s); }
+async function authVerify(tok){ const s=authSecret(); if(!s||!tok) return null; const [body,sig]=String(tok).split("."); if(!body||!sig) return null;
+  let exp; try{ exp=await _authHmac(body,s); }catch(e){ return null; } if(sig!==exp) return null;
+  try{ const o=JSON.parse(_b64uToBuf(body).toString("utf8")); if(o.exp && Date.now()>o.exp) return null; return o; }catch(e){ return null; } }
+function hashPw(pw){ const salt=crypto.randomBytes(16); const dk=crypto.scryptSync(String(pw),salt,32); return "scrypt$"+salt.toString("hex")+"$"+dk.toString("hex"); }
+function checkPw(pw, stored){ try{ const [,saltHex,hashHex]=String(stored).split("$"); const dk=crypto.scryptSync(String(pw),Buffer.from(saltHex,"hex"),32); const hb=Buffer.from(hashHex,"hex"); return dk.length===hb.length && crypto.timingSafeEqual(dk,hb); }catch(e){ return false; } }
+function getCookie(req, name){ const c=req.headers.cookie||""; const m=new RegExp("(?:^|; )"+name+"=([^;]+)").exec(c); return m?decodeURIComponent(m[1]):""; }
+function authCookie(token, maxAge){ return AUTH_COOKIE+"="+token+"; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age="+maxAge; }
+async function authUser(req){ return await authVerify(getCookie(req, AUTH_COOKIE)); }
+async function ensurePortalUsers(){
+  await sql`create table if not exists portal_users (
+    id serial primary key, email text unique not null, pass_hash text not null,
+    is_admin boolean default false, modules text[] default '{}',
+    reset_token text, reset_expires timestamptz,
+    created_at timestamptz default now(), updated_at timestamptz default now() )`;
+  const c = await sql`select count(*)::int n from portal_users`;
+  if ((c[0]?.n||0) === 0 && process.env.ADMIN_EMAIL && process.env.ADMIN_PASSWORD){
+    try { await sql`insert into portal_users (email, pass_hash, is_admin, modules) values (${String(process.env.ADMIN_EMAIL).toLowerCase()}, ${hashPw(process.env.ADMIN_PASSWORD)}, true, ${PORTAL_MODULES}) on conflict (email) do nothing`; } catch(e){}
+  }
+}
+async function handlerAuth(req, res){
+  if (cors(req, res)) return;
+  try{
+    await ensurePortalUsers();
+    let body = req.body; if (typeof body === "string"){ try{ body=JSON.parse(body); }catch{ body={}; } } body = body || {};
+    const action = body.action || ((/[?&]action=([^&]*)/.exec(req.url||"")||[])[1]) || (req.method==="GET"?"me":"");
+    const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
+
+    if (action === "me"){ const u=await authUser(req); return json(res,200,{ user: u ? {email:u.email, admin:!!u.admin, modules:u.modules||[]} : null, gate: !!process.env.AUTH_SECRET }); }
+
+    if (action === "login"){
+      const email=String(body.email||"").trim().toLowerCase();
+      const r=await sql`select * from portal_users where lower(email)=${email}`;
+      const u=r[0];
+      if(!u || !checkPw(body.password, u.pass_hash)) return json(res,401,{error:"Invalid email or password"});
+      const modules = u.is_admin ? PORTAL_MODULES : (u.modules||[]);
+      const tok=await authSign({uid:u.id, email:u.email, admin:!!u.is_admin, modules, exp:Date.now()+AUTH_DAYS*864e5});
+      if(!tok) return json(res,500,{error:"AUTH_SECRET not set on server"});
+      res.setHeader("Set-Cookie", authCookie(tok, AUTH_DAYS*86400));
+      return json(res,200,{ ok:true, user:{email:u.email, admin:!!u.is_admin, modules} });
+    }
+    if (action === "logout"){ res.setHeader("Set-Cookie", authCookie("", 0)); return json(res,200,{ok:true}); }
+
+    if (action === "forgot"){
+      const email=String(body.email||"").trim().toLowerCase();
+      const r=await sql`select id from portal_users where lower(email)=${email}`;
+      if(r[0]){ const token=crypto.randomBytes(24).toString("hex");
+        await sql`update portal_users set reset_token=${token}, reset_expires=${new Date(Date.now()+3600000).toISOString()} where id=${r[0].id}`;
+        const link=base+"/reset.html?token="+token;
+        try{ await sendWheelsMail([email],[],`<p>A password reset was requested for your Bharat Steel MIS portal account.</p><p><a href="${link}">Reset your password</a> (link valid for 1 hour).</p><p>If you did not request this, you can ignore this email.</p>`,"Bharat Steel MIS - Password Reset",null); }catch(e){}
+      }
+      return json(res,200,{ok:true}); // never reveal whether the email exists
+    }
+    if (action === "reset"){
+      const token=String(body.token||""); const pw=String(body.password||"");
+      if(pw.length<6) return json(res,400,{error:"Password must be at least 6 characters"});
+      const r=await sql`select id from portal_users where reset_token=${token} and reset_expires > now()`;
+      if(!r[0]) return json(res,400,{error:"Invalid or expired reset link"});
+      await sql`update portal_users set pass_hash=${hashPw(pw)}, reset_token=null, reset_expires=null, updated_at=now() where id=${r[0].id}`;
+      return json(res,200,{ok:true});
+    }
+
+    // ---- admin-only: user management ----
+    const me = await authUser(req);
+    if (action === "users_list"){
+      if(!me||!me.admin) return json(res,403,{error:"admin only"});
+      const r=await sql`select id,email,is_admin,modules,created_at from portal_users order by email`;
+      return json(res,200,{ users:r, all_modules:PORTAL_MODULES });
+    }
+    if (action === "user_save"){
+      if(!me||!me.admin) return json(res,403,{error:"admin only"});
+      const email=String(body.email||"").trim().toLowerCase(); if(!email) return json(res,400,{error:"Email is required"});
+      const admin=!!body.admin;
+      const modules=Array.isArray(body.modules)?body.modules.filter(m=>PORTAL_MODULES.includes(m)):[];
+      try{
+        if(body.id){
+          if(body.password) await sql`update portal_users set email=${email}, is_admin=${admin}, modules=${modules}, pass_hash=${hashPw(String(body.password))}, updated_at=now() where id=${body.id}`;
+          else              await sql`update portal_users set email=${email}, is_admin=${admin}, modules=${modules}, updated_at=now() where id=${body.id}`;
+        } else {
+          if(!body.password) return json(res,400,{error:"Password is required for a new user"});
+          await sql`insert into portal_users (email, pass_hash, is_admin, modules) values (${email}, ${hashPw(String(body.password))}, ${admin}, ${modules})`;
+        }
+      }catch(e){ if(String(e.message||e).includes("duplicate")) return json(res,400,{error:"That email already exists"}); throw e; }
+      return json(res,200,{ok:true});
+    }
+    if (action === "user_delete"){
+      if(!me||!me.admin) return json(res,403,{error:"admin only"});
+      if(+body.id === +me.uid) return json(res,400,{error:"You can't delete your own account"});
+      const admins=await sql`select count(*)::int n from portal_users where is_admin=true`;
+      const target=await sql`select is_admin from portal_users where id=${body.id}`;
+      if(target[0]?.is_admin && (admins[0]?.n||0)<=1) return json(res,400,{error:"Can't delete the last admin"});
+      await sql`delete from portal_users where id=${body.id}`;
+      return json(res,200,{ok:true});
+    }
+    return json(res,400,{error:"unknown action"});
+  }catch(e){ return json(res,500,{error:String(e.message||e)}); }
+}
+
 // _router.js
 async function handler5(req, res) {
   const url = req.url || "";
@@ -1482,6 +1592,7 @@ async function handler5(req, res) {
   if (route === "dispatch") return handler(req, res);
   if (route === "sync") return handler2(req, res);
   if (route === "wheels") return handlerWheels(req, res);
+  if (route === "auth") return handlerAuth(req, res);
   res.setHeader("Cache-Control", "no-store");
   res.status(404).json({ error: "unknown route: " + route });
 }
