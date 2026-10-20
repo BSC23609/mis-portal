@@ -33,7 +33,7 @@
 
   <div class="tabbar">
     <button class="tabbtn active" id="tabbtn-stock" onclick="showTab('stock')">Stock Statement</button>
-    <button class="tabbtn" id="tabbtn-prod" onclick="showTab('prod')">Production</button>
+    <button class="tabbtn" id="tabbtn-prod" onclick="showTab('prod')">Production Report</button>
   </div>
 
   <div id="tabStock">
@@ -78,12 +78,20 @@
   </div><!-- /tabStock -->
 
   <div id="tabProd" style="display:none">
+    <div class="toolbar"><div class="sp">
+      <button class="pbtn" style="background:var(--blue);border-color:var(--blue)" onclick="window.print()">Print / Save PDF</button>
+      <a class="pbtn" style="background:var(--blue);border-color:var(--blue);text-decoration:none" href="settings.html">Settings</a>
+    </div></div>
     <div class="card">
-      <h3>Production — Wheels India <span class="r" id="prodSub"></span></h3>
-      <div class="tblwrap" id="prodPeriods"></div>
+      <h3>Total Production Report <span class="r" id="prodRepSub"></span></h3>
+      <div class="tblwrap" id="prodTotal"></div>
     </div>
     <div class="card">
-      <h3>Monthly production <span class="r">current year · MT</span></h3>
+      <h3>Wheels India Production Report <span class="r">WIR grades · MT</span></h3>
+      <div class="tblwrap" id="prodWheels"></div>
+    </div>
+    <div class="card">
+      <h3>Wheels India Monthly Production Report <span class="r">current year · MT</span></h3>
       <div class="tblwrap" id="prodMonthly"></div>
     </div>
   </div>
@@ -94,7 +102,7 @@
 <script>
 const SEC=[['COIL','Coil Stock','#1367a6'],['PLATE','Plate Stock (WIP / FG)','#0e7a4b'],['STRIP','Strip / Blank Stock','#b5651d'],['SCRAP','Scrap','#8a1c1c']];
 const SMALL_PLATE=0.1, SMALL_STRIP=0.011;   // plate below 0.1 MT & strip below 0.011 MT hidden when the filter is on
-let ROWS=[], META={}, WORKED=[], PROD=[], PRODM=[];
+let ROWS=[], META={}, WORKED=[], PRODDAILY=[], HOLIDAYS=[];
 function showTab(t){
   $('tabStock').style.display = t==='prod'?'none':'';
   $('tabProd').style.display  = t==='prod'?'':'none';
@@ -129,14 +137,14 @@ async function load(){
   catch(e){ $('hideSmall').checked = true; }
   try{
     const b='?t='+Date.now();
-    const [csv,wk,prod,prodm] = await Promise.all([
+    const [csv,wk,pday,setJson] = await Promise.all([
       fetch(DATA_BASE+'/wheels_stock.csv'+b).then(r=>{if(!r.ok)throw 0;return r.text();}),
       fetch(DATA_BASE+'/wheels_worked.csv'+b).then(r=>r.ok?r.text():'').catch(()=>''),
-      fetch(DATA_BASE+'/wheels_production.csv'+b).then(r=>r.ok?r.text():'').catch(()=>''),
-      fetch(DATA_BASE+'/wheels_production_monthly.csv'+b).then(r=>r.ok?r.text():'').catch(()=>'')
+      fetch(DATA_BASE+'/wheels_proddaily.csv'+b).then(r=>r.ok?r.text():'').catch(()=>''),
+      fetch(BASE+'/api/wheels?route=settings'+b).then(r=>r.ok?r.json():{}).catch(()=>({}))
     ]);
     WORKED=parseCSV(wk).map(r=>({Brand:brandNorm(r.Brand),Yr:+r.Yr,Mth:+r.Mth,Qty:gnum(r.Qty)||0}));
-    PROD=parseCSV(prod); PRODM=parseCSV(prodm);
+    PRODDAILY=parseCSV(pday); HOLIDAYS=(setJson&&setJson.holidays)||[];
     ROWS=parseCSV(csv).map(r=>({...r,Quantity:gnum(r.Quantity)||0,form:formOf(r.ItemName)}));
     const metaRaw=await fetch(DATA_BASE+'/wheels_meta.json'+b).then(r=>r.ok?r.json():{}).catch(()=>({}));
     META=metaRaw; setStamp(META.generated);
@@ -209,45 +217,47 @@ function renderWorked(){
       </tbody></table></div>`;
   }
 }
-const pnum3=v=>{const n=gnum(v);return n!==null?n.toFixed(3):'';};
-const pdDD=d=>{const p=n=>String(n).padStart(2,'0');return p(d.getDate())+'-'+p(d.getMonth()+1)+'-'+d.getFullYear();};
 const PMON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-function renderProdPeriods(){
-  if(!PROD.length){$('prodPeriods').innerHTML='<div class="empty">No production data yet — the refresh job may not have pushed it.</div>';return;}
-  const today=new Date();
-  const yday=new Date(today); yday.setDate(today.getDate()-1);
-  const lmToday=new Date(today); lmToday.setMonth(today.getMonth()-1);
-  const lmYday=new Date(yday);   lmYday.setMonth(yday.getMonth()-1);
-  // Qty-only columns; header shows the period's date in the requested format
-  const cols=[
-    {k:'Daily Production Qty',               t:'Today',       s:pdDD(today)},
-    {k:'Yesterday Production Qty',           t:'Yesterday',   s:pdDD(yday)},
-    {k:'Last Month Upto Yesterday Qty',      t:'Last Month upto', s:pdDD(lmYday)},
-    {k:'Monthly Production Qty',             t:'Monthly',     s:PMON[today.getMonth()]+'-'+today.getFullYear()},
-    {k:'Yearly Production Qty',              t:'Yearly',      s:''+today.getFullYear()}
-  ];
-  const pick=t=>PROD.find(r=>(r['Production Type']||'').toUpperCase()===t);
-  const list=[['Plate',pick('PLATE TOTAL')],['Strip',pick('STRIP TOTAL')],['Total',PROD.find(r=>/GRAND TOTAL/i.test(r['Production Type']||''))]];
-  const dw=(87/cols.length).toFixed(2);
-  let h='<div style="overflow-x:auto"><table class="x" style="width:100%;table-layout:fixed;border-collapse:collapse">'
-    +'<colgroup><col style="width:13%">'+cols.map(()=>`<col style="width:${dw}%">`).join('')+'</colgroup>'
-    +'<thead><tr><th class="l">Type</th>'
-    +cols.map(c=>`<th style="white-space:normal">${c.t}<br><span style="font-weight:400;color:#889;text-transform:none">${c.s}</span></th>`).join('')+'</tr></thead><tbody>';
-  list.forEach(([label,r])=>{ if(!r) return;
-    const st=label==='Total'?'background:#0e2a47;color:#fff;font-weight:700':'font-weight:600';
-    h+=`<tr style="${st}"><td class="l">${label}</td>`+cols.map(c=>`<td class="r">${pnum3(r[c.k])}</td>`).join('')+'</tr>';
-  });
-  h+='</tbody></table></div>';
-  $('prodPeriods').innerHTML=h;
-  $('prodSub').textContent='Plate = MACHINE01 (MDS) · Strip = MACHINE15 (MDS) · Qty in MT';
+const PMACHS=[['MACHINE02 (MDS)','CTL 01-06 MM (MDS)'],['MACHINE01 (MDS)','CTL 6-25 MM (MDS)'],['MACHINE15 (MDS)','Shearing 06-25 MM (MDS)']];
+const isoL=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+const ddmmL=d=>String(d.getDate()).padStart(2,'0')+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+d.getFullYear();
+const pf=n=>{n=Math.round(n*1000)/1000;return n===0?'0':n.toFixed(3).replace(/\.?0+$/,'');};
+// last working day strictly before today, skipping Sundays + holidays
+function lastWD(hol){const h=new Set((hol||[]).map(s=>String(s).slice(0,10)));let b=new Date();b.setHours(12,0,0,0);do{b.setDate(b.getDate()-1);}while(b.getDay()===0||h.has(isoL(b)));return b;}
+function ptable(headers,rows,grand){
+  let h='<div style="overflow-x:auto"><table class="x" style="width:100%;border-collapse:collapse"><thead><tr>';
+  h+=`<th class="l">${esc(headers[0])}</th>`;
+  for(let i=1;i<headers.length;i++) h+=`<th style="white-space:normal">${esc(headers[i])}</th>`;
+  h+='</tr></thead><tbody>';
+  rows.forEach(r=>{ h+=`<tr><td class="l" style="border-top:1px solid #eef1f3;padding:5px 10px">${esc(r.label)}</td>`+r.vals.map(v=>`<td class="r" style="border-top:1px solid #eef1f3;padding:5px 10px">${v}</td>`).join('')+'</tr>'; });
+  h+=`<tr style="background:#0e2a47;color:#fff;font-weight:700"><td class="l" style="color:#fff;padding:6px 10px">${esc(grand.label)}</td>`+grand.vals.map(v=>`<td class="r" style="padding:6px 10px">${v}</td>`).join('')+'</tr>';
+  return h+'</tbody></table></div>';
 }
-function renderProdMonthly(){
-  if(!PRODM.length){$('prodMonthly').innerHTML='<div class="empty">No monthly data yet.</div>';return;}
-  let tot=0, h='<table class="x" style="width:100%;border-collapse:collapse"><thead><tr><th class="l">Month</th><th>Production (MT)</th></tr></thead><tbody>';
-  PRODM.forEach(r=>{const q=gnum(r['Grand Production Qty'])||0;tot+=q;
-    h+=`<tr><td class="l" style="border-top:1px solid #eef1f3;padding:5px 10px">${esc(r['Month With Year']||'')}</td><td class="r" style="border-top:1px solid #eef1f3;padding:5px 10px">${q.toFixed(3)}</td></tr>`;});
-  h+=`<tr><td style="border-top:2px solid #333;font-weight:700;padding:6px 10px">Total</td><td class="r" style="border-top:2px solid #333;font-weight:700;padding:6px 10px">${tot.toFixed(3)}</td></tr></tbody></table>`;
-  $('prodMonthly').innerHTML=h;
+function renderProdReport(){
+  if(!PRODDAILY.length){ $('prodTotal').innerHTML='<div class="empty">No production data yet — the refresh job may not have pushed it.</div>'; $('prodWheels').innerHTML=''; $('prodMonthly').innerHTML=''; $('prodRepSub').textContent=''; return; }
+  const R=PRODDAILY.map(r=>({ds:String(r['Date']||'').slice(0,10),mc:String(r['Machine']||'').trim(),tot:gnum(r['Total Qty'])||0,wh:gnum(r['Wheels Qty'])||0})).filter(r=>/^\d{4}-\d{2}-\d{2}$/.test(r.ds));
+  const base=lastWD(HOLIDAYS), bISO=isoL(base), bY=base.getFullYear(), bM=base.getMonth(), bD=base.getDate();
+  const monStart=isoL(new Date(bY,bM,1)), yrStart=isoL(new Date(bY,0,1));
+  let ly=bY,lmo=bM-1; if(lmo<0){lmo=11;ly--;}
+  const dim=new Date(ly,lmo+1,0).getDate(), lmDay=Math.min(bD,dim);
+  const lmStart=isoL(new Date(ly,lmo,1)), lmEndDt=new Date(ly,lmo,lmDay), lmEnd=isoL(lmEndDt);
+  const sum=(fld,mc,from,to)=>R.reduce((a,r)=>{ if(mc&&r.mc!==mc)return a; if(from&&r.ds<from)return a; if(to&&r.ds>to)return a; return a+r[fld]; },0);
+  const onL='Production on '+ddmmL(base), monL=PMON[bM]+' '+bY+' upto '+ddmmL(base), lmL='Last month upto '+ddmmL(lmEndDt), yrL='This Year upto '+ddmmL(base);
+  // Section A — total (all grades)
+  let tg=[0,0,0];
+  const trows=PMACHS.map(([c,nm])=>{const on=sum('tot',c,bISO,bISO),mo=sum('tot',c,monStart,bISO),lm=sum('tot',c,lmStart,lmEnd);tg[0]+=on;tg[1]+=mo;tg[2]+=lm;return{label:nm,vals:[pf(on),pf(mo),pf(lm)]};});
+  $('prodTotal').innerHTML=ptable(['Machine',onL,monL,lmL],trows,{label:'GRAND TOTAL',vals:tg.map(pf)});
+  // Section B — Wheels India (WIR grades)
+  let wg=[0,0,0,0];
+  const wrows=PMACHS.map(([c,nm])=>{const on=sum('wh',c,bISO,bISO),mo=sum('wh',c,monStart,bISO),lm=sum('wh',c,lmStart,lmEnd),yr=sum('wh',c,yrStart,bISO);wg[0]+=on;wg[1]+=mo;wg[2]+=lm;wg[3]+=yr;return{label:nm,vals:[pf(on),pf(mo),pf(lm),pf(yr)]};});
+  $('prodWheels').innerHTML=ptable(['Machine',onL,monL,lmL,yrL],wrows,{label:'GRAND TOTAL',vals:wg.map(pf)});
+  // Section C — Wheels India monthly (WIR)
+  const mset=R.filter(r=>r.wh!==0&&r.ds>=yrStart).map(r=>+r.ds.slice(5,7));
+  let firstM=mset.length?Math.min(...mset):(bM+1);
+  let mg=[0,0,0], mgt=0; const mrows=[];
+  for(let mm=firstM;mm<=bM+1;mm++){ const from=isoL(new Date(bY,mm-1,1)), to=isoL(new Date(bY,mm,0)); const c=PMACHS.map(([cc])=>sum('wh',cc,from,to)); const t=c.reduce((a,b)=>a+b,0); c.forEach((v,i)=>mg[i]+=v); mgt+=t; mrows.push({label:PMON[mm-1]+' '+bY,vals:[...c.map(pf),pf(t)]}); }
+  $('prodMonthly').innerHTML=ptable(['Month',PMACHS[0][1],PMACHS[1][1],PMACHS[2][1],'Total'],mrows,{label:'TOTAL',vals:[...mg.map(pf),pf(mgt)]});
+  $('prodRepSub').textContent='Machine-wise · Qty in MT · as on '+ddmmL(base);
 }
 function draw(){
   const {html,gb,gq}=sectionTable(viewRows());
@@ -261,7 +271,7 @@ function draw(){
     <div class="sgt"><span>TOTAL MATERIAL HELD</span><span>${gb} items · ${gq.toFixed(3)} MT</span></div>
     <div class="sfoot"><b>Bharat Steel (Chennai) Pvt. Ltd.</b> · No.147, Survey No.133, Thirunilai Village, Ponneri Taluk, Chennai 600103 · 044 6791 7800 · info@bharatsteels.in<br>
       System-generated statement of your material held at BSC as on the date/time shown. Figures drawn live from our ERP. For queries contact your account manager.</div>`;
-  renderByBrand(); renderWorked(); renderProdPeriods(); renderProdMonthly();
+  renderByBrand(); renderWorked(); renderProdReport();
 }
 load().then(()=>{ try{ showTab(localStorage.getItem('wheelsTab')||'stock'); }catch(e){ showTab('stock'); } });
 </script>

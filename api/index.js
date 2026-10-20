@@ -580,6 +580,7 @@ async function ensureWheelsTable(){
   await sql`alter table wheels_settings add column if not exists prod_wa_to text[] default '{}'`;
   await sql`alter table wheels_settings add column if not exists prod_enabled boolean default true`;
   await sql`alter table wheels_settings add column if not exists prod_format text default 'image'`;
+  await sql`alter table wheels_settings add column if not exists holidays text[] default '{}'`;
 }
 async function handlerWheels(req, res){
   if (cors(req, res)) return;
@@ -587,7 +588,7 @@ async function handlerWheels(req, res){
     await ensureWheelsTable();
     // GET /api/wheels?fmt=pdf  ->  the statement as a PDF (same data/structure as the email).
     // Public, no-auth: this is the URL WATI fetches for the WhatsApp document template.
-    const fmt = (req.query && req.query.fmt) || ((/[?&]fmt=(pdf|xlsx|prodpdf|prodpng)\b/.exec(req.url || "")) || [])[1] || "";
+    const fmt = (req.query && req.query.fmt) || ((/[?&]fmt=(pdf|xlsx|prodpdf|prodpng|wadiag)\b/.exec(req.url || "")) || [])[1] || "";
     if (req.method === "GET" && fmt === "pdf"){
       const pdf = await buildWheelsPdf();
       res.setHeader("Content-Type", "application/pdf");
@@ -618,13 +619,25 @@ async function handlerWheels(req, res){
     }
     // Diagnostic: which WhatsApp env vars does this deployment actually see? (names/booleans only, no secrets)
     if (req.method === "GET" && fmt === "wadiag"){
+      let st = {};
+      try { const dr = await sql`select wa_to, wa_enabled, prod_wa_to, prod_enabled, prod_format, holidays from wheels_settings where id=1`; st = dr[0] || {}; } catch(e){ st = { _err:String(e.message||e) }; }
       return json(res, 200, {
+        // --- env (names/booleans only, no secrets) ---
         WHEELS_WA_TEMPLATE: process.env.WHEELS_WA_TEMPLATE || null,
+        WHEELS_WA_PROD_TEMPLATE: process.env.WHEELS_WA_PROD_TEMPLATE || null,
         WATI_API_URL: !!watiBase(),
         WATI_key_present: !!watiKey(),
         CRON_SECRET_present: !!process.env.CRON_SECRET,
         wati_url_names: { WATI_API_URL: !!process.env.WATI_API_URL, WATI_ENDPOINT: !!process.env.WATI_ENDPOINT, WATI_BASE_URL: !!process.env.WATI_BASE_URL },
-        wati_key_names: { WATI_API_KEY: !!process.env.WATI_API_KEY, WATI_ACCESS_TOKEN: !!process.env.WATI_ACCESS_TOKEN, WATI_TOKEN: !!process.env.WATI_TOKEN }
+        wati_key_names: { WATI_API_KEY: !!process.env.WATI_API_KEY, WATI_ACCESS_TOKEN: !!process.env.WATI_ACCESS_TOKEN, WATI_TOKEN: !!process.env.WATI_TOKEN },
+        // --- live settings the daily trigger reads (this is what decides whether it actually sends) ---
+        stock_wa_enabled: st.wa_enabled !== false,
+        stock_wa_numbers: (st.wa_to || []).length,
+        prod_enabled: st.prod_enabled !== false,
+        prod_wa_numbers: (st.prod_wa_to || []).length,
+        prod_format: st.prod_format || "image",
+        holidays_count: (st.holidays || []).length,
+        settings_error: st._err || null
       });
     }
     if (req.method === "POST"){
@@ -740,6 +753,7 @@ async function handlerWheels(req, res){
       if (Array.isArray(body.prod_wa_to)) await sql`update wheels_settings set prod_wa_to=${body.prod_wa_to.map(String)} where id=1`;
       if (typeof body.prod_enabled === "boolean") await sql`update wheels_settings set prod_enabled=${body.prod_enabled} where id=1`;
       if (body.prod_format==="pdf"||body.prod_format==="image") await sql`update wheels_settings set prod_format=${body.prod_format} where id=1`;
+      if (Array.isArray(body.holidays)) await sql`update wheels_settings set holidays=${body.holidays.map(s=>String(s).slice(0,10)).filter(s=>/^\d{4}-\d{2}-\d{2}$/.test(s))} where id=1`;
       // test send: render from the last CSV and email to the given address (or configured To)
       if (body.send) {
         const rows = await sql`select mail_to, mail_cc from wheels_settings where id=1`;
@@ -765,7 +779,7 @@ async function handlerWheels(req, res){
       await sql`update wheels_settings set updated_at=now() where id=1`;
       return json(res, 200, { ok: true });
     }
-    const rows = await sql`select mail_to, mail_cc, send_time, enabled, wip, mail_subject, mail_body, wa_to, wa_enabled, prod_mail_to, prod_wa_to, prod_enabled, prod_format from wheels_settings where id=1`;
+    const rows = await sql`select mail_to, mail_cc, send_time, enabled, wip, mail_subject, mail_body, wa_to, wa_enabled, prod_mail_to, prod_wa_to, prod_enabled, prod_format, holidays from wheels_settings where id=1`;
     const s = rows[0] || {};
     return json(res, 200, {
       mail_to: s.mail_to || [], mail_cc: s.mail_cc || [],
@@ -773,7 +787,8 @@ async function handlerWheels(req, res){
       wip: s.wip || [], mail_subject: s.mail_subject || "", mail_body: s.mail_body || "",
       wa_to: s.wa_to || [], wa_enabled: s.wa_enabled !== false,
       prod_mail_to: s.prod_mail_to || [], prod_wa_to: s.prod_wa_to || [],
-      prod_enabled: s.prod_enabled !== false, prod_format: s.prod_format || "image"
+      prod_enabled: s.prod_enabled !== false, prod_format: s.prod_format || "image",
+      holidays: s.holidays || []
     });
   }catch(e){
     return json(res, 500, { error: String(e.message || e) });
@@ -985,40 +1000,87 @@ async function buildWheelsPdf(){
   await done;
   return Buffer.concat(chunks);
 }
-// ================= Wheels India PRODUCTION report (periods + monthly) =================
+// ================= Wheels India PRODUCTION report (machine-wise, 3 sections) =================
+// Machines (MDS) in display order.
+const PROD_MACHS=[
+  {code:"MACHINE02 (MDS)", name:"CTL 01-06 MM (MDS)"},
+  {code:"MACHINE01 (MDS)", name:"CTL 6-25 MM (MDS)"},
+  {code:"MACHINE15 (MDS)", name:"Shearing 06-25 MM (MDS)"}
+];
+const PROD_MON=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 async function wheelsProdData(){
   const DATA_BASE = process.env.DATA_BASE || "https://raw.githubusercontent.com/BSC23609/bsc-stock-data/main";
-  const [pTxt,mTxt] = await Promise.all([
-    fetch(DATA_BASE+"/wheels_production.csv?t="+Date.now()).then(r=>r.ok?r.text():"").catch(()=>""),
-    fetch(DATA_BASE+"/wheels_production_monthly.csv?t="+Date.now()).then(r=>r.ok?r.text():"").catch(()=>"")
-  ]);
-  return { periods: parseCsvSrv(pTxt), monthly: parseCsvSrv(mTxt) };
+  const txt = await fetch(DATA_BASE+"/wheels_proddaily.csv?t="+Date.now()).then(r=>r.ok?r.text():"").catch(()=>"");
+  return parseCsvSrv(txt); // rows: Date(YYYY-MM-DD), Machine, Machine Name, Total Qty, Wheels Qty
+}
+async function prodHolidays(){
+  try{ const r=await sql`select holidays from wheels_settings where id=1`; return (r[0] && r[0].holidays) || []; }
+  catch(e){ return []; }
 }
 function istYMD(){ const o={}; new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Kolkata",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(new Date()).forEach(x=>o[x.type]=x.value); return {y:+o.year,m:+o.month,d:+o.day}; }
-async function prodModel(){
-  const { periods, monthly } = await wheelsProdData();
+function isoUTC(dt){ return dt.getUTCFullYear()+"-"+String(dt.getUTCMonth()+1).padStart(2,"0")+"-"+String(dt.getUTCDate()).padStart(2,"0"); }
+function ddmmUTC(dt){ return String(dt.getUTCDate()).padStart(2,"0")+"-"+String(dt.getUTCMonth()+1).padStart(2,"0")+"-"+dt.getUTCFullYear(); }
+// last working day strictly before `today`, skipping Sundays and holidays (array of 'YYYY-MM-DD').
+function lastWorkingDay(y,m,d,holidays){
+  const hol=new Set((holidays||[]).map(s=>String(s).slice(0,10)));
+  let b=new Date(Date.UTC(y,m-1,d,12));
+  do{ b.setUTCDate(b.getUTCDate()-1); } while(b.getUTCDay()===0 || hol.has(isoUTC(b)));
+  return b;
+}
+async function prodModel(holidays){
+  const rows = await wheelsProdData();
+  if(holidays===undefined) holidays = await prodHolidays();
   const {y,m,d}=istYMD();
-  const base=new Date(Date.UTC(y,m-1,d,12));
-  const yd=new Date(base); yd.setUTCDate(base.getUTCDate()-1);
-  const lmT=new Date(base); lmT.setUTCMonth(base.getUTCMonth()-1);
-  const lmY=new Date(yd);   lmY.setUTCMonth(yd.getUTCMonth()-1);
-  const dd=x=>String(x.getUTCDate()).padStart(2,"0")+"-"+String(x.getUTCMonth()+1).padStart(2,"0")+"-"+x.getUTCFullYear();
-  const MON=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-  const cols=[
-    {k:"Daily Production Qty",           t:"Today",                  s:dd(base)},
-    {k:"Yesterday Production Qty",       t:"Yesterday",              s:dd(yd)},
-    {k:"Last Month Upto Yesterday Qty",  t:"Last Month upto",s:dd(lmY)},
-    {k:"Monthly Production Qty",         t:"Monthly",                s:MON[base.getUTCMonth()]+"-"+base.getUTCFullYear()},
-    {k:"Yearly Production Qty",          t:"Yearly",                 s:""+base.getUTCFullYear()}
-  ];
-  const pick=t=>periods.find(r=>String(r["Production Type"]||"").toUpperCase()===t);
-  const q=(r,k)=>{ const n=parseFloat(r&&r[k]); return isNaN(n)?"":n.toFixed(3); };
-  const rows=[["Plate",pick("PLATE TOTAL")],["Strip",pick("STRIP TOTAL")],["Total",periods.find(r=>/GRAND TOTAL/i.test(r["Production Type"]||""))]]
-    .filter(x=>x[1]).map(([label,r])=>({label, cells: cols.map(c=>q(r,c.k))}));
-  const mrows=monthly.map(r=>({ month:String(r["Month With Year"]||""), qty:(parseFloat(r["Grand Production Qty"])||0).toFixed(3) }));
-  const mtot=monthly.reduce((a,r)=>a+(parseFloat(r["Grand Production Qty"])||0),0).toFixed(3);
+  const base=lastWorkingDay(y,m,d,holidays);
+  const baseISO=isoUTC(base);
+  const bY=base.getUTCFullYear(), bM=base.getUTCMonth(), bD=base.getUTCDate();
+  const monStart=isoUTC(new Date(Date.UTC(bY,bM,1,12)));
+  const yrStart =isoUTC(new Date(Date.UTC(bY,0,1,12)));
+  let ly=bY, lmo=bM-1; if(lmo<0){ lmo=11; ly--; }
+  const dim=new Date(Date.UTC(ly,lmo+1,0,12)).getUTCDate();
+  const lmDay=Math.min(bD,dim);
+  const lmStart=isoUTC(new Date(Date.UTC(ly,lmo,1,12)));
+  const lmEndDt=new Date(Date.UTC(ly,lmo,lmDay,12));
+  const lmEnd=isoUTC(lmEndDt);
+  // parse rows once
+  const R=rows.map(r=>({ ds:String(r["Date"]||"").slice(0,10), mc:String(r["Machine"]||"").trim(),
+                         tot:parseFloat(r["Total Qty"])||0, wh:parseFloat(r["Wheels Qty"])||0 }))
+              .filter(r=>/^\d{4}-\d{2}-\d{2}$/.test(r.ds));
+  const sum=(fld,mc,from,to)=>R.reduce((a,r)=>{ if(mc&&r.mc!==mc)return a; if(from&&r.ds<from)return a; if(to&&r.ds>to)return a; return a+r[fld]; },0);
+  const fmt=n=>{ n=Math.round(n*1000)/1000; return n===0?"0":n.toFixed(3).replace(/\.?0+$/,""); };
+  // Section A: Total production (all grades) by machine
+  const total={rows:[],grand:{on:0,mon:0,lm:0}};
+  PROD_MACHS.forEach(mo=>{
+    const on=sum("tot",mo.code,baseISO,baseISO), mon=sum("tot",mo.code,monStart,baseISO), lm=sum("tot",mo.code,lmStart,lmEnd);
+    total.rows.push({name:mo.name,on,mon,lm}); total.grand.on+=on; total.grand.mon+=mon; total.grand.lm+=lm;
+  });
+  // Section B: Wheels India production (WIR grades) by machine
+  const wheels={rows:[],grand:{on:0,mon:0,lm:0,yr:0}};
+  PROD_MACHS.forEach(mo=>{
+    const on=sum("wh",mo.code,baseISO,baseISO), mon=sum("wh",mo.code,monStart,baseISO),
+          lm=sum("wh",mo.code,lmStart,lmEnd), yr=sum("wh",mo.code,yrStart,baseISO);
+    wheels.rows.push({name:mo.name,on,mon,lm,yr}); wheels.grand.on+=on; wheels.grand.mon+=mon; wheels.grand.lm+=lm; wheels.grand.yr+=yr;
+  });
+  // Section C: Wheels India monthly (WIR) — month x machine
+  const monthsWithData=R.filter(r=>r.wh!==0 && r.ds>=yrStart).map(r=>+r.ds.slice(5,7));
+  let firstM=monthsWithData.length?Math.min(...monthsWithData):(bM+1);
+  const monthly={rows:[],grand:{c:[0,0,0],tot:0}};
+  for(let mm=firstM; mm<=bM+1; mm++){
+    const from=isoUTC(new Date(Date.UTC(bY,mm-1,1,12))), to=isoUTC(new Date(Date.UTC(bY,mm,0,12)));
+    const c=PROD_MACHS.map(mo=>sum("wh",mo.code,from,to));
+    const tot=c.reduce((a,b)=>a+b,0);
+    monthly.rows.push({month:PROD_MON[mm-1]+" "+bY, c, tot});
+    c.forEach((v,i)=>monthly.grand.c[i]+=v); monthly.grand.tot+=tot;
+  }
   const asof=new Date().toLocaleString("en-IN",{timeZone:"Asia/Kolkata",day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"});
-  return { cols, rows, mrows, mtot, asof };
+  const labels={
+    on:"Production on "+ddmmUTC(base),
+    mon:PROD_MON[bM]+" "+bY+" upto "+ddmmUTC(base),
+    lm:"Last month upto "+ddmmUTC(lmEndDt),
+    yr:"This Year upto "+ddmmUTC(base)
+  };
+  const machNames=PROD_MACHS.map(mo=>mo.name);
+  return { asof, labels, machNames, total, wheels, monthly, fmt };
 }
 function prodFontFiles(){
   const dirs=[];
@@ -1027,65 +1089,97 @@ function prodFontFiles(){
   for(const dir of dirs){ try{ if(fs.existsSync(path.join(dir,"DejaVuSans.ttf"))) return [path.join(dir,"DejaVuSans.ttf"), path.join(dir,"DejaVuSans-Bold.ttf")]; }catch(e){} }
   return [];
 }
-function prodSvg(m){
-  const W=940, L=16, R=W-16, typeW=90, nC=m.cols.length, colW=(R-L-typeW)/nC;
+function prodWrap(s,maxChars){ const w=String(s).split(/\s+/); const lines=[]; let cur="";
+  for(const t of w){ if(((cur?cur+" ":"")+t).length<=maxChars){ cur=(cur?cur+" ":"")+t; } else { if(cur)lines.push(cur); cur=t; } }
+  if(cur)lines.push(cur); return lines.length?lines:[""]; }
+function prodSvg(M){
+  const W=940, L=16, R=W-16, f=M.fmt;
   const els=[]; let y=0;
   const rect=(x,yy,w,h,fill)=>els.push(`<rect x="${x}" y="${yy}" width="${w}" height="${h}" fill="${fill}"/>`);
-  const txt=(x,yy,s,o={})=>els.push(`<text x="${x}" y="${yy}" font-family="DejaVu Sans" font-size="${o.size||12}"${o.bold?' font-weight="bold"':''} fill="${o.fill||'#222'}" text-anchor="${o.anchor||'start'}">${esc2(s)}</text>`);
+  const txt=(x,yy,s,o={})=>els.push(`<text x="${x}" y="${yy}" font-family="DejaVu Sans" font-size="${o.size||11}"${o.bold?' font-weight="bold"':''} fill="${o.fill||'#222'}" text-anchor="${o.anchor||'start'}">${esc2(s)}</text>`);
   rect(0,0,W,58,"#0e2a47");
-  txt(L,26,"Wheels India — Production Report",{size:18,bold:true,fill:"#fff"});
-  txt(L,46,"Bharat Steel (Chennai) Pvt. Ltd.  ·  Plate = MACHINE01 (MDS) · Strip = MACHINE15 (MDS) · Qty in MT",{size:10,fill:"#cfe0ef"});
-  y=58; txt(L,y+18,"As on: "+m.asof,{size:10,fill:"#445"}); y+=28;
-  rect(L,y,R-L,22,"#0e2a47"); txt(L+8,y+15,"Production — Plate / Strip",{size:12,bold:true,fill:"#fff"}); y+=22;
-  const hH=34; rect(L,y,R-L,hH,"#eef3f7"); txt(L+6,y+21,"Type",{size:10,bold:true,fill:"#1a2a3a"});
-  m.cols.forEach((c,i)=>{ const cx=L+typeW+i*colW+colW/2; txt(cx,y+14,c.t,{size:9,bold:true,fill:"#1a2a3a",anchor:"middle"}); txt(cx,y+28,c.s,{size:9,fill:"#7a8690",anchor:"middle"}); });
-  y+=hH;
-  const rH=24;
-  m.rows.forEach((r,ri)=>{ const tot=r.label==="Total"; rect(L,y,R-L,rH, tot?"#0e2a47":(ri%2?"#f7fafc":"#ffffff"));
-    txt(L+6,y+16,r.label,{size:11,bold:true,fill:tot?"#fff":"#222"});
-    r.cells.forEach((v,i)=>{ const cx=L+typeW+i*colW+colW-6; txt(cx,y+16,v,{size:11,bold:tot,fill:tot?"#fff":"#222",anchor:"end"}); }); y+=rH; });
-  y+=16;
-  const m2w=340;
-  rect(L,y,m2w,22,"#0e2a47"); txt(L+8,y+15,"Monthly Production (current year)",{size:12,bold:true,fill:"#fff"}); y+=22;
-  rect(L,y,m2w,22,"#eef3f7"); txt(L+6,y+15,"Month",{size:10,bold:true,fill:"#1a2a3a"}); txt(L+m2w-6,y+15,"Production (MT)",{size:10,bold:true,fill:"#1a2a3a",anchor:"end"}); y+=22;
-  m.mrows.forEach((r,ri)=>{ rect(L,y,m2w,20, ri%2?"#f7fafc":"#ffffff"); txt(L+6,y+14,r.month,{size:10}); txt(L+m2w-6,y+14,r.qty,{size:10,anchor:"end"}); y+=20; });
-  rect(L,y,m2w,22,"#0e2a47"); txt(L+6,y+15,"Total",{size:10,bold:true,fill:"#fff"}); txt(L+m2w-6,y+15,m.mtot,{size:10,bold:true,fill:"#fff",anchor:"end"}); y+=22;
-  y+=18; txt(L,y,"Computer-generated report — may contain mistakes.  Bharat Steel (Chennai) Pvt. Ltd. · info@bharatsteels.in",{size:8,fill:"#999"}); y+=10;
+  txt(L,26,"Wheels India Production Report",{size:18,bold:true,fill:"#fff"});
+  txt(L,46,"Bharat Steel (Chennai) Pvt. Ltd.  ·  Machine-wise  ·  Qty in MT",{size:10,fill:"#cfe0ef"});
+  y=58; txt(L,y+18,"As on: "+M.asof,{size:10,fill:"#445"}); y+=30;
+  function section(title, headers, firstW, dataRows, grand){
+    const n=headers.length-1, colW=(R-L-firstW)/n;
+    rect(L,y,R-L,22,"#0e2a47"); txt(L+8,y+15,title,{size:12,bold:true,fill:"#fff"}); y+=22;
+    const hl=headers.map((h,i)=> i===0?[h]:prodWrap(h, Math.max(6,Math.floor(colW/5.4))));
+    const maxLines=Math.max(...hl.map(a=>a.length));
+    const hH=12+maxLines*11+4;
+    rect(L,y,R-L,hH,"#eef3f7");
+    txt(L+6,y+hH/2+4,headers[0],{size:10,bold:true,fill:"#1a2a3a"});
+    for(let i=1;i<headers.length;i++){ const cx=L+firstW+(i-1)*colW+colW/2; const lines=hl[i]; const sY=y+16+(maxLines-lines.length)*5.5;
+      lines.forEach((ln,li)=>txt(cx,sY+li*11,ln,{size:9,bold:true,fill:"#1a2a3a",anchor:"middle"})); }
+    y+=hH;
+    const rH=22;
+    dataRows.forEach((r,ri)=>{ rect(L,y,R-L,rH, ri%2?"#f7fafc":"#ffffff");
+      txt(L+6,y+15,r.label,{size:10,fill:"#222"});
+      r.vals.forEach((v,i)=>{ const cx=L+firstW+i*colW+colW-8; txt(cx,y+15,v,{size:10,fill:"#222",anchor:"end"}); }); y+=rH; });
+    rect(L,y,R-L,rH,"#0e2a47"); txt(L+6,y+15,grand.label,{size:10,bold:true,fill:"#fff"});
+    grand.vals.forEach((v,i)=>{ const cx=L+firstW+i*colW+colW-8; txt(cx,y+15,v,{size:10,bold:true,fill:"#fff",anchor:"end"}); }); y+=rH;
+    y+=18;
+  }
+  section("TOTAL PRODUCTION REPORT",
+    ["Machine", M.labels.on, M.labels.mon, M.labels.lm], 210,
+    M.total.rows.map(r=>({label:r.name, vals:[f(r.on),f(r.mon),f(r.lm)]})),
+    {label:"GRAND TOTAL", vals:[f(M.total.grand.on),f(M.total.grand.mon),f(M.total.grand.lm)]});
+  section("WHEELS INDIA PRODUCTION REPORT",
+    ["Machine", M.labels.on, M.labels.mon, M.labels.lm, M.labels.yr], 210,
+    M.wheels.rows.map(r=>({label:r.name, vals:[f(r.on),f(r.mon),f(r.lm),f(r.yr)]})),
+    {label:"GRAND TOTAL", vals:[f(M.wheels.grand.on),f(M.wheels.grand.mon),f(M.wheels.grand.lm),f(M.wheels.grand.yr)]});
+  section("WHEELS INDIA MONTHLY PRODUCTION REPORT",
+    ["Month", M.machNames[0], M.machNames[1], M.machNames[2], "Total"], 120,
+    M.monthly.rows.map(r=>({label:r.month, vals:[f(r.c[0]),f(r.c[1]),f(r.c[2]),f(r.tot)]})),
+    {label:"TOTAL", vals:[f(M.monthly.grand.c[0]),f(M.monthly.grand.c[1]),f(M.monthly.grand.c[2]),f(M.monthly.grand.tot)]});
+  txt(L,y,"Computer-generated report - may contain mistakes.  Bharat Steel (Chennai) Pvt. Ltd. · info@bharatsteels.in",{size:8,fill:"#999"}); y+=12;
   const H=y+6;
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><rect width="${W}" height="${H}" fill="#ffffff"/>${els.join("")}</svg>`;
 }
-async function buildWheelsProdPng(){
+async function buildWheelsProdPng(holidays){
   let Resvg; try{ Resvg=(await import("@resvg/resvg-js")).Resvg; }catch(e){ throw new Error("resvg-js not available on server: "+e.message); }
   const ff=prodFontFiles();
-  const svg=prodSvg(await prodModel());
+  const svg=prodSvg(await prodModel(holidays));
   const r=new Resvg(svg, { font:{ fontFiles:ff, loadSystemFonts: ff.length===0, defaultFontFamily:"DejaVu Sans" }, background:"#ffffff" });
   return Buffer.from(r.render().asPng());
 }
-async function buildWheelsProdPdf(){
+async function buildWheelsProdPdf(holidays){
   let PDFDocument; try{ PDFDocument=(await import("pdfkit")).default; }catch(e){ throw new Error("pdfkit not available on server: "+e.message); }
-  const m=await prodModel();
+  const M=await prodModel(holidays), f=M.fmt;
   const doc=new PDFDocument({size:"A4",margin:28}); const chunks=[]; doc.on("data",c=>chunks.push(c)); const done=new Promise(r=>doc.on("end",r));
   const L=28,R=567,W=R-L; let y=28;
   doc.rect(L,y,W,44).fill("#0e2a47");
-  doc.fillColor("#fff").font("Helvetica-Bold").fontSize(15).text("Wheels India — Production Report",L+10,y+9);
-  doc.font("Helvetica").fontSize(8).fillColor("#cfe0ef").text("Bharat Steel (Chennai) Pvt. Ltd.  ·  Plate = MACHINE01 (MDS) · Strip = MACHINE15 (MDS) · Qty in MT",L+10,y+28,{width:W-20});
-  y+=52; doc.fillColor("#445").font("Helvetica").fontSize(9).text("As on: "+m.asof,L,y); y+=16;
-  const typeW=84, nC=m.cols.length, colW=(W-typeW)/nC;
-  doc.rect(L,y,W,18).fill("#0e2a47"); doc.fillColor("#fff").font("Helvetica-Bold").fontSize(10).text("Production — Plate / Strip",L+8,y+5,{lineBreak:false}); y+=18;
-  const hH=30; doc.rect(L,y,W,hH).fill("#eef3f7"); doc.fillColor("#1a2a3a").font("Helvetica-Bold").fontSize(8).text("Type",L+5,y+11,{lineBreak:false});
-  m.cols.forEach((c,i)=>{ const cx=L+typeW+i*colW; doc.font("Helvetica-Bold").fontSize(8).fillColor("#1a2a3a").text(c.t,cx+2,y+5,{width:colW-4,align:"center",lineBreak:false}); doc.font("Helvetica").fontSize(7).fillColor("#7a8690").text(c.s,cx+2,y+18,{width:colW-4,align:"center",lineBreak:false}); });
-  y+=hH;
-  const rH=20;
-  m.rows.forEach((r,ri)=>{ const tot=r.label==="Total"; if(tot){doc.rect(L,y,W,rH).fill("#0e2a47");} else if(ri%2){doc.rect(L,y,W,rH).fill("#f7fafc");}
-    doc.font(tot?"Helvetica-Bold":"Helvetica").fontSize(10).fillColor(tot?"#fff":"#222").text(r.label,L+5,y+6,{lineBreak:false});
-    r.cells.forEach((v,i)=>{ const cx=L+typeW+i*colW; doc.font(tot?"Helvetica-Bold":"Helvetica").fontSize(9).fillColor(tot?"#fff":"#222").text(v,cx+2,y+6,{width:colW-6,align:"right",lineBreak:false}); }); y+=rH; });
-  y+=16;
-  const m2w=300;
-  doc.rect(L,y,m2w,18).fill("#0e2a47"); doc.fillColor("#fff").font("Helvetica-Bold").fontSize(10).text("Monthly Production (current year)",L+8,y+5,{lineBreak:false}); y+=18;
-  doc.rect(L,y,m2w,18).fill("#eef3f7"); doc.fillColor("#1a2a3a").font("Helvetica-Bold").fontSize(8).text("Month",L+6,y+5,{lineBreak:false}); doc.text("Production (MT)",L,y+5,{width:m2w-6,align:"right",lineBreak:false}); y+=18;
-  m.mrows.forEach((r,ri)=>{ if(ri%2){doc.rect(L,y,m2w,16).fill("#f7fafc");} doc.font("Helvetica").fontSize(9).fillColor("#222").text(r.month,L+6,y+4,{lineBreak:false}); doc.text(r.qty,L,y+4,{width:m2w-6,align:"right",lineBreak:false}); y+=16; });
-  doc.rect(L,y,m2w,18).fill("#0e2a47"); doc.fillColor("#fff").font("Helvetica-Bold").fontSize(9).text("Total",L+6,y+5,{lineBreak:false}); doc.text(m.mtot,L,y+5,{width:m2w-6,align:"right",lineBreak:false}); y+=24;
-  doc.fillColor("#999").font("Helvetica-Oblique").fontSize(7).text("Computer-generated report — may contain mistakes. Bharat Steel (Chennai) Pvt. Ltd. · info@bharatsteels.in",L,y,{width:W});
+  doc.fillColor("#fff").font("Helvetica-Bold").fontSize(15).text("Wheels India Production Report",L+10,y+9);
+  doc.font("Helvetica").fontSize(8).fillColor("#cfe0ef").text("Bharat Steel (Chennai) Pvt. Ltd.   Machine-wise   Qty in MT",L+10,y+28,{width:W-20});
+  y+=52; doc.fillColor("#445").font("Helvetica").fontSize(9).text("As on: "+M.asof,L,y); y+=16;
+  function section(title, headers, firstW, dataRows, grand){
+    if(y>720){ doc.addPage(); y=28; }
+    const n=headers.length-1, colW=(W-firstW)/n;
+    doc.rect(L,y,W,18).fill("#0e2a47"); doc.fillColor("#fff").font("Helvetica-Bold").fontSize(10).text(title,L+8,y+5,{lineBreak:false}); y+=18;
+    const hH=34; doc.rect(L,y,W,hH).fill("#eef3f7");
+    doc.fillColor("#1a2a3a").font("Helvetica-Bold").fontSize(8).text(headers[0],L+5,y+hH/2-4,{lineBreak:false});
+    for(let i=1;i<headers.length;i++){ const cx=L+firstW+(i-1)*colW; doc.font("Helvetica-Bold").fontSize(7).fillColor("#1a2a3a").text(headers[i],cx+2,y+5,{width:colW-4,align:"center"}); }
+    y+=hH;
+    const rH=18;
+    dataRows.forEach((r,ri)=>{ if(ri%2){doc.rect(L,y,W,rH).fill("#f7fafc");}
+      doc.font("Helvetica").fontSize(9).fillColor("#222").text(r.label,L+5,y+5,{width:firstW-6,lineBreak:false});
+      r.vals.forEach((v,i)=>{ const cx=L+firstW+i*colW; doc.font("Helvetica").fontSize(9).fillColor("#222").text(v,cx+2,y+5,{width:colW-6,align:"right",lineBreak:false}); }); y+=rH; });
+    doc.rect(L,y,W,rH).fill("#0e2a47"); doc.font("Helvetica-Bold").fontSize(9).fillColor("#fff").text(grand.label,L+5,y+5,{width:firstW-6,lineBreak:false});
+    grand.vals.forEach((v,i)=>{ const cx=L+firstW+i*colW; doc.font("Helvetica-Bold").fontSize(9).fillColor("#fff").text(v,cx+2,y+5,{width:colW-6,align:"right",lineBreak:false}); }); y+=rH+14;
+  }
+  section("TOTAL PRODUCTION REPORT",
+    ["Machine", M.labels.on, M.labels.mon, M.labels.lm], 150,
+    M.total.rows.map(r=>({label:r.name, vals:[f(r.on),f(r.mon),f(r.lm)]})),
+    {label:"GRAND TOTAL", vals:[f(M.total.grand.on),f(M.total.grand.mon),f(M.total.grand.lm)]});
+  section("WHEELS INDIA PRODUCTION REPORT",
+    ["Machine", M.labels.on, M.labels.mon, M.labels.lm, M.labels.yr], 150,
+    M.wheels.rows.map(r=>({label:r.name, vals:[f(r.on),f(r.mon),f(r.lm),f(r.yr)]})),
+    {label:"GRAND TOTAL", vals:[f(M.wheels.grand.on),f(M.wheels.grand.mon),f(M.wheels.grand.lm),f(M.wheels.grand.yr)]});
+  section("WHEELS INDIA MONTHLY PRODUCTION REPORT",
+    ["Month", M.machNames[0], M.machNames[1], M.machNames[2], "Total"], 90,
+    M.monthly.rows.map(r=>({label:r.month, vals:[f(r.c[0]),f(r.c[1]),f(r.c[2]),f(r.tot)]})),
+    {label:"TOTAL", vals:[f(M.monthly.grand.c[0]),f(M.monthly.grand.c[1]),f(M.monthly.grand.c[2]),f(M.monthly.grand.tot)]});
+  doc.fillColor("#999").font("Helvetica-Oblique").fontSize(7).text("Computer-generated report - may contain mistakes. Bharat Steel (Chennai) Pvt. Ltd.",L,y,{width:W});
   doc.end(); await done; return Buffer.concat(chunks);
 }
 async function sendWheelsMail(to, cc, html, subject, attach){
