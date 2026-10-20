@@ -1088,10 +1088,12 @@ async function buildWheelsPdf(){
 }
 // Stock statement as a PNG (for the WhatsApp image header). Same sections/columns as the PDF/email.
 function wheelsStockSvg(rows, asof){
-  const W=960, L=16, R=W-16;
+  const L=16;
   const SEC=[["PLATE","Plate Stock (WIP / FG)","#0e7a4b"],["STRIP","Strip / Blank Stock","#b5651d"],["COIL","Coil Stock","#1367a6"]];
-  const cols=[{k:"n",t:"#",w:26,a:"c"},{k:"mill",t:"Mill",w:64,a:"c"},{k:"grade",t:"Grade",w:120,a:"l"},{k:"thk",t:"Thk",w:52,a:"c"},{k:"wid",t:"Width",w:58,a:"c"},{k:"len",t:"Length",w:58,a:"c"},{k:"coil",t:"Coil / Batch No",w:200,a:"l"},{k:"qty",t:"Qty (MT)",w:84,a:"r"},{k:"age",t:"Aging",w:40,a:"c"}];
-  const sumW=cols.reduce((a,c)=>a+c.w,0), scale=(R-L)/sumW; let cx=L; cols.forEach(c=>{ c.w*=scale; c.x=cx; cx+=c.w; });
+  // content-sized columns (no stretch-to-fill) so the image stays compact on a phone
+  const cols=[{k:"n",t:"#",w:22,a:"c"},{k:"mill",t:"Mill",w:52,a:"c"},{k:"grade",t:"Grade",w:54,a:"l"},{k:"thk",t:"Thk",w:40,a:"c"},{k:"wid",t:"Width",w:44,a:"c"},{k:"len",t:"Length",w:46,a:"c"},{k:"coil",t:"Coil / Batch No",w:142,a:"l"},{k:"qty",t:"Qty (MT)",w:64,a:"r"},{k:"age",t:"Aging",w:38,a:"c"}];
+  let cx=L; cols.forEach(c=>{ c.x=cx; cx+=c.w; });
+  const W=cx+L, R=W-L;
   const qtyCol=cols.find(c=>c.k==="qty");
   const els=[];
   const rect=(x,y,w,h,f)=>els.push(`<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${f}"/>`);
@@ -1102,19 +1104,25 @@ function wheelsStockSvg(rows, asof){
   txt(L,24,"Job Work Stock Statement - Wheels India Limited",{size:16,bold:true,fill:"#fff"});
   txt(L,44,"Bharat Steel (Chennai) Pvt. Ltd.  ·  Material held at BSC on customer's account",{size:10,fill:"#cfe0ef"});
   y=58; txt(L,y+16,"Customer: Wheels India Limited      As on: "+asof+"      Warehouse: Job Work (WH 45)",{size:10,fill:"#445"}); y+=26;
+  const GC="#c4d0da"; const colXs=cols.map(c=>c.x).concat(R);
+  function grid(rowYs){ const lft=colXs[0],rgt=colXs[colXs.length-1],top=rowYs[0],bot=rowYs[rowYs.length-1];
+    rowYs.forEach(yy=>rect(lft,yy,rgt-lft,1,GC)); colXs.forEach(xx=>rect(xx,top,1,bot-top,GC)); }
   let gb=0, gq=0;
   for(const [form,title,hex] of SEC){
     const rs=rows.filter(r=>r.form===form).sort((a,b)=>b.Quantity-a.Quantity);
     if(!rs.length) continue;
     const tq=rs.reduce((a,r)=>a+r.Quantity,0); gb+=rs.length; gq+=tq;
     rect(L,y,R-L,20,hex); txt(L+8,y+14,title,{size:11,bold:true,fill:"#fff"}); txt(R-6,y+14,rs.length+" items · "+tq.toFixed(3)+" MT",{size:9,fill:"#fff",anchor:"end"}); y+=20;
-    rect(L,y,R-L,18,"#eef3f7"); cols.forEach(c=>put(c,y+12,c.t,{size:8,bold:true,fill:"#1a2a3a"})); y+=18;
+    const rowYs=[y];
+    rect(L,y,R-L,18,"#eef3f7"); cols.forEach(c=>put(c,y+12,c.t,{size:8,bold:true,fill:"#1a2a3a"})); y+=18; rowYs.push(y);
     const rH=16;
     rs.forEach((xr,i)=>{ if(i%2) rect(L,y,R-L,rH,"#f7fafc");
       const mill=(xr.ItemName||"").split(" ")[0];
       const v={n:String(i+1),mill,grade:xr.Grade||"",thk:dimS(xr.Thick),wid:dimS(xr.Width),len:lenS(xr.Length),coil:(xr.CoilNo||xr.BatchNum||""),qty:xr.Quantity.toFixed(3),age:(xr.AgeDays||"")};
-      cols.forEach(c=>put(c,y+11,String(v[c.k]),{size:8,fill:"#222"})); y+=rH; });
-    rect(L,y,R-L,18,"#e7eef4"); txt(qtyCol.x-6,y+12,title+" total",{size:8.5,bold:true,fill:"#1a2233",anchor:"end"}); put(qtyCol,y+12,tq.toFixed(3),{size:8.5,bold:true,fill:"#1a2233"}); y+=22;
+      cols.forEach(c=>put(c,y+11,String(v[c.k]),{size:8,fill:"#222"})); y+=rH; rowYs.push(y); });
+    rect(L,y,R-L,18,"#e7eef4"); txt(qtyCol.x-6,y+12,title+" total",{size:8.5,bold:true,fill:"#1a2233",anchor:"end"}); put(qtyCol,y+12,tq.toFixed(3),{size:8.5,bold:true,fill:"#1a2233"}); y+=18; rowYs.push(y);
+    grid(rowYs);
+    y+=4;
   }
   rect(L,y,R-L,24,"#0e2a47"); txt(L+10,y+16,"TOTAL MATERIAL HELD",{size:11,bold:true,fill:"#fff"}); txt(R-8,y+16,gb+" items · "+gq.toFixed(3)+" MT",{size:11,bold:true,fill:"#fff",anchor:"end"}); y+=30;
   txt(L,y,"System generated statement - might have mistakes.  Bharat Steel (Chennai) Pvt. Ltd. · info@bharatsteels.in",{size:8,fill:"#999"}); y+=10;
@@ -1225,43 +1233,53 @@ function prodWrap(s,maxChars){ const w=String(s).split(/\s+/); const lines=[]; l
   for(const t of w){ if(((cur?cur+" ":"")+t).length<=maxChars){ cur=(cur?cur+" ":"")+t; } else { if(cur)lines.push(cur); cur=t; } }
   if(cur)lines.push(cur); return lines.length?lines:[""]; }
 function prodSvg(M){
-  const W=940, L=16, R=W-16, f=M.fmt;
+  const L=16, f=M.fmt, COLW=70, FW_MACH=140, FW_MONTH=92;
+  // columns are a fixed, content-sized width (not stretched to the page) so the image stays compact on mobile
+  const widest = Math.max(FW_MACH+4*COLW, FW_MONTH+4*COLW);
+  const W = L + widest + L, R = W - L;
   const els=[]; let y=0;
   const rect=(x,yy,w,h,fill)=>els.push(`<rect x="${x}" y="${yy}" width="${w}" height="${h}" fill="${fill}"/>`);
   const txt=(x,yy,s,o={})=>els.push(`<text x="${x}" y="${yy}" font-family="DejaVu Sans" font-size="${o.size||11}"${o.bold?' font-weight="bold"':''} fill="${o.fill||'#222'}" text-anchor="${o.anchor||'start'}">${esc2(s)}</text>`);
   rect(0,0,W,58,"#0e2a47");
-  txt(L,26,"Wheels India Production Report",{size:18,bold:true,fill:"#fff"});
+  txt(L,26,"Wheels India Production Report",{size:17,bold:true,fill:"#fff"});
   txt(L,46,"Bharat Steel (Chennai) Pvt. Ltd.  ·  Machine-wise  ·  Qty in MT",{size:10,fill:"#cfe0ef"});
   y=58; txt(L,y+18,"As on: "+M.asof,{size:10,fill:"#445"}); y+=30;
+  const GC="#c4d0da"; // gridline colour
+  function grid(colXs, rowYs){ const lft=colXs[0], rgt=colXs[colXs.length-1], top=rowYs[0], bot=rowYs[rowYs.length-1];
+    rowYs.forEach(yy=>els.push(`<rect x="${lft}" y="${yy}" width="${rgt-lft}" height="1" fill="${GC}"/>`));
+    colXs.forEach(xx=>els.push(`<rect x="${xx}" y="${top}" width="1" height="${bot-top}" fill="${GC}"/>`)); }
   function section(title, headers, firstW, dataRows, grand){
-    const n=headers.length-1, colW=(R-L-firstW)/n;
-    rect(L,y,R-L,22,"#0e2a47"); txt(L+8,y+15,title,{size:12,bold:true,fill:"#fff"}); y+=22;
-    const hl=headers.map((h,i)=> i===0?[h]:prodWrap(h, Math.max(6,Math.floor(colW/5.4))));
+    const n=headers.length-1, colW=COLW, tw=firstW+n*colW;
+    const colXs=[L, L+firstW]; for(let i=1;i<=n;i++) colXs.push(L+firstW+i*colW);
+    rect(L,y,tw,22,"#0e2a47"); txt(L+8,y+15,title,{size:12,bold:true,fill:"#fff"}); y+=22;
+    const rowYs=[y];
+    const hl=headers.map((h,i)=> i===0?[h]:prodWrap(h, Math.max(6,Math.floor(colW/6.6))));
     const maxLines=Math.max(...hl.map(a=>a.length));
     const hH=12+maxLines*11+4;
-    rect(L,y,R-L,hH,"#eef3f7");
+    rect(L,y,tw,hH,"#eef3f7");
     txt(L+firstW/2,y+hH/2+4,headers[0],{size:10,bold:true,fill:"#1a2a3a",anchor:"middle"});
     for(let i=1;i<headers.length;i++){ const cx=L+firstW+(i-1)*colW+colW/2; const lines=hl[i]; const sY=y+16+(maxLines-lines.length)*5.5;
       lines.forEach((ln,li)=>txt(cx,sY+li*11,ln,{size:9,bold:true,fill:"#1a2a3a",anchor:"middle"})); }
-    y+=hH;
+    y+=hH; rowYs.push(y);
     const rH=22;
-    dataRows.forEach((r,ri)=>{ rect(L,y,R-L,rH, ri%2?"#f7fafc":"#ffffff");
+    dataRows.forEach((r,ri)=>{ rect(L,y,tw,rH, ri%2?"#f7fafc":"#ffffff");
       txt(L+firstW/2,y+15,r.label,{size:10,fill:"#222",anchor:"middle"});
-      r.vals.forEach((v,i)=>{ const cx=L+firstW+i*colW+colW/2; txt(cx,y+15,v,{size:10,fill:"#222",anchor:"middle"}); }); y+=rH; });
-    rect(L,y,R-L,rH,"#0e2a47"); txt(L+firstW/2,y+15,grand.label,{size:10,bold:true,fill:"#fff",anchor:"middle"});
-    grand.vals.forEach((v,i)=>{ const cx=L+firstW+i*colW+colW/2; txt(cx,y+15,v,{size:10,bold:true,fill:"#fff",anchor:"middle"}); }); y+=rH;
+      r.vals.forEach((v,i)=>{ const cx=L+firstW+i*colW+colW/2; txt(cx,y+15,v,{size:10,fill:"#222",anchor:"middle"}); }); y+=rH; rowYs.push(y); });
+    rect(L,y,tw,rH,"#0e2a47"); txt(L+firstW/2,y+15,grand.label,{size:10,bold:true,fill:"#fff",anchor:"middle"});
+    grand.vals.forEach((v,i)=>{ const cx=L+firstW+i*colW+colW/2; txt(cx,y+15,v,{size:10,bold:true,fill:"#fff",anchor:"middle"}); }); y+=rH; rowYs.push(y);
+    grid(colXs, rowYs);
     y+=18;
   }
   section("TOTAL PRODUCTION REPORT",
-    ["Machine", M.labels.on, M.labels.mon, M.labels.lm], 210,
+    ["Machine", M.labels.on, M.labels.mon, M.labels.lm], FW_MACH,
     M.total.rows.map(r=>({label:r.name, vals:[f(r.on),f(r.mon),f(r.lm)]})),
     {label:"GRAND TOTAL", vals:[f(M.total.grand.on),f(M.total.grand.mon),f(M.total.grand.lm)]});
   section("WHEELS INDIA PRODUCTION REPORT",
-    ["Machine", M.labels.on, M.labels.mon, M.labels.lm, M.labels.yr], 210,
+    ["Machine", M.labels.on, M.labels.mon, M.labels.lm, M.labels.yr], FW_MACH,
     M.wheels.rows.map(r=>({label:r.name, vals:[f(r.on),f(r.mon),f(r.lm),f(r.yr)]})),
     {label:"GRAND TOTAL", vals:[f(M.wheels.grand.on),f(M.wheels.grand.mon),f(M.wheels.grand.lm),f(M.wheels.grand.yr)]});
   section("WHEELS INDIA MONTHLY PRODUCTION REPORT",
-    ["Month", M.machNames[0], M.machNames[1], M.machNames[2], "Total"], 120,
+    ["Month", M.machNames[0], M.machNames[1], M.machNames[2], "Total"], FW_MONTH,
     M.monthly.rows.map(r=>({label:r.month, vals:[f(r.c[0]),f(r.c[1]),f(r.c[2]),f(r.tot)]})),
     {label:"TOTAL", vals:[f(M.monthly.grand.c[0]),f(M.monthly.grand.c[1]),f(M.monthly.grand.c[2]),f(M.monthly.grand.tot)]});
   txt(L,y,"Computer-generated report - may contain mistakes.  Bharat Steel (Chennai) Pvt. Ltd. · info@bharatsteels.in",{size:8,fill:"#999"}); y+=12;
@@ -1382,39 +1400,47 @@ function dailyStockSvg(M){
   // Two-column layout (mirrors the BSC Excel pivot sheet):
   //   LEFT  = HR Coil Stock (compact: Item | 38 | Grand Total)
   //   RIGHT = date box, then Sales / Purchase / Warehousewise tables.
-  const W=1200, L=16, R=W-16;
+  const salesN=(M.salesP.months||[]).length, purN=(M.purP.months||[]).length, whN=(M.whs||[]).length;
+  const MW=52, CATW=118, GRW=66;                    // fixed right-column widths (no stretch-to-fill)
+  const COILW=170+64+72;                            // left HR-coil table width
+  const rightNeeded=Math.max(CATW+Math.max(1,salesN,purN)*MW+GRW, CATW+Math.max(1,whN)*MW+GRW, 200);
+  const L=16, W=L+COILW+24+rightNeeded+L, R=W-L;
   const els=[];
   const rect=(x,yy,w,h,f)=>els.push(`<rect x="${x}" y="${yy}" width="${w}" height="${h}" fill="${f}"/>`);
   const txt=(x,yy,s,o={})=>els.push(`<text x="${x}" y="${yy}" font-family="DejaVu Sans" font-size="${o.size||9}"${o.bold?' font-weight="bold"':''} fill="${o.fill||'#222'}" text-anchor="${o.anchor||'start'}">${esc2(s)}</text>`);
   const put=(c,yy,s,o)=>{ if(c.align==="r") txt(c.x+c.w-5,yy,s,{...o,anchor:"end"}); else if(c.align==="c") txt(c.x+c.w/2,yy,s,{...o,anchor:"middle"}); else txt(c.x+5,yy,s,{...o,anchor:"start"}); };
   // draw a table with its own origin x0/y0; returns the y after the table.
+  const GC="#c4d0da";
   function drawTable(ox, oy, title, cols, rows, headH){
     let x=ox; cols.forEach(c=>{ c.x=x; x+=c.w; }); const tw=x-ox; let y=oy;
     rect(ox,y,tw,18,"#ffe08a"); txt(ox+6,y+13,title,{size:10,bold:true,fill:"#5a4500"}); y+=18;
+    const gridTop=y; const rowYs=[y];
     const hH=headH||18; rect(ox,y,tw,hH,"#dbeaf5");
     cols.forEach(c=>{ if(c.sub){ put(c,y+9,c.t,{size:7.5,bold:true,fill:"#1a2a3a"}); put(c,y+hH-3,c.sub,{size:7.5,bold:true,fill:"#1a2a3a"}); } else put(c,y+hH/2+3.5,c.t,{size:8.5,bold:true,fill:"#1a2a3a"}); });
-    y+=hH;
+    y+=hH; rowYs.push(y);
     const rH=16;
     rows.forEach((r,ri)=>{ if(r.gt) rect(ox,y,tw,rH,"#dbeaf5"); else if(ri%2) rect(ox,y,tw,rH,"#f7fafc");
-      cols.forEach((c,ci)=>put(c,y+11,r.v[ci]==null?"":String(r.v[ci]),{size:8.5,bold:!!r.gt,fill:"#1a2233"})); y+=rH; });
-    els.push(`<rect x="${ox}" y="${oy}" width="${tw}" height="${y-oy}" fill="none" stroke="#cdd7df" stroke-width="1"/>`);
+      cols.forEach((c,ci)=>put(c,y+11,r.v[ci]==null?"":String(r.v[ci]),{size:8.5,bold:!!r.gt,fill:"#1a2233"})); y+=rH; rowYs.push(y); });
+    // gridlines: a line under every row, and between every column
+    rowYs.forEach(yy=>rect(ox,yy,tw,1,GC));
+    cols.forEach(c=>rect(c.x,gridTop,1,y-gridTop,GC)); rect(ox+tw,gridTop,1,y-gridTop,GC);
+    els.push(`<rect x="${ox}" y="${oy}" width="${tw}" height="${y-oy}" fill="none" stroke="#9fb3c4" stroke-width="1"/>`);
     return y;
   }
   // title bar
   rect(0,0,W,30,"#2f9fe0"); txt(W/2,20,"BHARAT STEEL (CHENNAI) PRIVATE LIMITED",{size:15,bold:true,fill:"#ffffff",anchor:"middle"});
   const startY=44;
   // ---- LEFT: HR coil stock ----
-  const coilCols=[{t:"Row Labels",w:250,align:"l"},{t:"38",w:90,align:"r"},{t:"Grand Total",w:100,align:"r"}];
+  const coilCols=[{t:"Row Labels",w:170,align:"l"},{t:"38",w:64,align:"r"},{t:"Grand Total",w:72,align:"r"}];
   const coilRows=M.coilArr.map(([n,q])=>({v:[n,f3IN(q),f3IN(q)]})).concat([{v:["Grand Total",f3IN(M.t38),f3IN(M.t38)],gt:true}]);
-  const LW=250+90+100;
+  const LW=COILW;
   const leftY=drawTable(L, startY, "BHARAT HR COIL STOCK (Warehouse 38 · MT)", coilCols, coilRows);
   // ---- RIGHT column ----
-  const xR = L + LW + 30, rightW = R - xR;
+  const xR = L + LW + 24, rightW = R - xR;
   let ry = startY;
   rect(xR, ry, 200, 22, "#ffe08a"); txt(xR+100, ry+15, M.dateDMY, {size:12,bold:true,fill:"#5a4500",anchor:"middle"}); ry += 34;
-  function pivotCols(months, catW, grandW){
-    const mw=Math.max(46,(rightW-catW-grandW)/Math.max(1,months.length));
-    return [{t:"Row Labels",w:catW,align:"l"}].concat(months.map(i=>({t:DS_FYMON[i],w:mw,align:"r"}))).concat([{t:"Grand Total",w:grandW,align:"r"}]);
+  function pivotCols(months){
+    return [{t:"Row Labels",w:CATW,align:"l"}].concat(months.map(i=>({t:DS_FYMON[i],w:MW,align:"r"}))).concat([{t:"Grand Total",w:GRW,align:"r"}]);
   }
   function pivotRows(P){
     const rows=P.cats.map(c=>{ const rt=P.months.reduce((a,i)=>a+(P.data[c][i]||0),0);
@@ -1423,17 +1449,16 @@ function dailyStockSvg(M){
     return rows;
   }
   // Sales
-  if(M.salesP.cats.length) ry=drawTable(xR, ry, "BHARAT SALES REPORT (own material, excl. job work · MT)", pivotCols(M.salesP.months,150,80), pivotRows(M.salesP));
+  if(M.salesP.cats.length) ry=drawTable(xR, ry, "BHARAT SALES REPORT (own material, excl. job work · MT)", pivotCols(M.salesP.months), pivotRows(M.salesP));
   else ry=drawTable(xR, ry, "BHARAT SALES REPORT (MT)", [{t:"Row Labels",w:rightW,align:"l"}], [{v:["No data."]}]);
   ry+=16;
   // Purchase
-  if(M.purP.cats.length) ry=drawTable(xR, ry, "BHARAT PURCHASE REPORT (MT)", pivotCols(M.purP.months,150,80), pivotRows(M.purP));
+  if(M.purP.cats.length) ry=drawTable(xR, ry, "BHARAT PURCHASE REPORT (MT)", pivotCols(M.purP.months), pivotRows(M.purP));
   else ry=drawTable(xR, ry, "BHARAT PURCHASE REPORT (MT)", [{t:"Row Labels",w:rightW,align:"l"}], [{v:["No data."]}]);
   ry+=16;
   // Warehousewise
   {
-    const catW=150, grandW=80, mw=Math.max(44,(rightW-catW-grandW)/Math.max(1,M.whs.length));
-    const cols=[{t:"Row Labels",w:catW,align:"l"}].concat(M.whs.map(w=>({t:w,w:mw,align:"r"}))).concat([{t:"Grand Total",w:grandW,align:"r"}]);
+    const cols=[{t:"Row Labels",w:CATW,align:"l"}].concat(M.whs.map(w=>({t:w,w:MW,align:"r"}))).concat([{t:"Grand Total",w:GRW,align:"r"}]);
     const rows=M.whCats.map(c=>{ const rt=M.whs.reduce((a,w)=>a+(M.wd[c][w]||0),0);
       return {v:[c].concat(M.whs.map(w=>M.wd[c][w]?f0IN(M.wd[c][w]):"")).concat([f0IN(rt)])}; });
     rows.push({v:["Grand Total"].concat(M.whs.map(w=>f0IN(M.wt[w]||0))).concat([f0IN(M.whGrand)]), gt:true});
