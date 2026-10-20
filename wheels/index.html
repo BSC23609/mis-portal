@@ -221,16 +221,15 @@ const PMON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','D
 const PMACHS=[['MACHINE02 (MDS)','CTL 01-06 MM (MDS)'],['MACHINE01 (MDS)','CTL 6-25 MM (MDS)'],['MACHINE15 (MDS)','Shearing 06-25 MM (MDS)']];
 const isoL=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
 const ddmmL=d=>String(d.getDate()).padStart(2,'0')+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+d.getFullYear();
-const pf=n=>{n=Math.round(n*1000)/1000;return n===0?'0':n.toFixed(3).replace(/\.?0+$/,'');};
+const pf=n=>String(Math.round(n||0)); // whole numbers (MT), rounded
 // last working day strictly before today, skipping Sundays + holidays
 function lastWD(hol){const h=new Set((hol||[]).map(s=>String(s).slice(0,10)));let b=new Date();b.setHours(12,0,0,0);do{b.setDate(b.getDate()-1);}while(b.getDay()===0||h.has(isoL(b)));return b;}
 function ptable(headers,rows,grand){
-  let h='<div style="overflow-x:auto"><table class="x" style="width:100%;border-collapse:collapse"><thead><tr>';
-  h+=`<th class="l">${esc(headers[0])}</th>`;
-  for(let i=1;i<headers.length;i++) h+=`<th style="white-space:normal">${esc(headers[i])}</th>`;
+  let h='<div style="overflow-x:auto"><table class="x" style="width:100%;border-collapse:collapse;text-align:center"><thead><tr>';
+  headers.forEach(hd=> h+=`<th style="white-space:normal;text-align:center">${esc(hd)}</th>`);
   h+='</tr></thead><tbody>';
-  rows.forEach(r=>{ h+=`<tr><td class="l" style="border-top:1px solid #eef1f3;padding:5px 10px">${esc(r.label)}</td>`+r.vals.map(v=>`<td class="r" style="border-top:1px solid #eef1f3;padding:5px 10px">${v}</td>`).join('')+'</tr>'; });
-  h+=`<tr style="background:#0e2a47;color:#fff;font-weight:700"><td class="l" style="color:#fff;padding:6px 10px">${esc(grand.label)}</td>`+grand.vals.map(v=>`<td class="r" style="padding:6px 10px">${v}</td>`).join('')+'</tr>';
+  rows.forEach(r=>{ h+=`<tr><td style="border-top:1px solid #eef1f3;padding:5px 10px;text-align:center">${esc(r.label)}</td>`+r.vals.map(v=>`<td style="border-top:1px solid #eef1f3;padding:5px 10px;text-align:center">${v}</td>`).join('')+'</tr>'; });
+  h+=`<tr style="background:#0e2a47;color:#fff;font-weight:700"><td style="color:#fff;padding:6px 10px;text-align:center">${esc(grand.label)}</td>`+grand.vals.map(v=>`<td style="padding:6px 10px;text-align:center">${v}</td>`).join('')+'</tr>';
   return h+'</tbody></table></div>';
 }
 function renderProdReport(){

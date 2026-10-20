@@ -581,6 +581,10 @@ async function ensureWheelsTable(){
   await sql`alter table wheels_settings add column if not exists prod_enabled boolean default true`;
   await sql`alter table wheels_settings add column if not exists prod_format text default 'image'`;
   await sql`alter table wheels_settings add column if not exists holidays text[] default '{}'`;
+  // Management group (gets Wheels stock + production report + company-wide Daily Stock report)
+  await sql`alter table wheels_settings add column if not exists mgmt_mail_to text[] default '{}'`;
+  await sql`alter table wheels_settings add column if not exists mgmt_wa_to text[] default '{}'`;
+  await sql`alter table wheels_settings add column if not exists mgmt_enabled boolean default true`;
 }
 async function handlerWheels(req, res){
   if (cors(req, res)) return;
@@ -653,11 +657,17 @@ async function handlerWheels(req, res){
         if (auth !== "Bearer " + process.env.CRON_SECRET) return json(res, 401, { error: "unauthorized" });
         const tmpl = process.env.WHEELS_WA_TEMPLATE;
         if (!tmpl) return json(res, 400, { error: "WHEELS_WA_TEMPLATE not set" });
-        const r3 = await sql`select wa_to, wa_enabled from wheels_settings where id=1`;
+        const r3 = await sql`select wa_to, wa_enabled, mgmt_wa_to, mgmt_enabled, prod_wa_to, prod_enabled from wheels_settings where id=1`;
         const s3 = r3[0] || {};
-        if (s3.wa_enabled === false) return json(res, 200, { ok: true, skipped: "whatsapp disabled in settings" });
-        const nums = (s3.wa_to || []).map(String).map(x => x.trim()).filter(Boolean);
-        if (!nums.length) return json(res, 200, { ok: true, skipped: "no whatsapp recipients" });
+        // Wheels India Stock on WhatsApp goes to Client + Management + Production, each gated by its own switch.
+        const clean = a => (a || []).map(String).map(x => x.trim()).filter(Boolean);
+        const stockSet = [
+          ...(s3.wa_enabled === false ? [] : clean(s3.wa_to)),
+          ...(s3.mgmt_enabled === false ? [] : clean(s3.mgmt_wa_to)),
+          ...(s3.prod_enabled === false ? [] : clean(s3.prod_wa_to))
+        ];
+        const nums = [...new Set(stockSet)];
+        if (!nums.length) return json(res, 200, { ok: true, skipped: "no whatsapp recipients (client/management/production all empty or disabled)" });
         const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
         const sent = [];
         for (const num of nums) {
@@ -692,11 +702,16 @@ async function handlerWheels(req, res){
         if (auth !== "Bearer " + process.env.CRON_SECRET) return json(res, 401, { error: "unauthorized" });
         const tmpl = process.env.WHEELS_WA_PROD_TEMPLATE;
         if (!tmpl) return json(res, 400, { error: "WHEELS_WA_PROD_TEMPLATE not set" });
-        const r5 = await sql`select prod_wa_to, prod_enabled, prod_format from wheels_settings where id=1`;
+        const r5 = await sql`select prod_wa_to, prod_enabled, prod_format, mgmt_wa_to, mgmt_enabled from wheels_settings where id=1`;
         const s5 = r5[0] || {};
-        if (s5.prod_enabled === false) return json(res, 200, { ok: true, skipped: "production whatsapp disabled in settings" });
-        const nums = (s5.prod_wa_to || []).map(String).map(x => x.trim()).filter(Boolean);
-        if (!nums.length) return json(res, 200, { ok: true, skipped: "no production whatsapp recipients" });
+        // Production report on WhatsApp goes to Management + Production, each gated by its own switch.
+        const cleanP = a => (a || []).map(String).map(x => x.trim()).filter(Boolean);
+        const prodSet = [
+          ...(s5.mgmt_enabled === false ? [] : cleanP(s5.mgmt_wa_to)),
+          ...(s5.prod_enabled === false ? [] : cleanP(s5.prod_wa_to))
+        ];
+        const nums = [...new Set(prodSet)];
+        if (!nums.length) return json(res, 200, { ok: true, skipped: "no production whatsapp recipients (management/production empty or disabled)" });
         const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
         const url = base + (s5.prod_format === "pdf" ? "/wheels-production.pdf" : "/wheels-production.png");
         const sent = [];
@@ -754,6 +769,9 @@ async function handlerWheels(req, res){
       if (typeof body.prod_enabled === "boolean") await sql`update wheels_settings set prod_enabled=${body.prod_enabled} where id=1`;
       if (body.prod_format==="pdf"||body.prod_format==="image") await sql`update wheels_settings set prod_format=${body.prod_format} where id=1`;
       if (Array.isArray(body.holidays)) await sql`update wheels_settings set holidays=${body.holidays.map(s=>String(s).slice(0,10)).filter(s=>/^\d{4}-\d{2}-\d{2}$/.test(s))} where id=1`;
+      if (Array.isArray(body.mgmt_mail_to)) await sql`update wheels_settings set mgmt_mail_to=${body.mgmt_mail_to.map(String)} where id=1`;
+      if (Array.isArray(body.mgmt_wa_to)) await sql`update wheels_settings set mgmt_wa_to=${body.mgmt_wa_to.map(String)} where id=1`;
+      if (typeof body.mgmt_enabled === "boolean") await sql`update wheels_settings set mgmt_enabled=${body.mgmt_enabled} where id=1`;
       // test send: render from the last CSV and email to the given address (or configured To)
       if (body.send) {
         const rows = await sql`select mail_to, mail_cc from wheels_settings where id=1`;
@@ -779,7 +797,7 @@ async function handlerWheels(req, res){
       await sql`update wheels_settings set updated_at=now() where id=1`;
       return json(res, 200, { ok: true });
     }
-    const rows = await sql`select mail_to, mail_cc, send_time, enabled, wip, mail_subject, mail_body, wa_to, wa_enabled, prod_mail_to, prod_wa_to, prod_enabled, prod_format, holidays from wheels_settings where id=1`;
+    const rows = await sql`select mail_to, mail_cc, send_time, enabled, wip, mail_subject, mail_body, wa_to, wa_enabled, prod_mail_to, prod_wa_to, prod_enabled, prod_format, holidays, mgmt_mail_to, mgmt_wa_to, mgmt_enabled from wheels_settings where id=1`;
     const s = rows[0] || {};
     return json(res, 200, {
       mail_to: s.mail_to || [], mail_cc: s.mail_cc || [],
@@ -788,7 +806,8 @@ async function handlerWheels(req, res){
       wa_to: s.wa_to || [], wa_enabled: s.wa_enabled !== false,
       prod_mail_to: s.prod_mail_to || [], prod_wa_to: s.prod_wa_to || [],
       prod_enabled: s.prod_enabled !== false, prod_format: s.prod_format || "image",
-      holidays: s.holidays || []
+      holidays: s.holidays || [],
+      mgmt_mail_to: s.mgmt_mail_to || [], mgmt_wa_to: s.mgmt_wa_to || [], mgmt_enabled: s.mgmt_enabled !== false
     });
   }catch(e){
     return json(res, 500, { error: String(e.message || e) });
@@ -1047,7 +1066,7 @@ async function prodModel(holidays){
                          tot:parseFloat(r["Total Qty"])||0, wh:parseFloat(r["Wheels Qty"])||0 }))
               .filter(r=>/^\d{4}-\d{2}-\d{2}$/.test(r.ds));
   const sum=(fld,mc,from,to)=>R.reduce((a,r)=>{ if(mc&&r.mc!==mc)return a; if(from&&r.ds<from)return a; if(to&&r.ds>to)return a; return a+r[fld]; },0);
-  const fmt=n=>{ n=Math.round(n*1000)/1000; return n===0?"0":n.toFixed(3).replace(/\.?0+$/,""); };
+  const fmt=n=>String(Math.round(n||0)); // Production report: whole numbers (MT), rounded
   // Section A: Total production (all grades) by machine
   const total={rows:[],grand:{on:0,mon:0,lm:0}};
   PROD_MACHS.forEach(mo=>{
@@ -1108,16 +1127,16 @@ function prodSvg(M){
     const maxLines=Math.max(...hl.map(a=>a.length));
     const hH=12+maxLines*11+4;
     rect(L,y,R-L,hH,"#eef3f7");
-    txt(L+6,y+hH/2+4,headers[0],{size:10,bold:true,fill:"#1a2a3a"});
+    txt(L+firstW/2,y+hH/2+4,headers[0],{size:10,bold:true,fill:"#1a2a3a",anchor:"middle"});
     for(let i=1;i<headers.length;i++){ const cx=L+firstW+(i-1)*colW+colW/2; const lines=hl[i]; const sY=y+16+(maxLines-lines.length)*5.5;
       lines.forEach((ln,li)=>txt(cx,sY+li*11,ln,{size:9,bold:true,fill:"#1a2a3a",anchor:"middle"})); }
     y+=hH;
     const rH=22;
     dataRows.forEach((r,ri)=>{ rect(L,y,R-L,rH, ri%2?"#f7fafc":"#ffffff");
-      txt(L+6,y+15,r.label,{size:10,fill:"#222"});
-      r.vals.forEach((v,i)=>{ const cx=L+firstW+i*colW+colW-8; txt(cx,y+15,v,{size:10,fill:"#222",anchor:"end"}); }); y+=rH; });
-    rect(L,y,R-L,rH,"#0e2a47"); txt(L+6,y+15,grand.label,{size:10,bold:true,fill:"#fff"});
-    grand.vals.forEach((v,i)=>{ const cx=L+firstW+i*colW+colW-8; txt(cx,y+15,v,{size:10,bold:true,fill:"#fff",anchor:"end"}); }); y+=rH;
+      txt(L+firstW/2,y+15,r.label,{size:10,fill:"#222",anchor:"middle"});
+      r.vals.forEach((v,i)=>{ const cx=L+firstW+i*colW+colW/2; txt(cx,y+15,v,{size:10,fill:"#222",anchor:"middle"}); }); y+=rH; });
+    rect(L,y,R-L,rH,"#0e2a47"); txt(L+firstW/2,y+15,grand.label,{size:10,bold:true,fill:"#fff",anchor:"middle"});
+    grand.vals.forEach((v,i)=>{ const cx=L+firstW+i*colW+colW/2; txt(cx,y+15,v,{size:10,bold:true,fill:"#fff",anchor:"middle"}); }); y+=rH;
     y+=18;
   }
   section("TOTAL PRODUCTION REPORT",
@@ -1157,15 +1176,15 @@ async function buildWheelsProdPdf(holidays){
     const n=headers.length-1, colW=(W-firstW)/n;
     doc.rect(L,y,W,18).fill("#0e2a47"); doc.fillColor("#fff").font("Helvetica-Bold").fontSize(10).text(title,L+8,y+5,{lineBreak:false}); y+=18;
     const hH=34; doc.rect(L,y,W,hH).fill("#eef3f7");
-    doc.fillColor("#1a2a3a").font("Helvetica-Bold").fontSize(8).text(headers[0],L+5,y+hH/2-4,{lineBreak:false});
+    doc.fillColor("#1a2a3a").font("Helvetica-Bold").fontSize(8).text(headers[0],L,y+hH/2-4,{width:firstW,align:"center"});
     for(let i=1;i<headers.length;i++){ const cx=L+firstW+(i-1)*colW; doc.font("Helvetica-Bold").fontSize(7).fillColor("#1a2a3a").text(headers[i],cx+2,y+5,{width:colW-4,align:"center"}); }
     y+=hH;
     const rH=18;
     dataRows.forEach((r,ri)=>{ if(ri%2){doc.rect(L,y,W,rH).fill("#f7fafc");}
-      doc.font("Helvetica").fontSize(9).fillColor("#222").text(r.label,L+5,y+5,{width:firstW-6,lineBreak:false});
-      r.vals.forEach((v,i)=>{ const cx=L+firstW+i*colW; doc.font("Helvetica").fontSize(9).fillColor("#222").text(v,cx+2,y+5,{width:colW-6,align:"right",lineBreak:false}); }); y+=rH; });
-    doc.rect(L,y,W,rH).fill("#0e2a47"); doc.font("Helvetica-Bold").fontSize(9).fillColor("#fff").text(grand.label,L+5,y+5,{width:firstW-6,lineBreak:false});
-    grand.vals.forEach((v,i)=>{ const cx=L+firstW+i*colW; doc.font("Helvetica-Bold").fontSize(9).fillColor("#fff").text(v,cx+2,y+5,{width:colW-6,align:"right",lineBreak:false}); }); y+=rH+14;
+      doc.font("Helvetica").fontSize(9).fillColor("#222").text(r.label,L,y+5,{width:firstW,align:"center",lineBreak:false});
+      r.vals.forEach((v,i)=>{ const cx=L+firstW+i*colW; doc.font("Helvetica").fontSize(9).fillColor("#222").text(v,cx,y+5,{width:colW,align:"center",lineBreak:false}); }); y+=rH; });
+    doc.rect(L,y,W,rH).fill("#0e2a47"); doc.font("Helvetica-Bold").fontSize(9).fillColor("#fff").text(grand.label,L,y+5,{width:firstW,align:"center",lineBreak:false});
+    grand.vals.forEach((v,i)=>{ const cx=L+firstW+i*colW; doc.font("Helvetica-Bold").fontSize(9).fillColor("#fff").text(v,cx,y+5,{width:colW,align:"center",lineBreak:false}); }); y+=rH+14;
   }
   section("TOTAL PRODUCTION REPORT",
     ["Machine", M.labels.on, M.labels.mon, M.labels.lm], 150,

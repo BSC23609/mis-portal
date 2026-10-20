@@ -75,8 +75,30 @@
   </div>
 
   <div class="card">
-    <h3>Production report — internal (mail + WhatsApp)</h3>
-    <div class="hint" style="margin-bottom:10px">The Wheels India production report (Plate / Strip output) sent to internal recipients only — not the customer. Goes out with the daily run as a PDF or an image.</div>
+    <h3>Management group (mail + WhatsApp)</h3>
+    <div class="hint" style="margin-bottom:10px">Management receives <b>all three</b>: the Wheels India Stock statement, the Production Report, and the company-wide Daily Stock report — on both email and WhatsApp.</div>
+    <div class="fld">
+      <label>Email recipients (management)</label>
+      <textarea id="mgmtMailTo" rows="2" placeholder="one address per line or comma-separated"></textarea>
+    </div>
+    <div class="fld">
+      <label>WhatsApp numbers (management)</label>
+      <textarea id="mgmtWaTo" rows="2" placeholder="919500680093, 9144xxxxxxx"></textarea>
+      <div class="hint">One per line or comma-separated. 10-digit numbers get 91 added automatically.</div>
+    </div>
+    <div class="fld"><label>Daily send</label>
+      <div class="toggle"><input type="checkbox" id="mgmtEnabled"/> <span>enabled</span></div>
+      <div class="hint">Turn off to pause all of management's sends (stock + production + daily stock) without removing recipients.</div>
+    </div>
+    <div class="saverow">
+      <button class="pbtn" style="background:var(--blue);border-color:var(--blue)" onclick="saveSettings()">Save settings</button>
+      <span class="saved" id="savedM">✓ Saved</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Production group (mail + WhatsApp)</h3>
+    <div class="hint" style="margin-bottom:10px">The Production group receives the <b>Wheels India Stock statement</b> and the <b>Production Report</b> (not the company-wide Daily Stock) — on both email and WhatsApp. The format below (PDF / image) applies to the production report for both this group and management.</div>
     <div class="fld">
       <label>Format</label>
       <select id="prodFormat" style="max-width:220px"><option value="image">Image (PNG)</option><option value="pdf">PDF</option></select>
@@ -160,6 +182,9 @@ async function load(){
     $('prodWaTo').value=(SET.prod_wa_to||[]).join('\n');
     $('prodEnabled').checked=SET.prod_enabled!==false;
     $('prodFormat').value=(SET.prod_format==='pdf')?'pdf':'image';
+    $('mgmtMailTo').value=(SET.mgmt_mail_to||[]).join('\n');
+    $('mgmtWaTo').value=(SET.mgmt_wa_to||[]).join('\n');
+    $('mgmtEnabled').checked=SET.mgmt_enabled!==false;
     $('holidays').value=(SET.holidays||[]).join('\n');
     $('foot').textContent='Settings loaded';
   }catch(e){ $('errbox').innerHTML='<div class="err">Couldn\'t load settings.</div>'; }
@@ -174,8 +199,8 @@ function flash(id){const e=$(id);e.style.display='inline';setTimeout(()=>e.style
 async function saveSettings(){
   try{
     const split=v=>v.split(/[\n,;]+/).map(s=>s.trim()).filter(Boolean);
-    await post({mail_to:split($('mailTo').value),mail_cc:split($('mailCc').value),send_time:$('sendTime').value,enabled:$('enabled').checked,mail_subject:$('mailSubject').value,mail_body:$('mailBody').value,wa_to:split($('waTo').value),wa_enabled:$('waEnabled').checked,prod_mail_to:split($('prodMailTo').value),prod_wa_to:split($('prodWaTo').value),prod_enabled:$('prodEnabled').checked,prod_format:$('prodFormat').value,holidays:split($('holidays').value)});
-    flash('savedS'); flash('savedW'); flash('savedP'); flash('savedH');
+    await post({mail_to:split($('mailTo').value),mail_cc:split($('mailCc').value),send_time:$('sendTime').value,enabled:$('enabled').checked,mail_subject:$('mailSubject').value,mail_body:$('mailBody').value,wa_to:split($('waTo').value),wa_enabled:$('waEnabled').checked,prod_mail_to:split($('prodMailTo').value),prod_wa_to:split($('prodWaTo').value),prod_enabled:$('prodEnabled').checked,prod_format:$('prodFormat').value,holidays:split($('holidays').value),mgmt_mail_to:split($('mgmtMailTo').value),mgmt_wa_to:split($('mgmtWaTo').value),mgmt_enabled:$('mgmtEnabled').checked});
+    flash('savedS'); flash('savedW'); flash('savedP'); flash('savedH'); flash('savedM');
   }catch(e){ alert(e.message); }
 }
 async function sendTest(){

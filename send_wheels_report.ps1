@@ -225,6 +225,27 @@ try{
   Log "ERROR sending: $($_.Exception.Message)"; exit 1
 }
 
+# ================= 4b. internal copy of the stock statement (Management + Production) =================
+# Same Wheels India stock statement, sent to the internal lists (no customer CC).
+# Each list gated by its own switch in settings. WhatsApp for these lists is handled by the portal trigger below.
+$intTo = @()
+if($set.mgmt_enabled -ne $false){ $intTo += @($set.mgmt_mail_to) }
+if($set.prod_enabled -ne $false){ $intTo += @($set.prod_mail_to) }
+$intTo = @($intTo | Where-Object { $_ } | Select-Object -Unique)
+if($intTo.Count -gt 0){
+  try{
+    $intMessage = @{
+      subject = "[Internal] " + $(if($mailSubject.Trim()){$mailSubject}else{"BSC - Wheels India Job Work Stock Statement - $((Get-Date).ToString('dd MMM yyyy'))"})
+      body = @{ contentType="HTML"; content=$html }
+      toRecipients = @($intTo | ForEach-Object { @{ emailAddress=@{ address=$_ } } })
+    }
+    if($attachB64){ $intMessage.attachments = @(@{ "@odata.type"="#microsoft.graph.fileAttachment"; name=$attachName; contentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"; contentBytes=$attachB64 }) }
+    $intMsg = @{ message=$intMessage; saveToSentItems=$true } | ConvertTo-Json -Depth 10
+    Invoke-RestMethod -Method POST -Uri "https://graph.microsoft.com/v1.0/users/$($w.sender)/sendMail" -Headers $hdr -Body $intMsg
+    Log "Internal stock copy sent to $($intTo.Count) (mgmt+production)."
+  }catch{ Log "Internal stock copy ERROR: $($_.Exception.Message)" }
+}else{ Log "No internal stock recipients - internal copy skipped." }
+
 # ================= 5. WhatsApp (triggered on the portal) =================
 # The portal sends the same statement as a PDF via WATI. WATI credentials and the
 # template name live in Vercel env (WATI_API_URL, WATI_API_KEY, WHEELS_WA_TEMPLATE);
