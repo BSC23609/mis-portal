@@ -246,6 +246,30 @@ if($intTo.Count -gt 0){
   }catch{ Log "Internal stock copy ERROR: $($_.Exception.Message)" }
 }else{ Log "No internal stock recipients - internal copy skipped." }
 
+# ================= 4c. company-wide Daily Stock report -> Management (PNG email) =================
+if($set.mgmt_enabled -ne $false){
+  $mgTo = @($set.mgmt_mail_to | Where-Object { $_ })
+  if($mgTo.Count -gt 0){
+    try{
+      $dsUrl = "$($portal.TrimEnd('/'))/daily-stock.png"
+      $dsTmp = Join-Path $env:TEMP ('bsc_dailystock_'+[Guid]::NewGuid().ToString('N')+'.png')
+      Invoke-WebRequest -Uri $dsUrl -OutFile $dsTmp -TimeoutSec 90 -UseBasicParsing
+      $dsB64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($dsTmp))
+      Remove-Item $dsTmp -ErrorAction SilentlyContinue
+      $dsHtml = '<p>Dear Team,</p><p>Company-wide Daily Stock report:</p><img src="cid:dailyimg" style="max-width:100%;border:1px solid #d0d7dd"/><p>Bharat Steel (Chennai) Pvt. Ltd.</p>'
+      $dsMessage = @{
+        subject = 'BSC - Daily Stock Report - '+(Get-Date).ToString('dd MMM yyyy')
+        body = @{ contentType='HTML'; content=$dsHtml }
+        toRecipients = @($mgTo | ForEach-Object { @{ emailAddress=@{ address=$_ } } })
+        attachments = @(@{ '@odata.type'='#microsoft.graph.fileAttachment'; name=('BSC_DailyStock_'+(Get-Date).ToString('yyyyMMdd')+'.png'); contentType='image/png'; contentBytes=$dsB64; contentId='dailyimg'; isInline=$true })
+      }
+      $dsMsg = @{ message=$dsMessage; saveToSentItems=$true } | ConvertTo-Json -Depth 12
+      Invoke-RestMethod -Method POST -Uri "https://graph.microsoft.com/v1.0/users/$($w.sender)/sendMail" -Headers $hdr -Body $dsMsg
+      Log "Daily Stock report emailed to Management ($($mgTo.Count))."
+    }catch{ Log "Daily Stock email ERROR: $($_.Exception.Message)" }
+  }else{ Log "Management email list empty - Daily Stock email skipped." }
+}else{ Log "Management disabled - Daily Stock email skipped." }
+
 # ================= 5. WhatsApp (triggered on the portal) =================
 # The portal sends the same statement as a PDF via WATI. WATI credentials and the
 # template name live in Vercel env (WATI_API_URL, WATI_API_KEY, WHEELS_WA_TEMPLATE);
@@ -261,4 +285,17 @@ if($w.cron_secret){
   }catch{ Log "WhatsApp trigger ERROR: $($_.Exception.Message)" }
 }else{
   Log "WhatsApp not triggered ([wheels] cron_secret missing) - skipped."
+}
+
+# ================= 6. Daily Stock report WhatsApp -> Management (portal trigger) =================
+# The portal sends /daily-stock.png to the management numbers via WATI
+# (template WHEELS_WA_DAILY_TEMPLATE, else falls back to WHEELS_WA_PROD_TEMPLATE).
+if($w.cron_secret){
+  try{
+    $dwaResp = Invoke-RestMethod -Method POST -TimeoutSec 90 `
+                 -Uri "$($portal.TrimEnd('/'))/api/wheels" `
+                 -Headers @{ Authorization = "Bearer $($w.cron_secret)"; "Content-Type" = "application/json" } `
+                 -Body (@{ daily_whatsapp = $true } | ConvertTo-Json)
+    Log ("Daily Stock WhatsApp: " + ($dwaResp | ConvertTo-Json -Compress -Depth 6))
+  }catch{ Log "Daily Stock WhatsApp trigger ERROR: $($_.Exception.Message)" }
 }

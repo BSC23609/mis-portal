@@ -94,6 +94,21 @@
       <button class="pbtn" style="background:var(--blue);border-color:var(--blue)" onclick="saveSettings()">Save settings</button>
       <span class="saved" id="savedM">✓ Saved</span>
     </div>
+    <div style="border-top:1px solid #e3e8ec;margin-top:14px;padding-top:14px">
+      <div class="hint" style="margin-bottom:10px">Test the company-wide <b>Daily Stock report</b> (management-only) as a PNG. Leave the box blank to use the first saved management recipient.</div>
+      <div style="display:flex;gap:24px;flex-wrap:wrap">
+        <div style="flex:1;min-width:260px">
+          <div class="fld"><label>Test: Daily Stock email to</label><input type="text" id="dailyTestTo" placeholder="you@bharatsteels.in"/></div>
+          <button class="pbtn" style="background:var(--blue);border-color:var(--blue)" id="dailyMailBtn" onclick="sendDailyMailTest()">Send test email</button>
+          <span class="saved" id="savedDM"></span>
+        </div>
+        <div style="flex:1;min-width:260px">
+          <div class="fld"><label>Test: Daily Stock WhatsApp to</label><input type="text" id="dailyWaTestTo" placeholder="919500680093"/></div>
+          <button class="pbtn" style="background:#128c7e;border-color:#128c7e" id="dailyWaBtn" onclick="sendDailyWaTest()">Send test WhatsApp</button>
+          <span class="saved" id="savedDW"></span>
+        </div>
+      </div>
+    </div>
   </div>
 
   <div class="card">
@@ -256,6 +271,32 @@ async function sendProdWaTest(){
     const split=v=>v.split(/[\n,;]+/).map(s=>s.trim()).filter(Boolean);
     await post({prod_wa_to:split($('prodWaTo').value),prod_format:$('prodFormat').value,prod_enabled:$('prodEnabled').checked});
     const r=await post({prod_whatsapp_test:true, prod_wa_test_to:to});
+    if(r.skipped){ msg.style.color='var(--gray)'; msg.textContent='• '+r.skipped; }
+    else{ const s=(r.sent||[])[0]||{}; if(s.error){ msg.style.color='var(--red)'; msg.textContent='✗ '+s.error; } else { msg.style.color='var(--good)'; msg.textContent='✓ Sent to '+(s.num||to); } }
+  }catch(e){ msg.style.color='var(--red)'; msg.textContent='✗ '+e.message; }
+  finally{ b.disabled=false; b.textContent='Send test WhatsApp'; }
+}
+async function sendDailyMailTest(){
+  const to=$('dailyTestTo').value.trim();
+  const b=$('dailyMailBtn'); b.disabled=true; b.textContent='Sending…';
+  const msg=$('savedDM'); msg.style.display='inline'; msg.style.color='var(--gray)'; msg.textContent='sending…';
+  try{
+    const split=v=>v.split(/[\n,;]+/).map(s=>s.trim()).filter(Boolean);
+    await post({mgmt_mail_to:split($('mgmtMailTo').value),mgmt_wa_to:split($('mgmtWaTo').value),mgmt_enabled:$('mgmtEnabled').checked});
+    const r=await post({daily_mail_test:true, test_to:to});
+    if(r.error){ msg.style.color='var(--red)'; msg.textContent='✗ '+r.error; }
+    else{ msg.style.color='var(--good)'; msg.textContent='✓ Sent to '+(r.sent_to||[]).join(', '); }
+  }catch(e){ msg.style.color='var(--red)'; msg.textContent='✗ '+e.message; }
+  finally{ b.disabled=false; b.textContent='Send test email'; }
+}
+async function sendDailyWaTest(){
+  const to=$('dailyWaTestTo').value.trim();
+  const b=$('dailyWaBtn'); b.disabled=true; b.textContent='Sending…';
+  const msg=$('savedDW'); msg.style.display='inline'; msg.style.color='var(--gray)'; msg.textContent='sending…';
+  try{
+    const split=v=>v.split(/[\n,;]+/).map(s=>s.trim()).filter(Boolean);
+    await post({mgmt_wa_to:split($('mgmtWaTo').value),mgmt_enabled:$('mgmtEnabled').checked});
+    const r=await post({daily_whatsapp_test:true, daily_wa_test_to:to});
     if(r.skipped){ msg.style.color='var(--gray)'; msg.textContent='• '+r.skipped; }
     else{ const s=(r.sent||[])[0]||{}; if(s.error){ msg.style.color='var(--red)'; msg.textContent='✗ '+s.error; } else { msg.style.color='var(--good)'; msg.textContent='✓ Sent to '+(s.num||to); } }
   }catch(e){ msg.style.color='var(--red)'; msg.textContent='✗ '+e.message; }

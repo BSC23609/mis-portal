@@ -592,7 +592,7 @@ async function handlerWheels(req, res){
     await ensureWheelsTable();
     // GET /api/wheels?fmt=pdf  ->  the statement as a PDF (same data/structure as the email).
     // Public, no-auth: this is the URL WATI fetches for the WhatsApp document template.
-    const fmt = (req.query && req.query.fmt) || ((/[?&]fmt=(pdf|xlsx|prodpdf|prodpng|wadiag)\b/.exec(req.url || "")) || [])[1] || "";
+    const fmt = (req.query && req.query.fmt) || ((/[?&]fmt=(pdf|xlsx|prodpdf|prodpng|dailypng|wadiag)\b/.exec(req.url || "")) || [])[1] || "";
     if (req.method === "GET" && fmt === "pdf"){
       const pdf = await buildWheelsPdf();
       res.setHeader("Content-Type", "application/pdf");
@@ -618,6 +618,13 @@ async function handlerWheels(req, res){
       const png = await buildWheelsProdPng();
       res.setHeader("Content-Type", "image/png");
       res.setHeader("Content-Disposition", 'inline; filename="WheelsIndia_Production_' + new Date().toISOString().slice(0,10).replace(/-/g,"") + '.png"');
+      res.setHeader("Cache-Control", "no-store");
+      return res.status(200).end(png);
+    }
+    if (req.method === "GET" && fmt === "dailypng"){
+      const png = await buildDailyStockPng();
+      res.setHeader("Content-Type", "image/png");
+      res.setHeader("Content-Disposition", 'inline; filename="BSC_DailyStock_' + new Date().toISOString().slice(0,10).replace(/-/g,"") + '.png"');
       res.setHeader("Cache-Control", "no-store");
       return res.status(200).end(png);
     }
@@ -753,6 +760,54 @@ async function handlerWheels(req, res){
         const sent = [];
         try { const r = await send(num, tmpl, [{ name: "report", value: url }]); sent.push({ num, ...(r || { ok: true }) }); } catch (e) { sent.push({ num, error: String(e.message || e) }); }
         return json(res, 200, { ok: true, url, template: tmpl, sent });
+      }
+      // Daily Stock (company-wide) WhatsApp — daily trigger (CRON_SECRET). Goes to Management only.
+      // Template WHEELS_WA_DAILY_TEMPLATE (image header, variable "report" = /daily-stock.png).
+      if (body.daily_whatsapp) {
+        const auth = req.headers.authorization || "";
+        if (!process.env.CRON_SECRET) return json(res, 503, { error: "CRON_SECRET not set" });
+        if (auth !== "Bearer " + process.env.CRON_SECRET) return json(res, 401, { error: "unauthorized" });
+        const tmpl = process.env.WHEELS_WA_DAILY_TEMPLATE || process.env.WHEELS_WA_PROD_TEMPLATE;
+        if (!tmpl) return json(res, 400, { error: "WHEELS_WA_DAILY_TEMPLATE not set" });
+        const rd = await sql`select mgmt_wa_to, mgmt_enabled from wheels_settings where id=1`;
+        const sd = rd[0] || {};
+        if (sd.mgmt_enabled === false) return json(res, 200, { ok: true, skipped: "management disabled in settings" });
+        const nums = [...new Set((sd.mgmt_wa_to || []).map(String).map(x => x.trim()).filter(Boolean))];
+        if (!nums.length) return json(res, 200, { ok: true, skipped: "no management whatsapp recipients" });
+        const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
+        const url = base + "/daily-stock.png";
+        const sent = [];
+        for (const num of nums) { try { const r = await send(num, tmpl, [{ name: "report", value: url }]); sent.push({ num, ...(r || { ok: true }) }); } catch (e) { sent.push({ num, error: String(e.message || e) }); } }
+        return json(res, 200, { ok: true, url, template: tmpl, sent });
+      }
+      // Daily Stock WhatsApp — test send from the settings page (no CRON_SECRET)
+      if (body.daily_whatsapp_test) {
+        const tmpl = process.env.WHEELS_WA_DAILY_TEMPLATE || process.env.WHEELS_WA_PROD_TEMPLATE;
+        if (!tmpl) return json(res, 200, { ok: true, skipped: "WHEELS_WA_DAILY_TEMPLATE not set on server" });
+        if (!watiBase() || !watiKey()) return json(res, 200, { ok: true, skipped: "WATI not configured on server (need WATI_API_URL + token)" });
+        const rd = await sql`select mgmt_wa_to from wheels_settings where id=1`;
+        const sd = rd[0] || {};
+        let num = String(body.daily_wa_test_to || "").trim();
+        if (!num) num = (sd.mgmt_wa_to || []).map(String)[0] || "";
+        if (!num) return json(res, 200, { ok: true, skipped: "no test number (enter one or save a management number first)" });
+        const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
+        const url = base + "/daily-stock.png";
+        const sent = [];
+        try { const r = await send(num, tmpl, [{ name: "report", value: url }]); sent.push({ num, ...(r || { ok: true }) }); } catch (e) { sent.push({ num, error: String(e.message || e) }); }
+        return json(res, 200, { ok: true, url, template: tmpl, sent });
+      }
+      // Daily Stock email — test send from the settings page
+      if (body.daily_mail_test) {
+        const rd = await sql`select mgmt_mail_to from wheels_settings where id=1`;
+        const sd = rd[0] || {};
+        const to = body.test_to ? [String(body.test_to)] : (sd.mgmt_mail_to || []);
+        if (!to.length) return json(res, 400, { error: "no recipient (enter one or save a management email first)" });
+        const stamp = new Date().toISOString().slice(0,10).replace(/-/g,"");
+        const png = (await buildDailyStockPng()).toString("base64");
+        const html = `<p>Dear Team,</p><p>Company-wide Daily Stock report:</p><img src="cid:dailyimg" style="max-width:100%;border:1px solid #d0d7dd"/><p>Bharat Steel (Chennai) Pvt. Ltd.</p>`;
+        const attach = { name:"BSC_DailyStock_"+stamp+".png", b64:png, contentType:"image/png", cid:"dailyimg" };
+        await sendWheelsMail(to, [], html, (body.test_to?"[TEST] ":"")+"BSC — Daily Stock Report — "+new Date().toLocaleDateString("en-IN"), attach);
+        return json(res, 200, { ok:true, sent_to:to });
       }
       // update only the keys provided (settings save and WIP save are separate posts)
       if (Array.isArray(body.mail_to)) await sql`update wheels_settings set mail_to=${body.mail_to} where id=1`;
@@ -1200,6 +1255,150 @@ async function buildWheelsProdPdf(holidays){
     {label:"TOTAL", vals:[f(M.monthly.grand.c[0]),f(M.monthly.grand.c[1]),f(M.monthly.grand.c[2]),f(M.monthly.grand.tot)]});
   doc.fillColor("#999").font("Helvetica-Oblique").fontSize(7).text("Computer-generated report - may contain mistakes. Bharat Steel (Chennai) Pvt. Ltd.",L,y,{width:W});
   doc.end(); await done; return Buffer.concat(chunks);
+}
+
+// ================= Company-wide DAILY STOCK report (PNG) — mirrors stock/daily.html =================
+const DS_SHOWN_WH=["11","38","22","07","39","50","51","52"];
+const DS_FYMON=["Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb","Mar"];
+const dsFyOf=(y,m)=>m>=4?y:y-1;
+const dsIdx=m=>(m+8)%12;
+function f0IN(n){ return Number(n||0).toLocaleString("en-IN",{maximumFractionDigits:0}); }
+function f3IN(n){ return Number(n||0).toLocaleString("en-IN",{minimumFractionDigits:3,maximumFractionDigits:3}); }
+async function dailyStockData(){
+  const DATA_BASE = process.env.DATA_BASE || "https://raw.githubusercontent.com/BSC23609/bsc-stock-data/main";
+  const g=u=>fetch(DATA_BASE+"/"+u+"?t="+Date.now()).then(r=>r.ok?r.text():"").catch(()=>"");
+  const [stock,sales,pur,jw,wstk,prod] = await Promise.all([
+    g("mis_stock.csv"), g("mis_sales.csv"), g("mis_purchase.csv"), g("mis_jobwork_flow.csv"), g("wheels_stock.csv"), g("production.csv")
+  ]);
+  const meta = await fetch(DATA_BASE+"/mis_meta.json?t="+Date.now()).then(r=>r.ok?r.json():{}).catch(()=>({}));
+  return { stock:parseCsvSrv(stock), sales:parseCsvSrv(sales), pur:parseCsvSrv(pur), jw:parseCsvSrv(jw), wstk:parseCsvSrv(wstk), prod:parseCsvSrv(prod), meta };
+}
+// month x category pivot (current FY). onlyJw: true=only job-work rows, false=exclude job-work, undefined=all rows.
+function dsPivot(rows, fy, onlyJw){
+  const data={}, tot={}; let latest=-1;
+  rows.forEach(r=>{ const isJw=r.JW==="Y"; if(onlyJw!==undefined && (onlyJw?!isJw:isJw)) return;
+    const y=+r.Yr, m=+r.Mth; if(!m || dsFyOf(y,m)!==fy) return; const i=dsIdx(m), q=parseFloat(r.Qty)||0;
+    const c=r.Category||"(uncategorised)"; (data[c]??={})[i]=(data[c][i]||0)+q; tot[i]=(tot[i]||0)+q; if(i>latest)latest=i; });
+  const cats=Object.keys(data).sort();
+  const months=DS_FYMON.map((_,i)=>i).filter(i=>i<=latest);
+  return { cats, months, data, tot };
+}
+async function dailyStockModel(){
+  const D=await dailyStockData();
+  const {y:iy,m:im}=istYMD(); const fy = im>=4 ? iy : iy-1;
+  const num=v=>parseFloat(v)||0;
+  const STOCK=D.stock.filter(r=>DS_SHOWN_WH.includes(r.WhsCode));
+  // HR coil stock (WH 38, item-wise)
+  const w38={}; STOCK.filter(r=>r.WhsCode==="38").forEach(r=>{ w38[r.ItemName]=(w38[r.ItemName]||0)+num(r.OnHand); });
+  const coilArr=Object.entries(w38).sort((a,b)=>b[1]-a[1]); const t38=coilArr.reduce((s,[,q])=>s+q,0);
+  // sales / job-work / purchase pivots
+  const salesP=dsPivot(D.sales, fy, false);
+  const jwP=dsPivot(D.sales, fy, true);
+  const purP=dsPivot(D.pur, fy, undefined);
+  const inFy=r=>dsFyOf(+r.Yr,+r.Mth)===fy;
+  const ownMt=D.sales.filter(r=>r.JW!=="Y"&&inFy(r)).reduce((a,r)=>a+num(r.Qty),0);
+  const jwMt =D.sales.filter(r=>r.JW==="Y"&&inFy(r)).reduce((a,r)=>a+num(r.Qty),0);
+  // Wheels India throughput
+  const isW=s=>/WHEELS INDIA/i.test(s||"");
+  let recv=0,disp=0;
+  D.jw.forEach(r=>{ if(dsFyOf(+r.Yr,+r.Mth)!==fy)return;
+    if(isW(r.CardName)&&/VENDOR/i.test(r.CardName)&&/^Received/.test(r.Kind)) recv+=num(r.InQty);
+    if(isW(r.CardName)&&/CUSTOMER/i.test(r.CardName)&&/^Dispatched/.test(r.Kind)) disp+=num(r.OutQty); });
+  const held=D.wstk.reduce((a,r)=>a+num(r.Quantity),0);
+  const wInv=D.sales.filter(r=>r.JW==="Y"&&isW(r.CardName)&&inFy(r)).reduce((a,r)=>a+num(r.Qty),0);
+  // warehouse-wise (category x warehouse)
+  const wd={}, ws=new Set(), wt={};
+  STOCK.forEach(r=>{ const q=num(r.OnHand), c=r.Category||"8. OTHERS"; (wd[c]??={})[r.WhsCode]=(wd[c][r.WhsCode]||0)+q; ws.add(r.WhsCode); wt[r.WhsCode]=(wt[r.WhsCode]||0)+q; });
+  const whCats=Object.keys(wd).sort(), whs=[...ws].sort();
+  const whGrand=Object.values(wt).reduce((a,b)=>a+b,0);
+  // production today / month-to-date
+  const PC=["Today Prime Nos","Today Defective Nos","Today Scrap Nos","Today Prime Qty","Today Defective Qty","Today Scrap Qty","Month Prime Nos","Month Defective Nos","Month Scrap Nos","Month Prime Qty","Month Defective Qty","Month Scrap Qty"];
+  const prodRows=D.prod.map(r=>({ name:(r["Machine Name"]||r["Machine Code"]||""), vals:PC.map(c=>num(r[c])) }));
+  const prodTot=PC.map((_,i)=>prodRows.reduce((a,r)=>a+r.vals[i],0));
+  const asof = D.meta.generated ? new Date(D.meta.generated).toLocaleString("en-IN",{day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit",timeZone:"Asia/Kolkata"}) : new Date().toLocaleString("en-IN",{timeZone:"Asia/Kolkata"});
+  return { fy, asof, coilArr, t38, salesP, jwP, purP, ownMt, jwMt, recv, disp, held, wInv, wd, whCats, whs, wt, whGrand, prodRows, prodTot };
+}
+function dailyStockSvg(M){
+  const W=1180, L=16, R=W-16;
+  const els=[]; let y=0;
+  const rect=(x,yy,w,h,f)=>els.push(`<rect x="${x}" y="${yy}" width="${w}" height="${h}" fill="${f}"/>`);
+  const txt=(x,yy,s,o={})=>els.push(`<text x="${x}" y="${yy}" font-family="DejaVu Sans" font-size="${o.size||10}"${o.bold?' font-weight="bold"':''} fill="${o.fill||'#222'}" text-anchor="${o.anchor||'start'}">${esc2(s)}</text>`);
+  const cell=(c,yy,s,o)=>{ if(c.align==="r") txt(c.x+c.w-6,yy,s,{...o,anchor:"end"}); else if(c.align==="c") txt(c.x+c.w/2,yy,s,{...o,anchor:"middle"}); else txt(c.x+6,yy,s,{...o,anchor:"start"}); };
+  const place=cols=>{ let x=L; cols.forEach(c=>{ c.x=x; x+=c.w; }); return x-L; };
+  // header band
+  rect(0,0,W,52,"#0e2a47");
+  txt(L,24,"BHARAT STEEL (CHENNAI) PRIVATE LIMITED — Daily Stock Report",{size:17,bold:true,fill:"#fff"});
+  txt(L,42,"Company-wide daily stock, sales, purchase, job-work & production",{size:10,fill:"#cfe0ef"});
+  y=52; txt(R,y+16,"As on: "+M.asof,{size:10,fill:"#445",anchor:"end"}); y+=26;
+  function bar(t){ rect(L,y,R-L,20,"#2f6ea5"); txt(L+8,y+14,t,{size:11,bold:true,fill:"#fff"}); y+=20; }
+  // generic table: cols=[{t,w,align,sub}], rows=[{v:[],gt}]
+  function table(cols, rows, headH){
+    place(cols); const hH=headH||20;
+    rect(L,y,R-L,hH,"#dbeaf5");
+    cols.forEach(c=>{ if(c.sub){ txt(c.x+c.w/2,y+9,c.t,{size:8,bold:true,fill:"#1a2a3a",anchor:"middle"}); txt(c.x+c.w/2,y+hH-4,c.sub,{size:8,bold:true,fill:"#1a2a3a",anchor:"middle"}); } else cell(c,y+hH/2+4,c.t,{size:9,bold:true,fill:"#1a2a3a"}); });
+    y+=hH;
+    const rH=18;
+    rows.forEach((r,ri)=>{ rect(L,y,R-L,rH, r.gt?"#dbeaf5":(ri%2?"#f7fafc":"#ffffff"));
+      cols.forEach((c,ci)=>cell(c,y+13,r.v[ci]==null?"":String(r.v[ci]),{size:9,bold:!!r.gt,fill:"#1a2233"})); y+=rH; });
+  }
+  function note(txtStr){ rect(L,y,R-L,20,"#f3f7fa"); txt(L+8,y+14,txtStr,{size:9,fill:"#33505f"}); y+=24; }
+  // 1. HR coil stock
+  bar("BHARAT HR COIL STOCK (Warehouse 38)");
+  table(
+    [{t:"Item",w:R-L-260,align:"l"},{t:"38",w:130,align:"r"},{t:"Grand Total",w:130,align:"r"}],
+    M.coilArr.map(([n,q])=>({v:[n,f3IN(q),f3IN(q)]})).concat([{v:["Grand Total",f3IN(M.t38),f3IN(M.t38)],gt:true}])
+  ); y+=10;
+  // pivot renderer
+  function pivot(title, P, note0){
+    bar(title);
+    if(!P.cats.length){ note("No data."); return; }
+    const gcolW=110, catW=240, mw=Math.max(58,(R-L-catW-gcolW)/Math.max(1,P.months.length));
+    const cols=[{t:"Category",w:catW,align:"l"}].concat(P.months.map(i=>({t:DS_FYMON[i],w:mw,align:"r"}))).concat([{t:"Grand Total",w:gcolW,align:"r"}]);
+    const rows=P.cats.map(c=>{ const rt=P.months.reduce((a,i)=>a+(P.data[c][i]||0),0);
+      return {v:[c].concat(P.months.map(i=>P.data[c][i]?f0IN(P.data[c][i]):"")).concat([f0IN(rt)])}; });
+    const gt={v:["Grand Total"].concat(P.months.map(i=>f0IN(P.tot[i]||0))).concat([f0IN(Object.values(P.tot).reduce((a,b)=>a+b,0))]), gt:true};
+    table(cols, rows.concat([gt]));
+    if(note0){ note(note0); } else { y+=10; }
+  }
+  pivot("BHARAT SALES REPORT (current FY · own material, excl. job work · MT)", M.salesP);
+  pivot("JOB WORK — CUSTOMER MATERIAL PROCESSED (excluded from sales above · MT)", M.jwP,
+    `Gross (sales + job work): ${f0IN(M.ownMt+M.jwMt)} MT  =  own material ${f0IN(M.ownMt)} + job work ${f0IN(M.jwMt)}`);
+  note(`Wheels India job-work throughput (this FY):  received ${f0IN(M.recv)}  ->  processed / returned ${f0IN(M.disp)}  ->  invoiced ${f0IN(M.wInv)} MT   ·   their stock at WH45 now ${f0IN(M.held)} MT`);
+  pivot("BHARAT PURCHASE REPORT (current FY · MT)", M.purP);
+  // warehouse-wise
+  bar("WAREHOUSEWISE STOCK (MT)");
+  {
+    const gcolW=110, catW=240, mw=Math.max(70,(R-L-catW-gcolW)/Math.max(1,M.whs.length));
+    const cols=[{t:"Category",w:catW,align:"l"}].concat(M.whs.map(w=>({t:w,w:mw,align:"r"}))).concat([{t:"Grand Total",w:gcolW,align:"r"}]);
+    const rows=M.whCats.map(c=>{ const rt=M.whs.reduce((a,w)=>a+(M.wd[c][w]||0),0);
+      return {v:[c].concat(M.whs.map(w=>M.wd[c][w]?f0IN(M.wd[c][w]):"")).concat([f0IN(rt)])}; });
+    const gt={v:["Grand Total"].concat(M.whs.map(w=>f0IN(M.wt[w]||0))).concat([f0IN(M.whGrand)]), gt:true};
+    table(cols, rows.concat([gt]));
+  } y+=10;
+  // production
+  bar("PRODUCTION — TODAY & MONTH-TO-DATE (Nos = pieces · Qty in MT)");
+  {
+    const sub=["Prime Nos","Def Nos","Scrap Nos","Prime Qty","Def Qty","Scrap Qty"];
+    const mcW=180, dw=(R-L-mcW)/12;
+    const cols=[{t:"Machine",w:mcW,align:"l"}];
+    sub.forEach(s=>cols.push({t:"TODAY",sub:s,w:dw,align:"r"}));
+    sub.forEach(s=>cols.push({t:"MTD",sub:s,w:dw,align:"r"}));
+    const isNos=i=>(i%6)<3;
+    const fmtp=(v,i)=>v?(isNos(i)?f0IN(v):f3IN(v)):"";
+    const rows=M.prodRows.map(r=>({v:[r.name].concat(r.vals.map((v,i)=>fmtp(v,i)))}));
+    const gt={v:["Grand Total"].concat(M.prodTot.map((v,i)=>isNos(i)?f0IN(v):f3IN(v))), gt:true};
+    table(cols, M.prodRows.length?rows.concat([gt]):[{v:["No production entries."].concat(Array(12).fill(""))}], 30);
+  }
+  y+=14; txt(L,y,"Computer-generated report - may contain mistakes.  Bharat Steel (Chennai) Pvt. Ltd. · info@bharatsteels.in",{size:8,fill:"#999"}); y+=10;
+  const H=y+6;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><rect width="${W}" height="${H}" fill="#ffffff"/>${els.join("")}</svg>`;
+}
+async function buildDailyStockPng(){
+  let Resvg; try{ Resvg=(await import("@resvg/resvg-js")).Resvg; }catch(e){ throw new Error("resvg-js not available on server: "+e.message); }
+  const ff=prodFontFiles();
+  const svg=dailyStockSvg(await dailyStockModel());
+  const r=new Resvg(svg, { font:{ fontFiles:ff, loadSystemFonts: ff.length===0, defaultFontFamily:"DejaVu Sans" }, background:"#ffffff" });
+  return Buffer.from(r.render().asPng());
 }
 async function sendWheelsMail(to, cc, html, subject, attach){
   const tenant=process.env.TENANT_ID, cid=process.env.CLIENT_ID, sec=process.env.CLIENT_SECRET;
