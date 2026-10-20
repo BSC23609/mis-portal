@@ -910,7 +910,7 @@ async function renderWheelsHtml(baseUrl, wipSet, note){
     const rs=rows.filter(r=>r.form===k).sort((a,b)=>b.Quantity-a.Quantity); if(!rs.length)continue;
     const tq=rs.reduce((a,r)=>a+r.Quantity,0); gb+=rs.length; gq+=tq;
     body+=`<tr><td colspan="9" style="background:${c};color:#fff;font-weight:700;padding:7px 10px;font-size:13px">${t}<span style="float:right">${rs.length} items &middot; ${tq.toFixed(3)} MT</span></td></tr>`+
-      `<tr style="background:#eef3f7"><th>#</th><th>Mill</th><th>Grade</th><th>Thk</th><th>Width</th><th>Length</th><th>Coil / Batch No</th><th>Qty (MT)</th><th>Age (d)</th></tr>`;
+      `<tr style="background:#eef3f7"><th>#</th><th>Mill</th><th>Grade</th><th>Thk</th><th>Width</th><th>Length</th><th>Coil / Batch No</th><th>Qty (MT)</th><th>Aging (d)</th></tr>`;
     rs.forEach((x,i)=>{ const mill=(x.ItemName||"").split(" ")[0];
       const bc=(+x.BatchCount>1)?` <span style="color:#999">(${x.BatchCount} batches)</span>`:"";
       body+=`<tr><td style="text-align:center;color:#888">${i+1}</td><td style="text-align:center">${esc2(mill)}</td><td style="text-align:center">${esc2(x.Grade)}</td><td style="text-align:center">${dimS(x.Thick)}</td><td style="text-align:center">${dimS(x.Width)}</td><td style="text-align:center">${lenS(x.Length)}</td><td style="text-align:center;font-family:monospace;font-size:11px">${esc2(x.CoilNo||x.BatchNum)}${bc}</td><td style="text-align:center;font-weight:600">${x.Quantity.toFixed(3)}</td><td style="text-align:center;color:#888">${esc2(x.AgeDays)}</td></tr>`; });
@@ -938,7 +938,7 @@ async function buildWheelsXlsx(rows){
              ["Job Work Stock Statement — Wheels India Limited"],
              ["As on: "+new Date().toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})+"   |   Customer: Wheels India Limited   |   Warehouse: Job Work (WH 45)"],
              []];
-  const hdr=["#","Mill","Grade","Thk","Width","Length","Coil / Batch No","Mother Coil","Qty (MT)","Age (d)"];
+  const hdr=["#","Mill","Grade","Thk","Width","Length","Coil / Batch No","Mother Coil","Qty (MT)","Aging (d)"];
   let gGrand=0, secRanges=[];
   for(const [k,t] of SEC){
     const rs=rows.filter(r=>r.form===k).sort((a,b)=>b.Quantity-a.Quantity); if(!rs.length)continue;
@@ -952,6 +952,8 @@ async function buildWheelsXlsx(rows){
     aoa.push([]);
   }
   aoa.push(["TOTAL MATERIAL HELD","","","","","","","",Number(gGrand.toFixed(3)),""]);
+  aoa.push([]);
+  aoa.push(["System generated statement - might have mistakes"]);
   const ws=XLSX.utils.aoa_to_sheet(aoa);
   ws["!cols"]=[{wch:4},{wch:10},{wch:16},{wch:7},{wch:8},{wch:9},{wch:22},{wch:22},{wch:11},{wch:7}];
   const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,"Stock Statement");
@@ -995,7 +997,7 @@ async function buildWheelsPdf(){
     {k:"len", t:"Length",         w:48, a:"center"},
     {k:"coil",t:"Coil / Batch No",w:118,a:"left"},
     {k:"qty", t:"Qty (MT)",       w:56, a:"right"},
-    {k:"age", t:"Age",            w:34, a:"center"}
+    {k:"age", t:"Aging",          w:34, a:"center"}
   ];
   const sumW=cols.reduce((a,c)=>a+c.w,0), scale=W/sumW; let cx=L;
   cols.forEach(c=>{ c.w=c.w*scale; c.x=cx; cx+=c.w; });
@@ -1068,7 +1070,7 @@ async function buildWheelsPdf(){
     ensure(26);
     doc.fillColor("#6b5200").font("Helvetica").fontSize(7).text("Plates currently under process (awaiting shearing) are excluded from this statement.", L, y, {width:W});
     y+=11;
-    doc.fillColor("#999").font("Helvetica-Oblique").fontSize(6.5).text("Computer generated statement — may contain mistakes.  Bharat Steel (Chennai) Pvt. Ltd. · No.147, Survey No.133, Thirunilai Village, Ponneri Taluk, Chennai 600103 · 044 6791 7800 · info@bharatsteels.in", L, y, {width:W});
+    doc.fillColor("#999").font("Helvetica-Oblique").fontSize(6.5).text("System generated statement - might have mistakes.  Bharat Steel (Chennai) Pvt. Ltd. · No.147, Survey No.133, Thirunilai Village, Ponneri Taluk, Chennai 600103 · 044 6791 7800 · info@bharatsteels.in", L, y, {width:W});
   }
 
   PAGES.forEach((pg, idx)=>{
@@ -1088,7 +1090,7 @@ async function buildWheelsPdf(){
 function wheelsStockSvg(rows, asof){
   const W=960, L=16, R=W-16;
   const SEC=[["PLATE","Plate Stock (WIP / FG)","#0e7a4b"],["STRIP","Strip / Blank Stock","#b5651d"],["COIL","Coil Stock","#1367a6"]];
-  const cols=[{k:"n",t:"#",w:26,a:"c"},{k:"mill",t:"Mill",w:64,a:"c"},{k:"grade",t:"Grade",w:120,a:"l"},{k:"thk",t:"Thk",w:52,a:"c"},{k:"wid",t:"Width",w:58,a:"c"},{k:"len",t:"Length",w:58,a:"c"},{k:"coil",t:"Coil / Batch No",w:200,a:"l"},{k:"qty",t:"Qty (MT)",w:84,a:"r"},{k:"age",t:"Age",w:40,a:"c"}];
+  const cols=[{k:"n",t:"#",w:26,a:"c"},{k:"mill",t:"Mill",w:64,a:"c"},{k:"grade",t:"Grade",w:120,a:"l"},{k:"thk",t:"Thk",w:52,a:"c"},{k:"wid",t:"Width",w:58,a:"c"},{k:"len",t:"Length",w:58,a:"c"},{k:"coil",t:"Coil / Batch No",w:200,a:"l"},{k:"qty",t:"Qty (MT)",w:84,a:"r"},{k:"age",t:"Aging",w:40,a:"c"}];
   const sumW=cols.reduce((a,c)=>a+c.w,0), scale=(R-L)/sumW; let cx=L; cols.forEach(c=>{ c.w*=scale; c.x=cx; cx+=c.w; });
   const qtyCol=cols.find(c=>c.k==="qty");
   const els=[];
@@ -1115,7 +1117,7 @@ function wheelsStockSvg(rows, asof){
     rect(L,y,R-L,18,"#e7eef4"); txt(qtyCol.x-6,y+12,title+" total",{size:8.5,bold:true,fill:"#1a2233",anchor:"end"}); put(qtyCol,y+12,tq.toFixed(3),{size:8.5,bold:true,fill:"#1a2233"}); y+=22;
   }
   rect(L,y,R-L,24,"#0e2a47"); txt(L+10,y+16,"TOTAL MATERIAL HELD",{size:11,bold:true,fill:"#fff"}); txt(R-8,y+16,gb+" items · "+gq.toFixed(3)+" MT",{size:11,bold:true,fill:"#fff",anchor:"end"}); y+=30;
-  txt(L,y,"Computer-generated statement - may contain mistakes.  Bharat Steel (Chennai) Pvt. Ltd. · info@bharatsteels.in",{size:8,fill:"#999"}); y+=10;
+  txt(L,y,"System generated statement - might have mistakes.  Bharat Steel (Chennai) Pvt. Ltd. · info@bharatsteels.in",{size:8,fill:"#999"}); y+=10;
   const H=y+6;
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><rect width="${W}" height="${H}" fill="#ffffff"/>${els.join("")}</svg>`;
 }
