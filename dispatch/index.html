@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
@@ -144,7 +144,6 @@
   <!-- Date range bar -->
   <div class="daterange">
     <div class="dr-shortcuts">
-      <button class="dr-chip" data-shortcut="yesterday">Yesterday</button>
       <button class="dr-chip" data-shortcut="today">Today</button>
       <button class="dr-chip" data-shortcut="week">This Week</button>
       <button class="dr-chip active" data-shortcut="month">This Month</button>
@@ -291,7 +290,7 @@
 
 <script>
 // ============ CONFIG ============
-const DATA_URL = 'https://raw.githubusercontent.com/BSC23609/bsc-stock-data/main/data.csv';
+const DATA_URL = 'data.csv';
 const SHEET_NAME_PREFERRED = null;  // not applicable for CSV; kept for compatibility
 const MAX_VALID_MINUTES = 720;       // 12 hours - drop rows above this from KPIs/charts (data entry errors)
 
@@ -575,7 +574,7 @@ const STATE = {
   // Date range filter (inclusive). null = unbounded.
   fromDate: null,           // JS Date at local midnight
   toDate:   null,           // JS Date at local midnight
-  activeShortcut: 'month',  // 'yesterday' | 'today' | 'week' | 'month' | 'last30' | 'custom'
+  activeShortcut: 'month',  // 'today' | 'week' | 'month' | 'last30' | 'custom'
 
   selectedCusts: new Set(),
   selectedEmps: new Set(),
@@ -611,10 +610,7 @@ function parseYMD(s) {
 function applyShortcut(name) {
   const now = new Date();
   STATE.activeShortcut = name;
-  if (name === 'yesterday') {
-    STATE.fromDate = addDays(startOfDay(now), -1);
-    STATE.toDate   = addDays(startOfDay(now), -1);
-  } else if (name === 'today') {
+  if (name === 'today') {
     STATE.fromDate = startOfDay(now);
     STATE.toDate   = startOfDay(now);
   } else if (name === 'week') {
