@@ -356,6 +356,9 @@ try{
   # and applies the holiday-aware "last working day" logic, so no period maths is done here.
   #   Machines (MDS): MACHINE02 = CTL 01-06 MM, MACHINE01 = CTL 6-25 MM, MACHINE15 = Shearing 06-25 MM.
   #   [Total Qty] = all grades on these machines; [Wheels Qty] = WIR006/WIR025 only.
+  #   NOTE: HRC-coded output items ARE counted - for the CTL lines the cut HR-coil output keeps its
+  #   HRC item code and is genuine production (excluding it understated CTL 01-06). Only true scrap/
+  #   offcut items (OTH000000000185 / OTH000000000218) and blank items are excluded.
   $wheelsDailySql = @'
 SELECT
     CONVERT(varchar(10), COALESCE(TRY_CONVERT(DATE, NULLIF(T0.U_ExDate,'')), TRY_CONVERT(DATE, T0.U_SDate)), 23) AS [Date],
@@ -369,7 +372,6 @@ WHERE COALESCE(TRY_CONVERT(DATE, NULLIF(T0.U_ExDate,'')), TRY_CONVERT(DATE, T0.U
   AND T1.U_MachCode IN ('MACHINE01 (MDS)','MACHINE02 (MDS)','MACHINE15 (MDS)')
   AND ISNULL(T1.U_OPItem,'') <> ''
   AND T1.U_OPItem NOT IN ('OTH000000000185','OTH000000000218')
-  AND T1.U_OPItem NOT LIKE 'HRC%'
 GROUP BY COALESCE(TRY_CONVERT(DATE, NULLIF(T0.U_ExDate,'')), TRY_CONVERT(DATE, T0.U_SDate)), T1.U_MachCode
 ORDER BY 1, 2
 '@

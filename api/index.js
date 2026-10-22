@@ -585,6 +585,34 @@ async function ensureWheelsTable(){
   await sql`alter table wheels_settings add column if not exists mgmt_mail_to text[] default '{}'`;
   await sql`alter table wheels_settings add column if not exists mgmt_wa_to text[] default '{}'`;
   await sql`alter table wheels_settings add column if not exists mgmt_enabled boolean default true`;
+  await sql`create table if not exists wheels_send_log (
+    id bigserial primary key,
+    ts timestamptz default now(),
+    run_date date default (now() at time zone 'Asia/Kolkata')::date,
+    report text,
+    channel text,
+    status text,
+    total int default 0,
+    ok_count int default 0,
+    fail_count int default 0,
+    detail text default ''
+  )`;
+}
+// Append one delivery-log row. Best-effort: never throws, so a logging failure can't break a send.
+async function logSend(o){
+  try{
+    await sql`insert into wheels_send_log (report, channel, status, total, ok_count, fail_count, detail)
+      values (${String(o.report||'').slice(0,40)}, ${String(o.channel||'').slice(0,20)}, ${String(o.status||'').slice(0,20)},
+              ${Number(o.total||0)}, ${Number(o.ok||0)}, ${Number(o.fail||0)}, ${String(o.detail||'').slice(0,500)})`;
+  }catch(e){ /* best-effort; logging must never break a send */ }
+}
+// Summarise a WATI per-number result array into a log row ({status, ok, fail, detail}).
+function waSummary(sent){
+  const okc = sent.filter(x=>!x.error).length, failc = sent.length - okc;
+  const status = failc===0 ? 'ok' : (okc ? 'partial' : 'fail');
+  const detail = failc ? sent.filter(x=>x.error).map(x=>x.num+': '+x.error).join('; ')
+                       : sent.length+' recipient(s): '+sent.map(x=>x.num).join(', ');
+  return { status, ok:okc, fail:failc, total:sent.length, detail };
 }
 async function handlerWheels(req, res){
   if (cors(req, res)) return;
@@ -592,7 +620,7 @@ async function handlerWheels(req, res){
     await ensureWheelsTable();
     // GET /api/wheels?fmt=pdf  ->  the statement as a PDF (same data/structure as the email).
     // Public, no-auth: this is the URL WATI fetches for the WhatsApp document template.
-    const fmt = (req.query && req.query.fmt) || ((/[?&]fmt=(pdf|xlsx|stockpng|prodpdf|prodpng|dailypng|wadiag)\b/.exec(req.url || "")) || [])[1] || "";
+    const fmt = (req.query && req.query.fmt) || ((/[?&]fmt=(pdf|xlsx|stockpng|prodpdf|prodpng|dailypng|wadiag|sendlog)\b/.exec(req.url || "")) || [])[1] || "";
     if (req.method === "GET" && fmt === "pdf"){
       const pdf = await buildWheelsPdf();
       res.setHeader("Content-Type", "application/pdf");
@@ -635,6 +663,14 @@ async function handlerWheels(req, res){
       res.setHeader("Cache-Control", "no-store");
       return res.status(200).end(png);
     }
+    // Delivery log: recent WhatsApp/email send results for the daily reminders (read by wheels/log.html).
+    if (req.method === "GET" && fmt === "sendlog"){
+      let rows = [];
+      try { rows = await sql`select ts, run_date, report, channel, status, total, ok_count, fail_count, detail
+                             from wheels_send_log order by id desc limit 300`; }
+      catch(e){ return json(res, 200, { rows: [], error: String(e.message||e) }); }
+      return json(res, 200, { rows });
+    }
     // Diagnostic: which WhatsApp env vars does this deployment actually see? (names/booleans only, no secrets)
     if (req.method === "GET" && fmt === "wadiag"){
       let st = {};
@@ -663,6 +699,17 @@ async function handlerWheels(req, res){
       let body = req.body;
       if (typeof body === "string") { try { body = JSON.parse(body); } catch { body = {}; } }
       body = body || {};
+      // Delivery-log ingest — the daily PowerShell scripts POST here after each EMAIL send so the
+      // Send Log page shows email status too (WhatsApp is logged by the portal itself below). CRON_SECRET-guarded.
+      if (body.log_add) {
+        const auth = req.headers.authorization || "";
+        if (!process.env.CRON_SECRET) return json(res, 503, { error: "CRON_SECRET not set" });
+        if (auth !== "Bearer " + process.env.CRON_SECRET) return json(res, 401, { error: "unauthorized" });
+        const okc = Number(body.ok||0), failc = Number(body.fail||0), tot = Number(body.total || (okc+failc));
+        const status = String(body.status || (failc ? (okc ? 'partial' : 'fail') : 'ok'));
+        await logSend({ report: body.report, channel: body.channel || 'email', status, total: tot, ok: okc, fail: failc, detail: body.detail });
+        return json(res, 200, { ok: true });
+      }
       // WhatsApp send trigger (fired by the daily script after the email). Guarded by CRON_SECRET.
       // Creds + template come from Vercel env (WATI_API_URL, WATI_API_KEY, WHEELS_WA_TEMPLATE);
       // recipient numbers come from the in-app settings (wa_to). PDF is served at /api/wheels?fmt=pdf.
@@ -682,7 +729,7 @@ async function handlerWheels(req, res){
           ...(s3.prod_enabled === false ? [] : clean(s3.prod_wa_to))
         ];
         const nums = [...new Set(stockSet)];
-        if (!nums.length) return json(res, 200, { ok: true, skipped: "no whatsapp recipients (client/management/production all empty or disabled)" });
+        if (!nums.length) { await logSend({report:'wheels_stock', channel:'whatsapp', status:'skipped', detail:'no recipients (client/management/production all empty or disabled)'}); return json(res, 200, { ok: true, skipped: "no whatsapp recipients (client/management/production all empty or disabled)" }); }
         const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
         const sent = [];
         const img = base + "/wheels.png?d=" + imgStamp();
@@ -690,6 +737,7 @@ async function handlerWheels(req, res){
           try { const r = await send(num, tmpl, [{ name: "report", value: img }]); sent.push({ num, ...(r || { ok: true }) }); }   // image header "report" + static URL buttons
           catch (e) { sent.push({ num, error: String(e.message || e) }); }
         }
+        await logSend({ report:'wheels_stock', channel:'whatsapp', ...waSummary(sent) });
         return json(res, 200, { ok: true, image: img, pdf: base + "/wheels.pdf", xlsx: base + "/wheels.xlsx", template: tmpl, sent });
       }
       // WhatsApp test send (triggered from the settings page, like the email test — no CRON_SECRET).
@@ -728,11 +776,12 @@ async function handlerWheels(req, res){
           ...(s5.prod_enabled === false ? [] : cleanP(s5.prod_wa_to))
         ];
         const nums = [...new Set(prodSet)];
-        if (!nums.length) return json(res, 200, { ok: true, skipped: "no production whatsapp recipients (management/production empty or disabled)" });
+        if (!nums.length) { await logSend({report:'production', channel:'whatsapp', status:'skipped', detail:'no recipients (management/production empty or disabled)'}); return json(res, 200, { ok: true, skipped: "no production whatsapp recipients (management/production empty or disabled)" }); }
         const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
         const url = base + "/wheels-production.png?d=" + imgStamp(); // WhatsApp always image (dated to force fresh fetch); email respects the pdf/image toggle
         const sent = [];
         for (const num of nums) { try { const r = await send(num, tmpl, [{ name: "report", value: url }]); sent.push({ num, ...(r || { ok: true }) }); } catch (e) { sent.push({ num, error: String(e.message || e) }); } }
+        await logSend({ report:'production', channel:'whatsapp', ...waSummary(sent) });
         return json(res, 200, { ok: true, url, template: tmpl, sent });
       }
       // Production email — test send (and reused by nothing else). Renders the chosen format and emails it.
@@ -781,13 +830,14 @@ async function handlerWheels(req, res){
         if (!tmpl) return json(res, 400, { error: "WHEELS_WA_DAILY_TEMPLATE not set" });
         const rd = await sql`select mgmt_wa_to, mgmt_enabled from wheels_settings where id=1`;
         const sd = rd[0] || {};
-        if (sd.mgmt_enabled === false) return json(res, 200, { ok: true, skipped: "management disabled in settings" });
+        if (sd.mgmt_enabled === false) { await logSend({report:'daily_stock', channel:'whatsapp', status:'skipped', detail:'management disabled in settings'}); return json(res, 200, { ok: true, skipped: "management disabled in settings" }); }
         const nums = [...new Set((sd.mgmt_wa_to || []).map(String).map(x => x.trim()).filter(Boolean))];
-        if (!nums.length) return json(res, 200, { ok: true, skipped: "no management whatsapp recipients" });
+        if (!nums.length) { await logSend({report:'daily_stock', channel:'whatsapp', status:'skipped', detail:'no management whatsapp recipients'}); return json(res, 200, { ok: true, skipped: "no management whatsapp recipients" }); }
         const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
         const url = base + "/daily-stock.png?d=" + imgStamp();
         const sent = [];
         for (const num of nums) { try { const r = await send(num, tmpl, [{ name: "report", value: url }]); sent.push({ num, ...(r || { ok: true }) }); } catch (e) { sent.push({ num, error: String(e.message || e) }); } }
+        await logSend({ report:'daily_stock', channel:'whatsapp', ...waSummary(sent) });
         return json(res, 200, { ok: true, url, template: tmpl, sent });
       }
       // Daily Stock WhatsApp — test send from the settings page (no CRON_SECRET)
