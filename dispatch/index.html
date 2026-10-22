@@ -529,7 +529,9 @@ function parseRows(rows) {
       const bTimeRaw = diffMin(outMin, invMin);
       const tTimeRaw = diffMin(inMin, invMin);
 
-      const isPending = wbStatus.toLowerCase() === 'pending' || outMin == null || invMin == null;
+      // Completed once the vehicle is weighed OUT or an INVOICE exists (either proves the cycle finished).
+      // Pending only when it has neither — those are the genuine gaps (no out-weighment and no invoice).
+      const isPending = (outMin == null && invMin == null);
 
       // Validity for KPIs: not pending AND all three values exist AND within sane bound
       const valid = !isPending
