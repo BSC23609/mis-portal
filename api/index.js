@@ -1291,7 +1291,7 @@ function prodSvg(M){
   const rect=(x,yy,w,h,fill)=>els.push(`<rect x="${x}" y="${yy}" width="${w}" height="${h}" fill="${fill}"/>`);
   const txt=(x,yy,s,o={})=>els.push(`<text x="${x}" y="${yy}" font-family="DejaVu Sans" font-size="${o.size||11}"${o.bold?' font-weight="bold"':''} fill="${o.fill||'#222'}" text-anchor="${o.anchor||'start'}">${esc2(s)}</text>`);
   rect(0,0,W,58,"#0e2a47");
-  txt(L,26,"Wheels India Production Report",{size:17,bold:true,fill:"#fff"});
+  txt(L,26,"Daily Production Report",{size:17,bold:true,fill:"#fff"});
   txt(L,46,"Bharat Steel (Chennai) Pvt. Ltd.  ·  Machine-wise  ·  Qty in MT",{size:10,fill:"#cfe0ef"});
   y=58; txt(L,y+18,"As on: "+M.asof,{size:10,fill:"#445"}); y+=30;
   const GC="#c4d0da"; // gridline colour
@@ -1349,7 +1349,7 @@ async function buildWheelsProdPdf(holidays){
   const doc=new PDFDocument({size:"A4",margin:28}); const chunks=[]; doc.on("data",c=>chunks.push(c)); const done=new Promise(r=>doc.on("end",r));
   const L=28,R=567,W=R-L; let y=28;
   doc.rect(L,y,W,44).fill("#0e2a47");
-  doc.fillColor("#fff").font("Helvetica-Bold").fontSize(15).text("Wheels India Production Report",L+10,y+9);
+  doc.fillColor("#fff").font("Helvetica-Bold").fontSize(15).text("Daily Production Report",L+10,y+9);
   doc.font("Helvetica").fontSize(8).fillColor("#cfe0ef").text("Bharat Steel (Chennai) Pvt. Ltd.   Machine-wise   Qty in MT",L+10,y+28,{width:W-20});
   y+=52; doc.fillColor("#445").font("Helvetica").fontSize(9).text("As on: "+M.asof,L,y); y+=16;
   function section(title, headers, firstW, dataRows, grand){
