@@ -1,0 +1,282 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Wheels India — Settings — Bharat Steel MIS</title><link rel="icon" type="image/png" href="BSC.png"/>
+<script>window.PORTAL={module:'wheels',screen:'settings'}</script>
+<style>
+  .fld{margin-bottom:14px}
+  .fld label{display:block;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--gray);margin-bottom:5px}
+  .fld input[type=text],.fld input[type=time],.fld input[type=email],.fld textarea,.fld select{width:100%;border:1px solid var(--line);border-radius:8px;padding:9px 11px;font-size:14px;font-family:inherit;background:#fff}
+  .fld .hint{font-size:11px;color:var(--gray);margin-top:4px}
+  .saverow{display:flex;align-items:center;gap:12px;margin-top:8px}
+  .saved{color:var(--good);font-size:13px;font-weight:600;display:none}
+  .toggle{display:flex;align-items:center;gap:8px;font-size:14px}
+  /* recipients table */
+  table.rc{width:100%;border-collapse:collapse;font-size:13px;min-width:820px}
+  table.rc th{background:#0e2a47;color:#fff;text-align:left;padding:9px 8px;font-size:11px;text-transform:uppercase;letter-spacing:.03em;white-space:nowrap}
+  table.rc th.ck,table.rc td.ck{text-align:center}
+  table.rc td{padding:6px 8px;border-top:1px solid #eef2f5;vertical-align:middle}
+  table.rc tr:nth-child(even) td{background:#fafcfe}
+  table.rc input[type=text],table.rc input[type=email],table.rc select{width:100%;border:1px solid var(--line);border-radius:7px;padding:7px 8px;font-size:13px;font-family:inherit;background:#fff}
+  table.rc input[type=checkbox]{width:18px;height:18px;cursor:pointer}
+  table.rc tfoot td{border-top:2px solid #cdd8e2;background:#f4f8fc;padding:9px 8px}
+  .rcbtn{font-size:12px;cursor:pointer;font-weight:600;text-decoration:none;color:#1367a6;white-space:nowrap}
+  .rcbtn.del{color:#a3271b;margin-left:8px}
+  .addbtn{background:var(--blue);border:1px solid var(--blue);color:#fff;border-radius:7px;padding:7px 14px;font-weight:700;cursor:pointer;font-size:13px}
+</style>
+</head><body>
+<div class="pw">
+  <div id="errbox"></div>
+
+  <!-- ===================== RECIPIENTS ===================== -->
+  <div class="card">
+    <h3 style="margin:0 0 6px">Recipients</h3>
+    <div class="hint" style="margin-bottom:12px">Add each person with their email and WhatsApp number, then tick which reports they should receive. A ticked report is sent to that person on <b>both</b> email and WhatsApp (whichever details are filled in). Edit any field and press <b>Save</b> on that row. Type into the bottom row and press <b>Add</b> for a new person.</div>
+    <div class="tblwrap" style="overflow:auto">
+      <table class="rc">
+        <thead><tr>
+          <th>Name</th><th>Email</th><th>Group</th><th>Number</th>
+          <th class="ck">Job Work<br>Stock</th><th class="ck">Daily<br>Stock</th><th class="ck">Daily<br>Production</th><th></th>
+        </tr></thead>
+        <tbody id="rcRows"></tbody>
+        <tfoot><tr id="rcAdd">
+          <td><input type="text" id="aName" placeholder="Name"/></td>
+          <td><input type="email" id="aEmail" placeholder="name@bharatsteels.in"/></td>
+          <td><select id="aGrp"><option value="">—</option><option>Customer</option><option>Management</option><option>Production</option><option>Other</option></select></td>
+          <td><input type="text" id="aMobile" placeholder="919500680093"/></td>
+          <td class="ck"><input type="checkbox" id="aJw"/></td>
+          <td class="ck"><input type="checkbox" id="aDs"/></td>
+          <td class="ck"><input type="checkbox" id="aDp"/></td>
+          <td><button class="addbtn" id="addBtn" onclick="addRecip()">Add</button></td>
+        </tr></tfoot>
+      </table>
+    </div>
+  </div>
+
+  <!-- ===================== MESSAGE & SCHEDULE ===================== -->
+  <div class="card">
+    <h3>Job Work Stock email — message & schedule</h3>
+    <div class="fld">
+      <label>Email subject <span style="font-weight:400;text-transform:none;color:var(--gray)">(optional — a default is used if blank)</span></label>
+      <input type="text" id="mailSubject" placeholder="BSC — Wheels India Job Work Stock Statement"/>
+    </div>
+    <div class="fld">
+      <label>Message body <span style="font-weight:400;text-transform:none;color:var(--gray)">(appears above the stock table)</span></label>
+      <textarea id="mailBody" rows="4" placeholder="Dear Sir/Madam,&#10;&#10;Please find below the current status of your material held at BSC as on date.&#10;&#10;Regards,&#10;Bharat Steel (Chennai) Pvt. Ltd."></textarea>
+      <div class="hint">Plain text. Line breaks are preserved. The branded stock table is added automatically below this message.</div>
+    </div>
+    <div style="display:flex;gap:24px;flex-wrap:wrap">
+      <div class="fld"><label>Send time (IST)</label><input type="time" id="sendTime" value="10:00"/></div>
+      <div class="fld"><label>Daily reports</label>
+        <div class="toggle"><input type="checkbox" id="enabled"/> <span>enabled</span></div>
+        <div class="hint">Master switch — turn off to pause the 10 AM sends without removing recipients.</div>
+      </div>
+      <div class="fld"><label>Production report format</label>
+        <select id="prodFormat" style="max-width:220px"><option value="image">Image (PNG)</option><option value="pdf">PDF</option></select>
+        <div class="hint">Applies to the Daily Production report email.</div>
+      </div>
+    </div>
+    <div class="saverow">
+      <button class="pbtn" style="background:var(--blue);border-color:var(--blue)" onclick="saveSettings()">Save settings</button>
+      <span class="saved" id="savedS">✓ Saved</span>
+    </div>
+  </div>
+
+  <!-- ===================== HOLIDAYS ===================== -->
+  <div class="card">
+    <h3>Holidays — skip days for reports</h3>
+    <div class="hint" style="margin-bottom:10px">Dates on which no report is sent (email + WhatsApp). The reports also never fire on Sundays. On the next working day, the "Production on" figures carry forward from the last working day before the skipped day(s).</div>
+    <div class="fld">
+      <label>Holiday dates</label>
+      <textarea id="holidays" rows="3" placeholder="2026-01-26&#10;2026-08-15&#10;2026-10-20"></textarea>
+      <div class="hint">One date per line, format <b>YYYY-MM-DD</b>. Comma-separated also works.</div>
+    </div>
+    <div class="saverow">
+      <button class="pbtn" style="background:var(--blue);border-color:var(--blue)" onclick="saveSettings()">Save settings</button>
+      <span class="saved" id="savedH">✓ Saved</span>
+    </div>
+  </div>
+
+  <!-- ===================== TESTS ===================== -->
+  <div class="card">
+    <h3>Send a test</h3>
+    <div class="hint" style="margin-bottom:12px">Send any report to one address / number right now to check it. Does not affect the daily schedule or the recipient list.</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:18px">
+      <div>
+        <div style="font-weight:700;color:#0e2a47;margin-bottom:8px">Job Work Stock</div>
+        <div class="fld"><label>Test email to</label><input type="text" id="testTo" placeholder="you@bharatsteels.in"/>
+          <button class="pbtn" style="margin-top:8px;background:var(--blue);border-color:var(--blue)" id="testBtn" onclick="sendTest()">Send test email</button>
+          <span class="saved" id="savedT"></span></div>
+        <div class="fld"><label>Test WhatsApp to</label><input type="text" id="waTestTo" placeholder="919500680093"/>
+          <button class="pbtn" style="margin-top:8px;background:#128c7e;border-color:#128c7e" id="waTestBtn" onclick="sendWaTest()">Send test WhatsApp</button>
+          <span class="saved" id="savedWT"></span></div>
+      </div>
+      <div>
+        <div style="font-weight:700;color:#0e2a47;margin-bottom:8px">Daily Stock</div>
+        <div class="fld"><label>Test email to</label><input type="text" id="dailyTestTo" placeholder="you@bharatsteels.in"/>
+          <button class="pbtn" style="margin-top:8px;background:var(--blue);border-color:var(--blue)" id="dailyMailBtn" onclick="sendDailyMailTest()">Send test email</button>
+          <span class="saved" id="savedDM"></span></div>
+        <div class="fld"><label>Test WhatsApp to</label><input type="text" id="dailyWaTestTo" placeholder="919500680093"/>
+          <button class="pbtn" style="margin-top:8px;background:#128c7e;border-color:#128c7e" id="dailyWaBtn" onclick="sendDailyWaTest()">Send test WhatsApp</button>
+          <span class="saved" id="savedDW"></span></div>
+      </div>
+      <div>
+        <div style="font-weight:700;color:#0e2a47;margin-bottom:8px">Daily Production</div>
+        <div class="fld"><label>Test email to</label><input type="text" id="prodTestTo" placeholder="you@bharatsteels.in"/>
+          <button class="pbtn" style="margin-top:8px;background:var(--blue);border-color:var(--blue)" id="prodMailBtn" onclick="sendProdMailTest()">Send test email</button>
+          <span class="saved" id="savedPM"></span></div>
+        <div class="fld"><label>Test WhatsApp to</label><input type="text" id="prodWaTestTo" placeholder="919500680093"/>
+          <button class="pbtn" style="margin-top:8px;background:#128c7e;border-color:#128c7e" id="prodWaBtn" onclick="sendProdWaTest()">Send test WhatsApp</button>
+          <span class="saved" id="savedPW"></span></div>
+      </div>
+    </div>
+  </div>
+
+  <footer id="foot"></footer>
+</div>
+
+<script src="../_portal.js"></script>
+<script>
+let SET={}, RECIPS=[];
+const esc=s=>String(s==null?'':s).replace(/[<>&"]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
+const grpOpts=(sel)=>['','Customer','Management','Production','Other'].map(g=>`<option${g===sel?' selected':''}>${g||'—'}</option>`).join('');
+
+async function load(){
+  try{
+    const set=await fetch(BASE+'/api/wheels?route=settings&t='+Date.now()).then(r=>r.ok?r.json():{}).catch(()=>({}));
+    SET=set||{};
+    if(SET.send_time) $('sendTime').value=SET.send_time;
+    $('enabled').checked=SET.enabled!==false;
+    $('mailSubject').value=SET.mail_subject||'';
+    $('mailBody').value=SET.mail_body||'';
+    $('prodFormat').value=(SET.prod_format==='pdf')?'pdf':'image';
+    $('holidays').value=(SET.holidays||[]).join('\n');
+    RECIPS=SET.recipients||[];
+    renderRecips();
+    $('foot').textContent='Settings loaded · '+RECIPS.length+' recipient(s)';
+  }catch(e){ $('errbox').innerHTML='<div class="err">Couldn\'t load settings.</div>'; }
+}
+
+function renderRecips(){
+  const tb=$('rcRows');
+  if(!RECIPS.length){ tb.innerHTML='<tr><td colspan="8" class="hint" style="padding:14px">No recipients yet. Fill the bottom row and press <b>Add</b>.</td></tr>'; return; }
+  tb.innerHTML=RECIPS.map(r=>{
+    const jw=!!(r.jw_email||r.jw_wa), ds=!!(r.ds_email||r.ds_wa), dp=!!(r.dp_email||r.dp_wa);
+    return `<tr data-id="${r.id}">
+      <td><input type="text" class="r-name" value="${esc(r.name)}"/></td>
+      <td><input type="email" class="r-email" value="${esc(r.email)}"/></td>
+      <td><select class="r-grp">${grpOpts(r.grp||'')}</select></td>
+      <td><input type="text" class="r-mobile" value="${esc(r.mobile)}"/></td>
+      <td class="ck"><input type="checkbox" class="r-jw"${jw?' checked':''}/></td>
+      <td class="ck"><input type="checkbox" class="r-ds"${ds?' checked':''}/></td>
+      <td class="ck"><input type="checkbox" class="r-dp"${dp?' checked':''}/></td>
+      <td><a class="rcbtn" onclick="saveRow(${r.id},this);return false">Save</a><a class="rcbtn del" onclick="delRecip(${r.id});return false">Delete</a></td>
+    </tr>`;
+  }).join('');
+}
+
+function rowPayload(tr,id){
+  const g=s=>tr.querySelector(s);
+  const ck=s=>g(s).checked;
+  const jw=ck('.r-jw'), ds=ck('.r-ds'), dp=ck('.r-dp');
+  // one tick per report → set both channels (email + whatsapp) the same
+  return { id:id||undefined, name:g('.r-name').value.trim(), email:g('.r-email').value.trim(),
+    grp:g('.r-grp').value, mobile:g('.r-mobile').value.trim(),
+    jw_email:jw, jw_wa:jw, ds_email:ds, ds_wa:ds, dp_email:dp, dp_wa:dp };
+}
+async function saveRow(id,el){
+  const tr=el.closest('tr'); const old=el.textContent; el.textContent='Saving…';
+  try{ await post({recip_save:rowPayload(tr,id)}); el.textContent='✓ Saved'; setTimeout(()=>{el.textContent=old;},1500); await load(); }
+  catch(e){ alert(e.message); el.textContent=old; }
+}
+async function addRecip(){
+  const b=$('addBtn');
+  const g=s=>$(s).checked;
+  const jw=g('aJw'), ds=g('aDs'), dp=g('aDp');
+  const r={ name:$('aName').value.trim(), email:$('aEmail').value.trim(), grp:$('aGrp').value, mobile:$('aMobile').value.trim(),
+    jw_email:jw, jw_wa:jw, ds_email:ds, ds_wa:ds, dp_email:dp, dp_wa:dp };
+  if(!r.name && !r.email && !r.mobile){ alert('Enter at least a name, email or number'); return; }
+  b.disabled=true; b.textContent='Adding…';
+  try{
+    await post({recip_save:r});
+    ['aName','aEmail','aMobile'].forEach(i=>$(i).value=''); $('aGrp').value=''; ['aJw','aDs','aDp'].forEach(i=>$(i).checked=false);
+    await load();
+  }catch(e){ alert(e.message); }
+  finally{ b.disabled=false; b.textContent='Add'; }
+}
+async function delRecip(id){
+  if(!confirm('Remove this recipient?')) return;
+  try{ await post({recip_delete:id}); await load(); }catch(e){ alert(e.message); }
+}
+
+async function post(body){
+  const r=await fetch(BASE+'/api/wheels?route=settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(!r.ok) throw new Error('save failed ('+r.status+')');
+  return r.json().catch(()=>({}));
+}
+function flash(id){const e=$(id);if(!e)return;e.style.display='inline';setTimeout(()=>e.style.display='none',2500);}
+async function saveSettings(){
+  try{
+    const split=v=>v.split(/[\n,;]+/).map(s=>s.trim()).filter(Boolean);
+    await post({send_time:$('sendTime').value,enabled:$('enabled').checked,mail_subject:$('mailSubject').value,mail_body:$('mailBody').value,prod_format:$('prodFormat').value,holidays:split($('holidays').value)});
+    flash('savedS'); flash('savedH');
+  }catch(e){ alert(e.message); }
+}
+async function sendTest(){
+  const to=$('testTo').value.trim(); if(!to){ alert('Enter a test email'); return; }
+  const b=$('testBtn'); b.disabled=true; b.textContent='Sending…';
+  const msg=$('savedT'); msg.style.display='inline'; msg.style.color='var(--gray)'; msg.textContent='sending…';
+  try{
+    await post({mail_body:$('mailBody').value,mail_subject:$('mailSubject').value});
+    const r=await post({send:true,test_to:to,mail_body:$('mailBody').value,mail_subject:$('mailSubject').value});
+    msg.style.color='var(--good)'; msg.textContent=`✓ Sent to ${to} · ${r.items} items · ${r.mt} MT`;
+  }catch(e){ msg.style.color='var(--red)'; msg.textContent='✗ '+e.message; }
+  finally{ b.disabled=false; b.textContent='Send test email'; }
+}
+async function sendWaTest(){
+  const to=$('waTestTo').value.trim(); if(!to){ alert('Enter a test WhatsApp number'); return; }
+  const b=$('waTestBtn'); b.disabled=true; b.textContent='Sending…';
+  const msg=$('savedWT'); msg.style.display='inline'; msg.style.color='var(--gray)'; msg.textContent='sending…';
+  try{ const r=await post({whatsapp_test:true, wa_test_to:to});
+    if(r.skipped){ msg.style.color='var(--gray)'; msg.textContent='• '+r.skipped; } else{ const s=(r.sent||[])[0]||{}; if(s.error){ msg.style.color='var(--red)'; msg.textContent='✗ '+s.error; } else{ msg.style.color='var(--good)'; msg.textContent='✓ Sent to '+(s.num||to); } }
+  }catch(e){ msg.style.color='var(--red)'; msg.textContent='✗ '+e.message; }
+  finally{ b.disabled=false; b.textContent='Send test WhatsApp'; }
+}
+async function sendDailyMailTest(){
+  const to=$('dailyTestTo').value.trim(); if(!to){ alert('Enter a test email'); return; }
+  const b=$('dailyMailBtn'); b.disabled=true; b.textContent='Sending…';
+  const msg=$('savedDM'); msg.style.display='inline'; msg.style.color='var(--gray)'; msg.textContent='sending…';
+  try{ const r=await post({daily_mail_test:true, test_to:to});
+    if(r.error){ msg.style.color='var(--red)'; msg.textContent='✗ '+r.error; } else{ msg.style.color='var(--good)'; msg.textContent='✓ Sent to '+(r.sent_to||[]).join(', '); }
+  }catch(e){ msg.style.color='var(--red)'; msg.textContent='✗ '+e.message; }
+  finally{ b.disabled=false; b.textContent='Send test email'; }
+}
+async function sendDailyWaTest(){
+  const to=$('dailyWaTestTo').value.trim(); if(!to){ alert('Enter a test WhatsApp number'); return; }
+  const b=$('dailyWaBtn'); b.disabled=true; b.textContent='Sending…';
+  const msg=$('savedDW'); msg.style.display='inline'; msg.style.color='var(--gray)'; msg.textContent='sending…';
+  try{ const r=await post({daily_whatsapp_test:true, daily_wa_test_to:to});
+    if(r.skipped){ msg.style.color='var(--gray)'; msg.textContent='• '+r.skipped; } else{ const s=(r.sent||[])[0]||{}; if(s.error){ msg.style.color='var(--red)'; msg.textContent='✗ '+s.error; } else{ msg.style.color='var(--good)'; msg.textContent='✓ Sent to '+(s.num||to); } }
+  }catch(e){ msg.style.color='var(--red)'; msg.textContent='✗ '+e.message; }
+  finally{ b.disabled=false; b.textContent='Send test WhatsApp'; }
+}
+async function sendProdMailTest(){
+  const to=$('prodTestTo').value.trim(); if(!to){ alert('Enter a test email'); return; }
+  const b=$('prodMailBtn'); b.disabled=true; b.textContent='Sending…';
+  const msg=$('savedPM'); msg.style.display='inline'; msg.style.color='var(--gray)'; msg.textContent='sending…';
+  try{ await post({prod_format:$('prodFormat').value}); const r=await post({prod_mail_test:true, test_to:to});
+    if(r.error){ msg.style.color='var(--red)'; msg.textContent='✗ '+r.error; } else{ msg.style.color='var(--good)'; msg.textContent='✓ Sent ('+r.format+') to '+(r.sent_to||[]).join(', '); }
+  }catch(e){ msg.style.color='var(--red)'; msg.textContent='✗ '+e.message; }
+  finally{ b.disabled=false; b.textContent='Send test email'; }
+}
+async function sendProdWaTest(){
+  const to=$('prodWaTestTo').value.trim(); if(!to){ alert('Enter a test WhatsApp number'); return; }
+  const b=$('prodWaBtn'); b.disabled=true; b.textContent='Sending…';
+  const msg=$('savedPW'); msg.style.display='inline'; msg.style.color='var(--gray)'; msg.textContent='sending…';
+  try{ await post({prod_format:$('prodFormat').value}); const r=await post({prod_whatsapp_test:true, prod_wa_test_to:to});
+    if(r.skipped){ msg.style.color='var(--gray)'; msg.textContent='• '+r.skipped; } else{ const s=(r.sent||[])[0]||{}; if(s.error){ msg.style.color='var(--red)'; msg.textContent='✗ '+s.error; } else{ msg.style.color='var(--good)'; msg.textContent='✓ Sent to '+(s.num||to); } }
+  }catch(e){ msg.style.color='var(--red)'; msg.textContent='✗ '+e.message; }
+  finally{ b.disabled=false; b.textContent='Send test WhatsApp'; }
+}
+load();
+</script>
+</body></html>
