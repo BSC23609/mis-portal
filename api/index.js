@@ -597,6 +597,30 @@ async function ensureWheelsTable(){
     fail_count int default 0,
     detail text default ''
   )`;
+  // Unified recipient list (replaces the old client/management/production groups).
+  // Each person independently subscribes to any of the 3 reports, per channel.
+  await sql`create table if not exists wheels_recipients (
+    id bigserial primary key,
+    name text default '',
+    grp text default '',
+    email text default '',
+    mobile text default '',
+    jw_email boolean default false, jw_wa boolean default false,
+    ds_email boolean default false, ds_wa boolean default false,
+    dp_email boolean default false, dp_wa boolean default false,
+    created_at timestamptz default now()
+  )`;
+}
+// All recipients as plain objects (for the settings UI, the scripts, and the WhatsApp routes).
+async function wheelsRecipients(){
+  try { return (await sql`select id,name,grp,email,mobile,jw_email,jw_wa,ds_email,ds_wa,dp_email,dp_wa from wheels_recipients order by id`).map(r=>({...r})); }
+  catch(e){ return []; }
+}
+// Distinct WhatsApp numbers of everyone subscribed to a report's WhatsApp channel. flag: 'jw_wa'|'ds_wa'|'dp_wa'
+function recipientMobiles(recips, flag){
+  const seen = new Set(), out = [];
+  for (const r of recips) { if (r[flag] && String(r.mobile||"").trim()) { const m=String(r.mobile).trim(); if(!seen.has(m)){ seen.add(m); out.push(m); } } }
+  return out;
 }
 // Append one delivery-log row. Best-effort: never throws, so a logging failure can't break a send.
 async function logSend(o){
@@ -710,6 +734,27 @@ async function handlerWheels(req, res){
         await logSend({ report: body.report, channel: body.channel || 'email', status, total: tot, ok: okc, fail: failc, detail: body.detail });
         return json(res, 200, { ok: true });
       }
+      // Recipients CRUD (settings UI). Add/update one person, or delete by id.
+      if (body.recip_save) {
+        const r = body.recip_save || {};
+        const nm = String(r.name||"").slice(0,120), gp = String(r.grp||"").slice(0,60);
+        const em = String(r.email||"").trim().slice(0,160), mo = String(r.mobile||"").trim().slice(0,30);
+        const b = k => r[k] === true || r[k] === "true" || r[k] === 1;
+        const flags = [b("jw_email"), b("jw_wa"), b("ds_email"), b("ds_wa"), b("dp_email"), b("dp_wa")];
+        if (r.id) {
+          await sql`update wheels_recipients set name=${nm},grp=${gp},email=${em},mobile=${mo},
+            jw_email=${flags[0]},jw_wa=${flags[1]},ds_email=${flags[2]},ds_wa=${flags[3]},dp_email=${flags[4]},dp_wa=${flags[5]}
+            where id=${Number(r.id)}`;
+          return json(res, 200, { ok: true, id: Number(r.id) });
+        }
+        const ins = await sql`insert into wheels_recipients (name,grp,email,mobile,jw_email,jw_wa,ds_email,ds_wa,dp_email,dp_wa)
+          values (${nm},${gp},${em},${mo},${flags[0]},${flags[1]},${flags[2]},${flags[3]},${flags[4]},${flags[5]}) returning id`;
+        return json(res, 200, { ok: true, id: ins[0].id });
+      }
+      if (body.recip_delete) {
+        await sql`delete from wheels_recipients where id=${Number(body.recip_delete)}`;
+        return json(res, 200, { ok: true });
+      }
       // WhatsApp send trigger (fired by the daily script after the email). Guarded by CRON_SECRET.
       // Creds + template come from Vercel env (WATI_API_URL, WATI_API_KEY, WHEELS_WA_TEMPLATE);
       // recipient numbers come from the in-app settings (wa_to). PDF is served at /api/wheels?fmt=pdf.
@@ -719,17 +764,9 @@ async function handlerWheels(req, res){
         if (auth !== "Bearer " + process.env.CRON_SECRET) return json(res, 401, { error: "unauthorized" });
         const tmpl = process.env.WHEELS_WA_TEMPLATE;
         if (!tmpl) return json(res, 400, { error: "WHEELS_WA_TEMPLATE not set" });
-        const r3 = await sql`select wa_to, wa_enabled, mgmt_wa_to, mgmt_enabled, prod_wa_to, prod_enabled from wheels_settings where id=1`;
-        const s3 = r3[0] || {};
-        // Wheels India Stock on WhatsApp goes to Client + Management + Production, each gated by its own switch.
-        const clean = a => (a || []).map(String).map(x => x.trim()).filter(Boolean);
-        const stockSet = [
-          ...(s3.wa_enabled === false ? [] : clean(s3.wa_to)),
-          ...(s3.mgmt_enabled === false ? [] : clean(s3.mgmt_wa_to)),
-          ...(s3.prod_enabled === false ? [] : clean(s3.prod_wa_to))
-        ];
-        const nums = [...new Set(stockSet)];
-        if (!nums.length) { await logSend({report:'wheels_stock', channel:'whatsapp', status:'skipped', detail:'no recipients (client/management/production all empty or disabled)'}); return json(res, 200, { ok: true, skipped: "no whatsapp recipients (client/management/production all empty or disabled)" }); }
+        // Job Work Stock on WhatsApp → everyone who ticked its WhatsApp box in Recipients.
+        const nums = recipientMobiles(await wheelsRecipients(), "jw_wa");
+        if (!nums.length) { await logSend({report:'wheels_stock', channel:'whatsapp', status:'skipped', detail:'no recipients ticked for Job Work Stock WhatsApp'}); return json(res, 200, { ok: true, skipped: "no whatsapp recipients ticked for Job Work Stock" }); }
         const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
         const sent = [];
         const img = base + "/wheels.png?d=" + imgStamp();
@@ -767,16 +804,9 @@ async function handlerWheels(req, res){
         if (auth !== "Bearer " + process.env.CRON_SECRET) return json(res, 401, { error: "unauthorized" });
         const tmpl = process.env.WHEELS_WA_PROD_TEMPLATE;
         if (!tmpl) return json(res, 400, { error: "WHEELS_WA_PROD_TEMPLATE not set" });
-        const r5 = await sql`select prod_wa_to, prod_enabled, prod_format, mgmt_wa_to, mgmt_enabled from wheels_settings where id=1`;
-        const s5 = r5[0] || {};
-        // Production report on WhatsApp goes to Management + Production, each gated by its own switch.
-        const cleanP = a => (a || []).map(String).map(x => x.trim()).filter(Boolean);
-        const prodSet = [
-          ...(s5.mgmt_enabled === false ? [] : cleanP(s5.mgmt_wa_to)),
-          ...(s5.prod_enabled === false ? [] : cleanP(s5.prod_wa_to))
-        ];
-        const nums = [...new Set(prodSet)];
-        if (!nums.length) { await logSend({report:'production', channel:'whatsapp', status:'skipped', detail:'no recipients (management/production empty or disabled)'}); return json(res, 200, { ok: true, skipped: "no production whatsapp recipients (management/production empty or disabled)" }); }
+        // Daily Production on WhatsApp → everyone who ticked its WhatsApp box in Recipients.
+        const nums = recipientMobiles(await wheelsRecipients(), "dp_wa");
+        if (!nums.length) { await logSend({report:'production', channel:'whatsapp', status:'skipped', detail:'no recipients ticked for Daily Production WhatsApp'}); return json(res, 200, { ok: true, skipped: "no whatsapp recipients ticked for Daily Production" }); }
         const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
         const url = base + "/wheels-production.png?d=" + imgStamp(); // WhatsApp always image (dated to force fresh fetch); email respects the pdf/image toggle
         const sent = [];
@@ -828,11 +858,9 @@ async function handlerWheels(req, res){
         if (auth !== "Bearer " + process.env.CRON_SECRET) return json(res, 401, { error: "unauthorized" });
         const tmpl = process.env.WHEELS_WA_DAILY_TEMPLATE || process.env.WHEELS_WA_PROD_TEMPLATE;
         if (!tmpl) return json(res, 400, { error: "WHEELS_WA_DAILY_TEMPLATE not set" });
-        const rd = await sql`select mgmt_wa_to, mgmt_enabled from wheels_settings where id=1`;
-        const sd = rd[0] || {};
-        if (sd.mgmt_enabled === false) { await logSend({report:'daily_stock', channel:'whatsapp', status:'skipped', detail:'management disabled in settings'}); return json(res, 200, { ok: true, skipped: "management disabled in settings" }); }
-        const nums = [...new Set((sd.mgmt_wa_to || []).map(String).map(x => x.trim()).filter(Boolean))];
-        if (!nums.length) { await logSend({report:'daily_stock', channel:'whatsapp', status:'skipped', detail:'no management whatsapp recipients'}); return json(res, 200, { ok: true, skipped: "no management whatsapp recipients" }); }
+        // Daily Stock on WhatsApp → everyone who ticked its WhatsApp box in Recipients.
+        const nums = recipientMobiles(await wheelsRecipients(), "ds_wa");
+        if (!nums.length) { await logSend({report:'daily_stock', channel:'whatsapp', status:'skipped', detail:'no recipients ticked for Daily Stock WhatsApp'}); return json(res, 200, { ok: true, skipped: "no whatsapp recipients ticked for Daily Stock" }); }
         const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
         const url = base + "/daily-stock.png?d=" + imgStamp();
         const sent = [];
@@ -922,7 +950,8 @@ async function handlerWheels(req, res){
       prod_mail_to: s.prod_mail_to || [], prod_wa_to: s.prod_wa_to || [],
       prod_enabled: s.prod_enabled !== false, prod_format: s.prod_format || "image",
       holidays: s.holidays || [],
-      mgmt_mail_to: s.mgmt_mail_to || [], mgmt_wa_to: s.mgmt_wa_to || [], mgmt_enabled: s.mgmt_enabled !== false
+      mgmt_mail_to: s.mgmt_mail_to || [], mgmt_wa_to: s.mgmt_wa_to || [], mgmt_enabled: s.mgmt_enabled !== false,
+      recipients: await wheelsRecipients()
     });
   }catch(e){
     return json(res, 500, { error: String(e.message || e) });
