@@ -610,6 +610,9 @@ async function ensureWheelsTable(){
     dp_email boolean default false, dp_wa boolean default false,
     created_at timestamptz default now()
   )`;
+  // Short-lived cache of the rendered report PNGs, so WhatsApp/Meta fetches an already-built image
+  // instead of waiting on a slow live render (which caused silently-dropped sends that still logged "ok").
+  await sql`create table if not exists wheels_img_cache ( name text primary key, png_b64 text, ts timestamptz default now() )`;
 }
 // All recipients as plain objects (for the settings UI, the scripts, and the WhatsApp routes).
 async function wheelsRecipients(){
@@ -621,6 +624,33 @@ function recipientMobiles(recips, flag){
   const seen = new Set(), out = [];
   for (const r of recips) { if (r[flag] && String(r.mobile||"").trim()) { const m=String(r.mobile).trim(); if(!seen.has(m)){ seen.add(m); out.push(m); } } }
   return out;
+}
+// Report-image cache. renderAndCachePng() builds the PNG and stores it; cachedPng() serves the stored
+// copy when it is fresh (default 5 min) and otherwise rebuilds. Priming the cache right before a
+// WhatsApp send makes Meta's image fetch instant, so the message is never dropped for a slow render.
+const PNG_BUILDERS = { stock: () => buildWheelsStockPng(), production: () => buildWheelsProdPng(), daily: () => buildDailyStockPng() };
+async function renderAndCachePng(name){
+  const png = await PNG_BUILDERS[name]();
+  const b64 = png.toString("base64");
+  try { await sql`insert into wheels_img_cache (name, png_b64, ts) values (${name}, ${b64}, now())
+                  on conflict (name) do update set png_b64=excluded.png_b64, ts=now()`; } catch(e){}
+  return png;
+}
+async function cachedPng(name, maxAgeSec){
+  try {
+    const r = await sql`select png_b64, extract(epoch from (now()-ts)) as age from wheels_img_cache where name=${name}`;
+    if (r[0] && r[0].png_b64 && Number(r[0].age) < (maxAgeSec||300)) return Buffer.from(r[0].png_b64, "base64");
+  } catch(e){}
+  return await renderAndCachePng(name);
+}
+// Send a WhatsApp template with one automatic retry, so a transient WATI/network blip doesn't drop a recipient.
+async function sendRetry(num, tmpl, params, tries){
+  let last;
+  for (let i = 0; i < (tries || 2); i++){
+    try { return await send(num, tmpl, params); }
+    catch(e){ last = e; await new Promise(r => setTimeout(r, 1500)); }
+  }
+  throw last;
 }
 // Append one delivery-log row. Best-effort: never throws, so a logging failure can't break a send.
 async function logSend(o){
@@ -669,10 +699,10 @@ async function handlerWheels(req, res){
       return res.status(200).end(Buffer.from(b64, "base64"));
     }
     if (req.method === "GET" && fmt === "stockpng"){
-      const png = await buildWheelsStockPng();
+      const png = await cachedPng("stock", 300);
       res.setHeader("Content-Type", "image/png");
       res.setHeader("Content-Disposition", 'inline; filename="WheelsIndia_Stock_' + new Date().toISOString().slice(0,10).replace(/-/g,"") + '.png"');
-      res.setHeader("Cache-Control", "no-store");
+      res.setHeader("Cache-Control", "public, max-age=300");
       return res.status(200).end(png);
     }
     if (req.method === "GET" && fmt === "prodpdf"){
@@ -683,17 +713,17 @@ async function handlerWheels(req, res){
       return res.status(200).end(pdf);
     }
     if (req.method === "GET" && fmt === "prodpng"){
-      const png = await buildWheelsProdPng();
+      const png = await cachedPng("production", 300);
       res.setHeader("Content-Type", "image/png");
       res.setHeader("Content-Disposition", 'inline; filename="WheelsIndia_Production_' + new Date().toISOString().slice(0,10).replace(/-/g,"") + '.png"');
-      res.setHeader("Cache-Control", "no-store");
+      res.setHeader("Cache-Control", "public, max-age=300");
       return res.status(200).end(png);
     }
     if (req.method === "GET" && fmt === "dailypng"){
-      const png = await buildDailyStockPng();
+      const png = await cachedPng("daily", 300);
       res.setHeader("Content-Type", "image/png");
       res.setHeader("Content-Disposition", 'inline; filename="BSC_DailyStock_' + new Date().toISOString().slice(0,10).replace(/-/g,"") + '.png"');
-      res.setHeader("Cache-Control", "no-store");
+      res.setHeader("Cache-Control", "public, max-age=300");
       return res.status(200).end(png);
     }
     // Delivery log: recent WhatsApp/email send results for the daily reminders (read by wheels/log.html).
@@ -780,8 +810,9 @@ async function handlerWheels(req, res){
         const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
         const sent = [];
         const img = base + "/wheels.png?d=" + imgStamp();
+        await renderAndCachePng("stock").catch(()=>{}); // pre-build so Meta's image fetch is instant (prevents silent drops)
         for (const num of nums) {
-          try { const r = await send(num, tmpl, [{ name: "report", value: img }]); sent.push({ num, ...(r || { ok: true }) }); }   // image header "report" + static URL buttons
+          try { const r = await sendRetry(num, tmpl, [{ name: "report", value: img }]); sent.push({ num, ...(r || { ok: true }) }); }   // image header "report" + static URL buttons
           catch (e) { sent.push({ num, error: String(e.message || e) }); }
         }
         await logSend({ report:'wheels_stock', channel:'whatsapp', ...waSummary(sent, nameByMobile(recips)) });
@@ -820,8 +851,9 @@ async function handlerWheels(req, res){
         if (!nums.length) { await logSend({report:'production', channel:'whatsapp', status:'skipped', detail:'no recipients ticked for Daily Production WhatsApp'}); return json(res, 200, { ok: true, skipped: "no whatsapp recipients ticked for Daily Production" }); }
         const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
         const url = base + "/wheels-production.png?d=" + imgStamp(); // WhatsApp always image (dated to force fresh fetch); email respects the pdf/image toggle
+        await renderAndCachePng("production").catch(()=>{}); // pre-build so Meta's image fetch is instant (prevents silent drops)
         const sent = [];
-        for (const num of nums) { try { const r = await send(num, tmpl, [{ name: "report", value: url }]); sent.push({ num, ...(r || { ok: true }) }); } catch (e) { sent.push({ num, error: String(e.message || e) }); } }
+        for (const num of nums) { try { const r = await sendRetry(num, tmpl, [{ name: "report", value: url }]); sent.push({ num, ...(r || { ok: true }) }); } catch (e) { sent.push({ num, error: String(e.message || e) }); } }
         await logSend({ report:'production', channel:'whatsapp', ...waSummary(sent, nameByMobile(recips)) });
         return json(res, 200, { ok: true, url, template: tmpl, sent });
       }
@@ -875,8 +907,9 @@ async function handlerWheels(req, res){
         if (!nums.length) { await logSend({report:'daily_stock', channel:'whatsapp', status:'skipped', detail:'no recipients ticked for Daily Stock WhatsApp'}); return json(res, 200, { ok: true, skipped: "no whatsapp recipients ticked for Daily Stock" }); }
         const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
         const url = base + "/daily-stock.png?d=" + imgStamp();
+        await renderAndCachePng("daily").catch(()=>{}); // pre-build so Meta's image fetch is instant (prevents silent drops)
         const sent = [];
-        for (const num of nums) { try { const r = await send(num, tmpl, [{ name: "report", value: url }]); sent.push({ num, ...(r || { ok: true }) }); } catch (e) { sent.push({ num, error: String(e.message || e) }); } }
+        for (const num of nums) { try { const r = await sendRetry(num, tmpl, [{ name: "report", value: url }]); sent.push({ num, ...(r || { ok: true }) }); } catch (e) { sent.push({ num, error: String(e.message || e) }); } }
         await logSend({ report:'daily_stock', channel:'whatsapp', ...waSummary(sent, nameByMobile(recips)) });
         return json(res, 200, { ok: true, url, template: tmpl, sent });
       }
@@ -988,6 +1021,13 @@ function parseCsvSrv(t){ if(!t)return[]; if(t.charCodeAt(0)===0xFEFF)t=t.slice(1
 function dimS(v){ const n=parseFloat(v); return isNaN(n)?"":(""+ +n.toFixed(2)); }
 function lenS(v){ const n=parseFloat(v); return (n&&n>0)?(""+ +n.toFixed(0)):"—"; }
 function esc2(s){ return String(s??"").replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
+// Row sort per section. Coil Stock → Aging (days) desc, tie-break by Thickness desc.
+// Other sections (Plate/Strip) keep quantity-desc.
+function wheelsSortCmp(formKey){
+  const num=v=>{const n=parseFloat(v);return isNaN(n)?0:n;};
+  if(formKey==="COIL") return (a,b)=>(num(b.AgeDays)-num(a.AgeDays))||(num(b.Thick)-num(a.Thick))||(b.Quantity-a.Quantity);
+  return (a,b)=>b.Quantity-a.Quantity;
+}
 
 async function renderWheelsHtml(baseUrl, wipSet, note){
   const DATA_BASE = process.env.DATA_BASE || "https://raw.githubusercontent.com/BSC23609/bsc-stock-data/main";
@@ -998,7 +1038,7 @@ async function renderWheelsHtml(baseUrl, wipSet, note){
   const SEC=[["PLATE","Plate Stock (WIP / FG)","#0e7a4b"],["STRIP","Strip / Blank Stock","#b5651d"],["COIL","Coil Stock","#1367a6"]]; // WIP/FG (plate+strip) first, coil last
   let body="", gb=0, gq=0;
   for(const [k,t,c] of SEC){
-    const rs=rows.filter(r=>r.form===k).sort((a,b)=>b.Quantity-a.Quantity); if(!rs.length)continue;
+    const rs=rows.filter(r=>r.form===k).sort(wheelsSortCmp(k)); if(!rs.length)continue;
     const tq=rs.reduce((a,r)=>a+r.Quantity,0); gb+=rs.length; gq+=tq;
     body+=`<tr><td colspan="9" style="background:${c};color:#fff;font-weight:700;padding:7px 10px;font-size:13px">${t}<span style="float:right">${rs.length} items &middot; ${tq.toFixed(3)} MT</span></td></tr>`+
       `<tr style="background:#eef3f7"><th>#</th><th>Mill</th><th>Grade</th><th>Thk</th><th>Width</th><th>Length</th><th>Coil / Batch No</th><th>Qty (MT)</th><th>Aging (d)</th></tr>`;
@@ -1032,7 +1072,7 @@ async function buildWheelsXlsx(rows){
   const hdr=["#","Mill","Grade","Thk","Width","Length","Coil / Batch No","Mother Coil","Qty (MT)","Aging (d)"];
   let gGrand=0, secRanges=[];
   for(const [k,t] of SEC){
-    const rs=rows.filter(r=>r.form===k).sort((a,b)=>b.Quantity-a.Quantity); if(!rs.length)continue;
+    const rs=rows.filter(r=>r.form===k).sort(wheelsSortCmp(k)); if(!rs.length)continue;
     const tq=rs.reduce((a,r)=>a+r.Quantity,0); gGrand+=tq;
     aoa.push([`${t}   (${rs.length} items, ${tq.toFixed(3)} MT)`]);
     aoa.push(hdr);
@@ -1122,7 +1162,7 @@ async function buildWheelsPdf(){
 
   function drawSection(form){
     const [t,hex]=SECDEF[form];
-    const rs=rows.filter(r=>r.form===form).sort((a,b)=>b.Quantity-a.Quantity);
+    const rs=rows.filter(r=>r.form===form).sort(wheelsSortCmp(form));
     if(!rs.length) return { n:0, q:0 };
     const tq=rs.reduce((a,r)=>a+r.Quantity,0);
     ensure(16+headH+rowH*2);
@@ -1200,7 +1240,7 @@ function wheelsStockSvg(rows, asof){
     rowYs.forEach(yy=>rect(lft,yy,rgt-lft,1,GC)); colXs.forEach(xx=>rect(xx,top,1,bot-top,GC)); }
   let gb=0, gq=0;
   for(const [form,title,hex] of SEC){
-    const rs=rows.filter(r=>r.form===form).sort((a,b)=>b.Quantity-a.Quantity);
+    const rs=rows.filter(r=>r.form===form).sort(wheelsSortCmp(form));
     if(!rs.length) continue;
     const tq=rs.reduce((a,r)=>a+r.Quantity,0); gb+=rs.length; gq+=tq;
     rect(L,y,R-L,20,hex); txt(L+8,y+14,title,{size:11,bold:true,fill:"#fff"}); txt(R-6,y+14,rs.length+" items · "+tq.toFixed(3)+" MT",{size:9,fill:"#fff",anchor:"end"}); y+=20;
