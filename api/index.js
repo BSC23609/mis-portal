@@ -631,12 +631,21 @@ async function logSend(o){
   }catch(e){ /* best-effort; logging must never break a send */ }
 }
 // Summarise a WATI per-number result array into a log row ({status, ok, fail, detail}).
-function waSummary(sent){
+// nameOf(number)->name is optional; when given, the Send Log shows names instead of raw numbers.
+function waSummary(sent, nameOf){
+  nameOf = nameOf || (x => x);
+  const label = x => { const nm = nameOf(x.num); return (nm && nm !== x.num) ? nm : x.num; };
   const okc = sent.filter(x=>!x.error).length, failc = sent.length - okc;
   const status = failc===0 ? 'ok' : (okc ? 'partial' : 'fail');
-  const detail = failc ? sent.filter(x=>x.error).map(x=>x.num+': '+x.error).join('; ')
-                       : sent.length+' recipient(s): '+sent.map(x=>x.num).join(', ');
+  const detail = failc ? sent.filter(x=>x.error).map(x=>label(x)+' ('+x.num+'): '+x.error).join('; ')
+                       : sent.length+' recipient(s): '+sent.map(label).join(', ');
   return { status, ok:okc, fail:failc, total:sent.length, detail };
+}
+// Build a number->name lookup from the recipients list (for Send Log details).
+function nameByMobile(recips){
+  const m = {};
+  for (const r of recips) { const k = String(r.mobile||"").trim(); if (k && r.name) m[k] = r.name; }
+  return n => m[String(n).trim()] || n;
 }
 async function handlerWheels(req, res){
   if (cors(req, res)) return;
@@ -765,7 +774,8 @@ async function handlerWheels(req, res){
         const tmpl = process.env.WHEELS_WA_TEMPLATE;
         if (!tmpl) return json(res, 400, { error: "WHEELS_WA_TEMPLATE not set" });
         // Job Work Stock on WhatsApp → everyone who ticked its WhatsApp box in Recipients.
-        const nums = recipientMobiles(await wheelsRecipients(), "jw_wa");
+        const recips = await wheelsRecipients();
+        const nums = recipientMobiles(recips, "jw_wa");
         if (!nums.length) { await logSend({report:'wheels_stock', channel:'whatsapp', status:'skipped', detail:'no recipients ticked for Job Work Stock WhatsApp'}); return json(res, 200, { ok: true, skipped: "no whatsapp recipients ticked for Job Work Stock" }); }
         const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
         const sent = [];
@@ -774,7 +784,7 @@ async function handlerWheels(req, res){
           try { const r = await send(num, tmpl, [{ name: "report", value: img }]); sent.push({ num, ...(r || { ok: true }) }); }   // image header "report" + static URL buttons
           catch (e) { sent.push({ num, error: String(e.message || e) }); }
         }
-        await logSend({ report:'wheels_stock', channel:'whatsapp', ...waSummary(sent) });
+        await logSend({ report:'wheels_stock', channel:'whatsapp', ...waSummary(sent, nameByMobile(recips)) });
         return json(res, 200, { ok: true, image: img, pdf: base + "/wheels.pdf", xlsx: base + "/wheels.xlsx", template: tmpl, sent });
       }
       // WhatsApp test send (triggered from the settings page, like the email test — no CRON_SECRET).
@@ -805,13 +815,14 @@ async function handlerWheels(req, res){
         const tmpl = process.env.WHEELS_WA_PROD_TEMPLATE;
         if (!tmpl) return json(res, 400, { error: "WHEELS_WA_PROD_TEMPLATE not set" });
         // Daily Production on WhatsApp → everyone who ticked its WhatsApp box in Recipients.
-        const nums = recipientMobiles(await wheelsRecipients(), "dp_wa");
+        const recips = await wheelsRecipients();
+        const nums = recipientMobiles(recips, "dp_wa");
         if (!nums.length) { await logSend({report:'production', channel:'whatsapp', status:'skipped', detail:'no recipients ticked for Daily Production WhatsApp'}); return json(res, 200, { ok: true, skipped: "no whatsapp recipients ticked for Daily Production" }); }
         const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
         const url = base + "/wheels-production.png?d=" + imgStamp(); // WhatsApp always image (dated to force fresh fetch); email respects the pdf/image toggle
         const sent = [];
         for (const num of nums) { try { const r = await send(num, tmpl, [{ name: "report", value: url }]); sent.push({ num, ...(r || { ok: true }) }); } catch (e) { sent.push({ num, error: String(e.message || e) }); } }
-        await logSend({ report:'production', channel:'whatsapp', ...waSummary(sent) });
+        await logSend({ report:'production', channel:'whatsapp', ...waSummary(sent, nameByMobile(recips)) });
         return json(res, 200, { ok: true, url, template: tmpl, sent });
       }
       // Production email — test send (and reused by nothing else). Renders the chosen format and emails it.
@@ -859,13 +870,14 @@ async function handlerWheels(req, res){
         const tmpl = process.env.WHEELS_WA_DAILY_TEMPLATE || process.env.WHEELS_WA_PROD_TEMPLATE;
         if (!tmpl) return json(res, 400, { error: "WHEELS_WA_DAILY_TEMPLATE not set" });
         // Daily Stock on WhatsApp → everyone who ticked its WhatsApp box in Recipients.
-        const nums = recipientMobiles(await wheelsRecipients(), "ds_wa");
+        const recips = await wheelsRecipients();
+        const nums = recipientMobiles(recips, "ds_wa");
         if (!nums.length) { await logSend({report:'daily_stock', channel:'whatsapp', status:'skipped', detail:'no recipients ticked for Daily Stock WhatsApp'}); return json(res, 200, { ok: true, skipped: "no whatsapp recipients ticked for Daily Stock" }); }
         const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
         const url = base + "/daily-stock.png?d=" + imgStamp();
         const sent = [];
         for (const num of nums) { try { const r = await send(num, tmpl, [{ name: "report", value: url }]); sent.push({ num, ...(r || { ok: true }) }); } catch (e) { sent.push({ num, error: String(e.message || e) }); } }
-        await logSend({ report:'daily_stock', channel:'whatsapp', ...waSummary(sent) });
+        await logSend({ report:'daily_stock', channel:'whatsapp', ...waSummary(sent, nameByMobile(recips)) });
         return json(res, 200, { ok: true, url, template: tmpl, sent });
       }
       // Daily Stock WhatsApp — test send from the settings page (no CRON_SECRET)
@@ -976,6 +988,13 @@ function parseCsvSrv(t){ if(!t)return[]; if(t.charCodeAt(0)===0xFEFF)t=t.slice(1
 function dimS(v){ const n=parseFloat(v); return isNaN(n)?"":(""+ +n.toFixed(2)); }
 function lenS(v){ const n=parseFloat(v); return (n&&n>0)?(""+ +n.toFixed(0)):"—"; }
 function esc2(s){ return String(s??"").replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
+// Row sort per section. Coil Stock → Aging (days) desc, tie-break by Thickness desc.
+// Other sections (Plate/Strip) keep quantity-desc.
+function wheelsSortCmp(formKey){
+  const num=v=>{const n=parseFloat(v);return isNaN(n)?0:n;};
+  if(formKey==="COIL") return (a,b)=>(num(b.AgeDays)-num(a.AgeDays))||(num(b.Thick)-num(a.Thick))||(b.Quantity-a.Quantity);
+  return (a,b)=>b.Quantity-a.Quantity;
+}
 
 async function renderWheelsHtml(baseUrl, wipSet, note){
   const DATA_BASE = process.env.DATA_BASE || "https://raw.githubusercontent.com/BSC23609/bsc-stock-data/main";
@@ -986,7 +1005,7 @@ async function renderWheelsHtml(baseUrl, wipSet, note){
   const SEC=[["PLATE","Plate Stock (WIP / FG)","#0e7a4b"],["STRIP","Strip / Blank Stock","#b5651d"],["COIL","Coil Stock","#1367a6"]]; // WIP/FG (plate+strip) first, coil last
   let body="", gb=0, gq=0;
   for(const [k,t,c] of SEC){
-    const rs=rows.filter(r=>r.form===k).sort((a,b)=>b.Quantity-a.Quantity); if(!rs.length)continue;
+    const rs=rows.filter(r=>r.form===k).sort(wheelsSortCmp(k)); if(!rs.length)continue;
     const tq=rs.reduce((a,r)=>a+r.Quantity,0); gb+=rs.length; gq+=tq;
     body+=`<tr><td colspan="9" style="background:${c};color:#fff;font-weight:700;padding:7px 10px;font-size:13px">${t}<span style="float:right">${rs.length} items &middot; ${tq.toFixed(3)} MT</span></td></tr>`+
       `<tr style="background:#eef3f7"><th>#</th><th>Mill</th><th>Grade</th><th>Thk</th><th>Width</th><th>Length</th><th>Coil / Batch No</th><th>Qty (MT)</th><th>Aging (d)</th></tr>`;
@@ -1020,7 +1039,7 @@ async function buildWheelsXlsx(rows){
   const hdr=["#","Mill","Grade","Thk","Width","Length","Coil / Batch No","Mother Coil","Qty (MT)","Aging (d)"];
   let gGrand=0, secRanges=[];
   for(const [k,t] of SEC){
-    const rs=rows.filter(r=>r.form===k).sort((a,b)=>b.Quantity-a.Quantity); if(!rs.length)continue;
+    const rs=rows.filter(r=>r.form===k).sort(wheelsSortCmp(k)); if(!rs.length)continue;
     const tq=rs.reduce((a,r)=>a+r.Quantity,0); gGrand+=tq;
     aoa.push([`${t}   (${rs.length} items, ${tq.toFixed(3)} MT)`]);
     aoa.push(hdr);
@@ -1110,7 +1129,7 @@ async function buildWheelsPdf(){
 
   function drawSection(form){
     const [t,hex]=SECDEF[form];
-    const rs=rows.filter(r=>r.form===form).sort((a,b)=>b.Quantity-a.Quantity);
+    const rs=rows.filter(r=>r.form===form).sort(wheelsSortCmp(form));
     if(!rs.length) return { n:0, q:0 };
     const tq=rs.reduce((a,r)=>a+r.Quantity,0);
     ensure(16+headH+rowH*2);
@@ -1188,7 +1207,7 @@ function wheelsStockSvg(rows, asof){
     rowYs.forEach(yy=>rect(lft,yy,rgt-lft,1,GC)); colXs.forEach(xx=>rect(xx,top,1,bot-top,GC)); }
   let gb=0, gq=0;
   for(const [form,title,hex] of SEC){
-    const rs=rows.filter(r=>r.form===form).sort((a,b)=>b.Quantity-a.Quantity);
+    const rs=rows.filter(r=>r.form===form).sort(wheelsSortCmp(form));
     if(!rs.length) continue;
     const tq=rs.reduce((a,r)=>a+r.Quantity,0); gb+=rs.length; gq+=tq;
     rect(L,y,R-L,20,hex); txt(L+8,y+14,title,{size:11,bold:true,fill:"#fff"}); txt(R-6,y+14,rs.length+" items · "+tq.toFixed(3)+" MT",{size:9,fill:"#fff",anchor:"end"}); y+=20;

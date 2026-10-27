@@ -156,7 +156,9 @@ async function load(){
 function sectionTable(rows){
   let html='<div class="swrap"><table class="x">', gb=0, gq=0;
   for(const [key,title,col] of SEC){
-    const rs=rows.filter(r=>r.form===key).sort((a,b)=>b.Quantity-a.Quantity);
+    const _n=v=>{const n=parseFloat(v);return isNaN(n)?0:n;};
+    const _cmp=(key==='COIL')?((a,b)=>(_n(b.AgeDays)-_n(a.AgeDays))||(_n(b.Thick)-_n(a.Thick))||(b.Quantity-a.Quantity)):((a,b)=>b.Quantity-a.Quantity);
+    const rs=rows.filter(r=>r.form===key).sort(_cmp);
     if(!rs.length) continue;
     const tq=rs.reduce((a,r)=>a+r.Quantity,0); gb+=rs.length; gq+=tq;
     html+=`<tr><td class="sec" colspan="10" style="background:${col}">${title}<span style="float:right">${rs.length} items · ${tq.toFixed(3)} MT</span></td></tr>
