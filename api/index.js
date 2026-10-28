@@ -1739,6 +1739,57 @@ async function handlerAuth(req, res){
   }catch(e){ return json(res,500,{error:String(e.message||e)}); }
 }
 
+// ================= Group single sign-on (app.thebharatsteelgroup.com) =================
+// The group portal signs the person in once, then sends them to /auth/sso with a one-minute HS256
+// token signed with GROUP_SSO_SECRET (shared only by the portal and this app). We check it, find the
+// portal user by email and set the normal MIS session cookie. The email + password login still works.
+function _ssoPage(res, msg){
+  const esc = String(msg).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+  res.statusCode = 401; res.setHeader("Content-Type","text/html; charset=utf-8"); res.setHeader("Cache-Control","no-store");
+  res.end(`<!doctype html><meta name=viewport content="width=device-width,initial-scale=1"><body style="font-family:system-ui,sans-serif;max-width:440px;margin:15vh auto;padding:0 16px"><h2>Could not sign you in</h2><p style="color:#5b6b7b">${esc}</p><p><a href="/login.html">Sign in with your email and password</a></p>`);
+}
+function _verifyGroupToken(token, secret, audience){
+  const parts = String(token||"").split(".");
+  if (parts.length !== 3) throw new Error("bad");
+  const [h, p, sig] = parts;
+  const header = JSON.parse(_b64uToBuf(h).toString("utf8"));
+  if (header.alg !== "HS256") throw new Error("bad");
+  const expect = _b64u(crypto.createHmac("sha256", secret).update(h + "." + p).digest());
+  const a = Buffer.from(expect), b = Buffer.from(sig);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) throw new Error("bad");
+  const c = JSON.parse(_b64uToBuf(p).toString("utf8"));
+  const now = Math.floor(Date.now()/1000);
+  if (c.iss !== "bsg-hub") throw new Error("bad");
+  if ((Array.isArray(c.aud) ? !c.aud.includes(audience) : c.aud !== audience)) throw new Error("bad");
+  if (!c.exp || now > c.exp + 10) { const e = new Error("expired"); e.expired = true; throw e; }
+  return c;
+}
+async function handlerGroupSso(req, res){
+  try{
+    const secret = process.env.GROUP_SSO_SECRET || "";
+    if (!secret) return _ssoPage(res, "Group sign-in is not set up on this app yet.");
+    const qs = new URL(req.url || "/", "http://x").searchParams;
+    let claims;
+    try { claims = _verifyGroupToken(qs.get("token"), secret, process.env.GROUP_SSO_APP_KEY || "mis"); }
+    catch(e){ return _ssoPage(res, e.expired ? "That sign-in link expired. Open MIS again from the group portal." : "Group sign-in could not be verified."); }
+    await ensurePortalUsers();
+    const tries = [String(claims.sub||"").trim().toLowerCase(), String(claims.email||"").trim().toLowerCase()].filter(v => v.includes("@"));
+    let u = null;
+    for (const e of tries){ const r = await sql`select * from portal_users where lower(email)=${e}`; if (r[0]) { u = r[0]; break; } }
+    if (!u) return _ssoPage(res, "Your group account is not linked to an MIS user. Ask IT to check your email in the group portal.");
+    const modules = u.is_admin ? PORTAL_MODULES : (u.modules||[]);
+    const tok = await authSign({uid:u.id, email:u.email, admin:!!u.is_admin, modules, exp:Date.now()+AUTH_DAYS*864e5});
+    if (!tok) return _ssoPage(res, "AUTH_SECRET is not set on this app.");
+    const next = qs.get("next") || "";
+    res.statusCode = 303;
+    res.setHeader("Set-Cookie", authCookie(tok, AUTH_DAYS*86400));
+    res.setHeader("Location", next.startsWith("/") && !next.startsWith("//") ? next : "/");
+    res.setHeader("Referrer-Policy", "no-referrer");
+    res.setHeader("Cache-Control", "no-store");
+    return res.end();
+  }catch(e){ res.statusCode = 500; return res.end("error"); }
+}
+
 // _router.js
 async function handler5(req, res) {
   const url = req.url || "";
@@ -1749,6 +1800,7 @@ async function handler5(req, res) {
   if (route === "sync") return handler2(req, res);
   if (route === "wheels") return handlerWheels(req, res);
   if (route === "auth") return handlerAuth(req, res);
+  if (route === "sso" || /^\/auth\/sso(\?|$)/.test(url)) return handlerGroupSso(req, res);
   res.setHeader("Cache-Control", "no-store");
   res.status(404).json({ error: "unknown route: " + route });
 }
