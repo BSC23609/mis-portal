@@ -1532,8 +1532,8 @@ function dailyStockSvg(M){
   //   LEFT  = HR Coil Stock (compact: Item | 38 | Grand Total)
   //   RIGHT = date box, then Sales / Purchase / Warehousewise tables.
   const salesN=(M.salesP.months||[]).length, purN=(M.purP.months||[]).length, whN=(M.whs||[]).length;
-  const MW=52, CATW=118, GRW=66;                    // fixed right-column widths (no stretch-to-fill)
-  const COILW=185+64+72;                            // left HR-coil table width
+  const MW=60, CATW=138, GRW=88;                    // fixed right-column widths (no stretch-to-fill)
+  const COILW=205+72+86;                            // left HR-coil table width
   const rightNeeded=Math.max(CATW+Math.max(1,salesN,purN)*MW+GRW, CATW+Math.max(1,whN)*MW+GRW, 200);
   const L=16, W=L+COILW+24+rightNeeded+L, R=W-L;
   const els=[];
@@ -1544,14 +1544,14 @@ function dailyStockSvg(M){
   const GC="#c4d0da";
   function drawTable(ox, oy, title, cols, rows, headH){
     let x=ox; cols.forEach(c=>{ c.x=x; x+=c.w; }); const tw=x-ox; let y=oy;
-    rect(ox,y,tw,20,"#ffe08a"); txt(ox+6,y+14,title,{size:11.5,bold:true,fill:"#5a4500"}); y+=20;
+    rect(ox,y,tw,23,"#ffe08a"); txt(ox+6,y+16,title,{size:13.5,bold:true,fill:"#5a4500"}); y+=23;
     const gridTop=y; const rowYs=[y];
-    const hH=headH||20; rect(ox,y,tw,hH,"#dbeaf5");
-    cols.forEach(c=>{ if(c.sub){ put(c,y+10,c.t,{size:8.5,bold:true,fill:"#1a2a3a"}); put(c,y+hH-3,c.sub,{size:8.5,bold:true,fill:"#1a2a3a"}); } else put(c,y+hH/2+3.5,c.t,{size:9.5,bold:true,fill:"#1a2a3a"}); });
+    const hH=headH||25; rect(ox,y,tw,hH,"#dbeaf5");
+    cols.forEach(c=>{ if(c.sub){ put(c,y+11,c.t,{size:10,bold:true,fill:"#1a2a3a"}); put(c,y+hH-4,c.sub,{size:10,bold:true,fill:"#1a2a3a"}); } else put(c,y+hH/2+4,c.t,{size:11.5,bold:true,fill:"#1a2a3a"}); });
     y+=hH; rowYs.push(y);
-    const rH=19;
+    const rH=23;
     rows.forEach((r,ri)=>{ if(r.gt) rect(ox,y,tw,rH,"#dbeaf5"); else if(ri%2) rect(ox,y,tw,rH,"#f7fafc");
-      cols.forEach((c,ci)=>put(c,y+13,r.v[ci]==null?"":String(r.v[ci]),{size:9.5,bold:!!r.gt,fill:"#1a2233"})); y+=rH; rowYs.push(y); });
+      cols.forEach((c,ci)=>put(c,y+16,r.v[ci]==null?"":String(r.v[ci]),{size:11.5,bold:!!r.gt,fill:"#1a2233"})); y+=rH; rowYs.push(y); });
     // gridlines: a line under every row, and between every column
     rowYs.forEach(yy=>rect(ox,yy,tw,1,GC));
     cols.forEach(c=>rect(c.x,gridTop,1,y-gridTop,GC)); rect(ox+tw,gridTop,1,y-gridTop,GC);
@@ -1559,17 +1559,17 @@ function dailyStockSvg(M){
     return y;
   }
   // title bar
-  rect(0,0,W,32,"#2f9fe0"); txt(W/2,21,"BHARAT STEEL (CHENNAI) PRIVATE LIMITED",{size:17,bold:true,fill:"#ffffff",anchor:"middle"});
-  const startY=44;
+  rect(0,0,W,36,"#2f9fe0"); txt(W/2,24,"BHARAT STEEL (CHENNAI) PRIVATE LIMITED",{size:20,bold:true,fill:"#ffffff",anchor:"middle"});
+  const startY=50;
   // ---- LEFT: HR coil stock ----
-  const coilCols=[{t:"Row Labels",w:185,align:"l"},{t:"38",w:64,align:"r"},{t:"Grand Total",w:72,align:"r"}];
+  const coilCols=[{t:"Row Labels",w:205,align:"l"},{t:"38",w:72,align:"r"},{t:"Grand Total",w:86,align:"r"}];
   const coilRows=M.coilArr.map(([n,q])=>({v:[n,f3IN(q),f3IN(q)]})).concat([{v:["Grand Total",f3IN(M.t38),f3IN(M.t38)],gt:true}]);
   const LW=COILW;
   const leftY=drawTable(L, startY, "BHARAT HR COIL STOCK (Warehouse 38 · MT)", coilCols, coilRows);
   // ---- RIGHT column ----
   const xR = L + LW + 24, rightW = R - xR;
   let ry = startY;
-  rect(xR, ry, 200, 24, "#ffe08a"); txt(xR+100, ry+16, M.dateDMY, {size:14,bold:true,fill:"#5a4500",anchor:"middle"}); ry += 36;
+  rect(xR, ry, 210, 27, "#ffe08a"); txt(xR+105, ry+18, M.dateDMY, {size:16,bold:true,fill:"#5a4500",anchor:"middle"}); ry += 40;
   function pivotCols(months){
     return [{t:"Row Labels",w:CATW,align:"l"}].concat(months.map(i=>({t:DS_FYMON[i],w:MW,align:"r"}))).concat([{t:"Grand Total",w:GRW,align:"r"}]);
   }
@@ -1603,7 +1603,7 @@ async function buildDailyStockPng(){
   let Resvg; try{ Resvg=(await import("@resvg/resvg-js")).Resvg; }catch(e){ throw new Error("resvg-js not available on server: "+e.message); }
   const ff=prodFontFiles();
   const svg=dailyStockSvg(await dailyStockModel());
-  const r=new Resvg(svg, { fitTo:{ mode:"zoom", value:2 }, font:{ fontFiles:ff, loadSystemFonts: ff.length===0, defaultFontFamily:"DejaVu Sans" }, background:"#ffffff" });
+  const r=new Resvg(svg, { fitTo:{ mode:"zoom", value:2.5 }, font:{ fontFiles:ff, loadSystemFonts: ff.length===0, defaultFontFamily:"DejaVu Sans" }, background:"#ffffff" });
   return Buffer.from(r.render().asPng());
 }
 async function sendWheelsMail(to, cc, html, subject, attach){
