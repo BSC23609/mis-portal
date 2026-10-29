@@ -36,6 +36,7 @@
         {id:'pivot',  label:'Coil Stock (T×W×Grade)', href:BASE+'/stock/coil-pivot.html'},
         {id:'sheets', label:'Sheet Stock List', href:BASE+'/stock/sheets.html'},
         {id:'coils',  label:'Coil Stock List', href:BASE+'/stock/coils.html'},
+        {id:'monthly',label:'Monthly Stock List', href:BASE+'/stock/monthly.html'},
     ]},
     { id:'dispatch', label:'Dispatch', href:BASE+'/dispatch/index.html', screens:[] },
     { id:'nmdc', label:'NMDC', href:BASE+'/nmdc/index.html', screens:[] },
