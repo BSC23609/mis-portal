@@ -2,27 +2,34 @@
 <meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>Monthly Stock List — Bharat Steel MIS</title><link rel="icon" type="image/png" href="BSC.png"/>
 <script>window.PORTAL={module:'stock',screen:'monthly'}</script>
+<style>
+  .mgrid{display:grid;grid-template-columns:1.15fr 1fr;gap:14px;align-items:start}
+  @media(max-width:900px){.mgrid{grid-template-columns:1fr}}
+  #tbl table td,#tbl table th{padding:5px 10px}
+  #chart svg{width:100%;height:auto;display:block}
+</style>
 </head><body>
 <div class="pw">
   <div id="errbox"></div>
-  <div class="filters">
+  <div class="filters" style="margin:8px 0">
     <span class="fcount" id="intro">Current coil stock (warehouse 38) grouped by GRPO purchase month</span>
     <button class="pbtn" style="background:var(--blue);border-color:var(--blue);margin-left:auto" onclick="dl()">Download CSV</button>
   </div>
 
-  <div class="kpis" id="kpis"></div>
+  <div class="kpis" id="kpis" style="margin:8px 0"></div>
 
-  <div class="card">
-    <h3>Monthly stock availability <span class="r" id="sub"></span></h3>
-    <div class="tblwrap scroll" id="tbl"></div>
+  <div class="mgrid">
+    <div class="card" style="margin:0">
+      <h3>Monthly stock availability <span class="r" id="sub"></span></h3>
+      <div class="tblwrap" id="tbl"></div>
+    </div>
+    <div class="card" style="margin:0">
+      <h3>Available stock by purchase month</h3>
+      <div id="chart"></div>
+    </div>
   </div>
 
-  <div class="card">
-    <h3>Available stock by purchase month</h3>
-    <div id="chart" style="width:100%;overflow-x:auto"></div>
-  </div>
-
-  <footer id="foot"></footer>
+  <footer id="foot" style="margin-top:8px"></footer>
 </div>
 <script src="../_portal.js"></script>
 <script src="_stockdata.js"></script>
@@ -74,8 +81,8 @@ function drawTable(){
 
 function drawChart(){
   if(!MONTHS.length){ $('chart').innerHTML=''; return; }
-  const n=MONTHS.length, bw=46, gap=24, padL=8, padR=8, padT=28, padB=42;
-  const plotH=200, W=Math.max(520, padL+padR+n*bw+(n-1)*gap), H=plotH+padT+padB;
+  const n=MONTHS.length, bw=30, gap=14, padL=8, padR=8, padT=24, padB=40;
+  const plotH=168, W=padL+padR+n*bw+(n-1)*gap, H=plotH+padT+padB;
   const max=Math.max(1,...MONTHS.map(m=>m.q)), scale=plotH/max;
   const col='#1367a6';
   let bars='';
