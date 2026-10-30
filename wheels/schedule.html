@@ -1,0 +1,119 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Production Schedule — Wheels India — Bharat Steel MIS</title><link rel="icon" type="image/png" href="../stock/BSC.png"/>
+<script>window.PORTAL={module:'wheels',screen:'schedule'}</script>
+<style>
+  .filters label{display:inline-flex;align-items:center;gap:5px}
+  .job{background:#fff;border:1px solid var(--line);border-radius:10px;margin:12px 0;overflow:hidden}
+  .jhead{display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;padding:10px 14px;background:#0e2a47;color:#fff}
+  .jhead .no{font-weight:700;font-size:14px}
+  .jhead .coil{font-size:13px;opacity:.92}
+  .jhead .r{margin-left:auto;font-family:var(--mono);font-size:12px}
+  .badge{font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px}
+  .b-open{background:#1a7f4b;color:#fff}.b-close{background:#56657a;color:#fff}
+  .jtbl table{width:100%;border-collapse:collapse}
+  .jtbl td,.jtbl th{padding:5px 10px;border-bottom:1px solid var(--line);font-size:13px}
+  .jtbl th{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--gray);text-align:left}
+  .jtbl td.num,.jtbl th.num{text-align:right;font-family:var(--mono)}
+  .jtbl tr.sub td{background:#f3f7fb;font-weight:600;font-size:11px;color:#0e4d7d}
+  .muted2{color:var(--gray)}
+</style>
+</head><body>
+<div class="pw">
+  <div id="errbox"></div>
+  <div class="filters">
+    <input type="search" id="q" placeholder="Search schedule no / item…" oninput="draw()"/>
+    <label>Status <select id="st" onchange="draw()"><option value="Open">Open</option><option value="all">All</option><option value="Close">Closed</option></select></label>
+    <label><input type="checkbox" id="wir" checked onchange="draw()"/> Wheels India only</label>
+    <button class="pbtn" style="background:var(--blue);border-color:var(--blue)" onclick="dl()">Download CSV</button>
+    <span class="fcount" id="fcount"></span>
+  </div>
+  <div class="kpis" id="kpis"></div>
+  <div id="jobs"></div>
+  <footer id="foot"></footer>
+</div>
+<script src="../_portal.js"></script>
+<script>
+let ROWS=[];
+const f3=n=>Number(n||0).toLocaleString('en-IN',{minimumFractionDigits:3,maximumFractionDigits:3});
+const dim=v=>{const n=parseFloat(v);return isNaN(n)?'':(''+ +n.toFixed(2));};
+const dint=v=>{const n=parseFloat(v);return isNaN(n)?'':(''+Math.round(n));};
+// Wheels India = grade token that STARTS with WIR (e.g. WIR006, WIR025, WIR025D), at a word boundary
+const isWIR=r=>/(^|[\s/])WIR/i.test(r.in+' '+r.out);
+const isLeaf=r=>{const n=(r.next||'').trim();return !n||n==='0';};  // final plate (no further stage; SAP uses "" or "0")
+
+function filtered(){
+  const q=($('q').value||'').toLowerCase(), st=$('st').value, wir=$('wir').checked;
+  return ROWS.filter(r=>
+    (st==='all'||r.status===st) &&
+    (!wir||isWIR(r)) &&
+    (!q||[r.master,r.sch,r.in,r.out].some(v=>(''+v).toLowerCase().includes(q))));
+}
+function groupByMaster(rs){
+  const m={}; rs.forEach(r=>{(m[r.master]||(m[r.master]=[])).push(r);});
+  // newest master first
+  return Object.entries(m).sort((a,b)=>(+b[0])-(+a[0]));
+}
+function draw(){
+  const rs=filtered(); const groups=groupByMaster(rs);
+  // FINAL plates only (leaf rows). Intermediate stage outputs are re-processed, not deliverables.
+  const leaves=rs.filter(isLeaf);
+  const outMT=leaves.reduce((a,r)=>a+(+r.oqty||0),0);
+  $('kpis').innerHTML=`
+    <div class="kpi"><div class="lab">Schedules shown</div><div class="val">${groups.length}</div></div>
+    <div class="kpi"><div class="lab">Final plates</div><div class="val">${leaves.length}</div></div>
+    <div class="kpi"><div class="lab">Final output MT</div><div class="val">${f3(outMT)} <small>MT</small></div></div>`;
+  $('fcount').textContent=`${groups.length} schedules · ${rs.length} lines`;
+  if(!groups.length){ $('jobs').innerHTML='<div class="empty" style="padding:24px;text-align:center;color:var(--gray)">No schedules match.</div>'; return; }
+  const html=groups.map(([mno,g])=>{
+    const s1=g.find(r=>r.stage==='1')||g[0];
+    const st=g[0].status, open=st==='Open';
+    const tot=g.filter(isLeaf).reduce((a,r)=>a+(+r.oqty||0),0);  // final plates only
+    const multi=g.some(r=>r.stage!=='1');
+    // sort lines: stage then schedule
+    g.sort((a,b)=>(+a.stage-+b.stage)||((+a.sch)-(+b.sch)));
+    let body='', lastStage='';
+    g.forEach((r,i)=>{
+      if(multi && r.stage!==lastStage){ lastStage=r.stage;
+        body+=`<tr class="sub"><td colspan="7">Stage ${r.stage} &nbsp;·&nbsp; from ${esc(r.in)}</td></tr>`; }
+      const leaf=isLeaf(r);
+      const tag=leaf?'':' <span class="muted2" style="font-size:10px">→ re-processed</span>';
+      body+=`<tr><td class="num muted2">${i+1}</td><td>${esc(r.out)}${tag}</td>
+        <td class="num">${dim(r.thk)}</td><td class="num">${dint(r.w)}</td><td class="num">${dint(r.len)}</td>
+        <td class="num" style="opacity:${leaf?1:.55}">${leaf?'<b>'+f3(r.oqty)+'</b>':f3(r.oqty)}</td><td class="num muted2">${esc(r.sch)}</td></tr>`;
+    });
+    return `<div class="job">
+      <div class="jhead"><span class="no">Schedule ${esc(mno)}</span>
+        <span class="badge ${open?'b-open':'b-close'}">${esc(st)}</span>
+        <span class="coil">From: <b>${esc(s1.in)}</b> &nbsp;·&nbsp; ${f3(s1.iqty)} MT</span>
+        <span class="r">${g.filter(isLeaf).length} plate(s) · ${f3(tot)} MT</span></div>
+      <div class="jtbl"><table><thead><tr><th class="num">#</th><th>Output item</th>
+        <th class="num">Thk</th><th class="num">Width</th><th class="num">Length</th>
+        <th class="num">Qty (MT)</th><th class="num">Sch no</th></tr></thead><tbody>${body}</tbody></table></div>
+    </div>`;
+  }).join('');
+  $('jobs').innerHTML=html;
+}
+function dl(){
+  const rs=filtered(), head=['Schedule Master','Stage','Status','Input Item','Input Qty','Output Item','Thickness','Width','Length','Output Qty','Output Schedule No','Next Schedule No','Final Plate'];
+  const csv=[head.join(',')].concat(rs.map(r=>[r.master,r.stage,r.status,`"${r.in}"`,r.iqty,`"${r.out}"`,r.thk,r.w,r.len,r.oqty,r.sch,r.next,isLeaf(r)?'Yes':'No'].join(','))).join('\n');
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+  a.download='wheels_production_schedule_'+new Date().toISOString().slice(0,10)+'.csv';a.click();
+}
+(async function(){
+  try{
+    const txt=await fetch(DATA_BASE+'/wheels_prod_schedule.csv?t='+Date.now()).then(r=>r.ok?r.text():'');
+    const raw=parseCSV(txt);
+    ROWS=raw.map(r=>({
+      master:r['Schedule Master No'], stage:r['Stage No'], sch:r['Output Schedule No'],
+      in:r['Input Item Name']||'', iqty:r['Input Qty'], prod:r['Production Qty'],
+      out:r['Output Item Name']||'', oqty:r['Output Qty'],
+      thk:r['Thickness'], w:r['Output Width'], len:r['Output Length'],
+      next:r['Next Schedule No']||'', status:r['Status']||''
+    }));
+  }catch(e){ $('errbox').innerHTML='<div class="err">Couldn\'t load the production schedule.</div>'; return; }
+  $('foot').textContent=`${ROWS.length} schedule lines`;
+  draw();
+})();
+</script>
+</body></html>
