@@ -22,12 +22,15 @@
 <div class="pw">
   <div id="errbox"></div>
   <div class="filters">
-    <input type="search" id="q" placeholder="Search schedule no / item…" oninput="draw()"/>
-    <label>Status <select id="st" onchange="draw()"><option value="Open">Open</option><option value="all">All</option><option value="Close">Closed</option></select></label>
-    <label><input type="checkbox" id="wir" checked onchange="draw()"/> Wheels India only</label>
+    <label>View <select id="view" onchange="onView()"><option value="plan">Next working day's plan</option><option value="open">All open schedules</option></select></label>
+    <input type="search" id="q" placeholder="Search item / coil / grade…" oninput="draw()"/>
+    <label id="lblSt">Status <select id="st" onchange="draw()"><option value="Open">Open</option><option value="all">All</option><option value="Close">Closed</option></select></label>
+    <label id="lblWir"><input type="checkbox" id="wir" checked onchange="draw()"/> Wheels India only</label>
     <button class="pbtn" style="background:var(--blue);border-color:var(--blue)" onclick="dl()">Download CSV</button>
     <span class="fcount" id="fcount"></span>
   </div>
+  <div class="fcount" id="planNote" style="margin:0 0 6px;color:#b36b00"></div>
+  <div id="planhead"></div>
   <div class="kpis" id="kpis"></div>
   <div id="jobs"></div>
   <footer id="foot"></footer>
@@ -42,12 +45,32 @@ const dint=v=>{const n=parseFloat(v);return isNaN(n)?'':(''+Math.round(n));};
 const isWIR=r=>/(^|[\s/])WIR/i.test(r.in+' '+r.out);
 const isLeaf=r=>{const n=(r.next||'').trim();return !n||n==='0';};  // final plate (no further stage; SAP uses "" or "0")
 
+// ---- working-day calendar. Sundays are always off; add company holidays below (yyyy-mm-dd). ----
+const WEEKLY_OFF=[0];               // 0=Sunday. Add 6 here if Saturdays are also off.
+const HOLIDAYS=[                    // e.g. '2026-11-02',
+];
+const ymd=d=>{const z=new Date(d);return z.getFullYear()+'-'+String(z.getMonth()+1).padStart(2,'0')+'-'+String(z.getDate()).padStart(2,'0');};
+const isOff=d=>WEEKLY_OFF.includes(new Date(d).getDay())||HOLIDAYS.includes(ymd(d));
+function nextWorkingDay(from){ const d=new Date(from); d.setDate(d.getDate()+1); let i=0; while(isOff(d)&&i<60){d.setDate(d.getDate()+1);i++;} return d; }
+const fmtDay=d=>new Date(d).toLocaleDateString('en-IN',{weekday:'long',day:'2-digit',month:'short',year:'numeric'});
+const TODAY=ymd(new Date());
+const planMode=()=>$('view').value==='plan';
+
 function filtered(){
-  const q=($('q').value||'').toLowerCase(), st=$('st').value, wir=$('wir').checked;
+  const q=($('q').value||'').toLowerCase(), plan=planMode();
+  const st = plan ? 'Open' : $('st').value;
+  const wir = plan ? true : $('wir').checked;
   return ROWS.filter(r=>
     (st==='all'||r.status===st) &&
     (!wir||isWIR(r)) &&
-    (!q||[r.master,r.sch,r.in,r.out].some(v=>(''+v).toLowerCase().includes(q))));
+    (!plan || r.raised===TODAY) &&
+    (!q||[r.in,r.out].some(v=>(''+v).toLowerCase().includes(q))));
+}
+function onView(){
+  const plan=planMode();
+  $('lblSt').style.display = plan?'none':'';
+  $('lblWir').style.display = plan?'none':'';
+  draw();
 }
 function groupByMaster(rs){
   const m={}; rs.forEach(r=>{(m[r.master]||(m[r.master]=[])).push(r);});
@@ -55,16 +78,26 @@ function groupByMaster(rs){
   return Object.entries(m).sort((a,b)=>(+b[0])-(+a[0]));
 }
 function draw(){
+  const plan=planMode();
   const rs=filtered(); const groups=groupByMaster(rs);
   // FINAL plates only (leaf rows). Intermediate stage outputs are re-processed, not deliverables.
   const leaves=rs.filter(isLeaf);
   const outMT=leaves.reduce((a,r)=>a+(+r.oqty||0),0);
+  if(plan){
+    const nwd=nextWorkingDay(new Date());
+    $('planhead').innerHTML=`<div class="card" style="background:#0e2a47;color:#fff;margin:4px 0 10px;padding:12px 16px">
+      <div style="font-size:11px;opacity:.75;text-transform:uppercase;letter-spacing:.09em">Wheels India &middot; Production Plan</div>
+      <div style="font-size:21px;font-weight:700;margin:2px 0">For ${fmtDay(nwd)}</div>
+      <div style="font-size:12px;opacity:.85">Schedules raised today (${fmtDay(new Date())}) and still open</div></div>`;
+  } else { $('planhead').innerHTML=''; }
   $('kpis').innerHTML=`
-    <div class="kpi"><div class="lab">Schedules shown</div><div class="val">${groups.length}</div></div>
-    <div class="kpi"><div class="lab">Final plates</div><div class="val">${leaves.length}</div></div>
-    <div class="kpi"><div class="lab">Final output MT</div><div class="val">${f3(outMT)} <small>MT</small></div></div>`;
+    <div class="kpi"><div class="lab">${plan?'Jobs planned':'Schedules shown'}</div><div class="val">${groups.length}</div></div>
+    <div class="kpi"><div class="lab">${plan?'Plates to produce':'Final plates'}</div><div class="val">${leaves.length}</div></div>
+    <div class="kpi"><div class="lab">${plan?'Planned output MT':'Final output MT'}</div><div class="val">${f3(outMT)} <small>MT</small></div></div>`;
   $('fcount').textContent=`${groups.length} schedules · ${rs.length} lines`;
-  if(!groups.length){ $('jobs').innerHTML='<div class="empty" style="padding:24px;text-align:center;color:var(--gray)">No schedules match.</div>'; return; }
+  if(!groups.length){
+    const msg = plan ? 'No schedules were raised today, so there is nothing planned for the next working day yet.' : 'No schedules match.';
+    $('jobs').innerHTML=`<div class="empty" style="padding:24px;text-align:center;color:var(--gray)">${msg}</div>`; return; }
   const html=groups.map(([mno,g])=>{
     const s1=g.find(r=>r.stage==='1')||g[0];
     const st=g[0].status, open=st==='Open';
@@ -75,28 +108,28 @@ function draw(){
     let body='', lastStage='';
     g.forEach((r,i)=>{
       if(multi && r.stage!==lastStage){ lastStage=r.stage;
-        body+=`<tr class="sub"><td colspan="7">Stage ${r.stage} &nbsp;·&nbsp; from ${esc(r.in)}</td></tr>`; }
+        body+=`<tr class="sub"><td colspan="6">Stage ${r.stage} &nbsp;·&nbsp; from ${esc(r.in)}</td></tr>`; }
       const leaf=isLeaf(r);
       const tag=leaf?'':' <span class="muted2" style="font-size:10px">→ re-processed</span>';
       body+=`<tr><td class="num muted2">${i+1}</td><td>${esc(r.out)}${tag}</td>
         <td class="num">${dim(r.thk)}</td><td class="num">${dint(r.w)}</td><td class="num">${dint(r.len)}</td>
-        <td class="num" style="opacity:${leaf?1:.55}">${leaf?'<b>'+f3(r.oqty)+'</b>':f3(r.oqty)}</td><td class="num muted2">${esc(r.sch)}</td></tr>`;
+        <td class="num" style="opacity:${leaf?1:.55}">${leaf?'<b>'+f3(r.oqty)+'</b>':f3(r.oqty)}</td></tr>`;
     });
     return `<div class="job">
-      <div class="jhead"><span class="no">Schedule ${esc(mno)}</span>
+      <div class="jhead"><span class="no">${esc(s1.in)}</span>
         <span class="badge ${open?'b-open':'b-close'}">${esc(st)}</span>
-        <span class="coil">From: <b>${esc(s1.in)}</b> &nbsp;·&nbsp; ${f3(s1.iqty)} MT</span>
+        <span class="coil">Input <b>${f3(s1.iqty)} MT</b></span>
         <span class="r">${g.filter(isLeaf).length} plate(s) · ${f3(tot)} MT</span></div>
       <div class="jtbl"><table><thead><tr><th class="num">#</th><th>Output item</th>
         <th class="num">Thk</th><th class="num">Width</th><th class="num">Length</th>
-        <th class="num">Qty (MT)</th><th class="num">Sch no</th></tr></thead><tbody>${body}</tbody></table></div>
+        <th class="num">Qty (MT)</th></tr></thead><tbody>${body}</tbody></table></div>
     </div>`;
   }).join('');
   $('jobs').innerHTML=html;
 }
 function dl(){
-  const rs=filtered(), head=['Schedule Master','Stage','Status','Input Item','Input Qty','Output Item','Thickness','Width','Length','Output Qty','Output Schedule No','Next Schedule No','Final Plate'];
-  const csv=[head.join(',')].concat(rs.map(r=>[r.master,r.stage,r.status,`"${r.in}"`,r.iqty,`"${r.out}"`,r.thk,r.w,r.len,r.oqty,r.sch,r.next,isLeaf(r)?'Yes':'No'].join(','))).join('\n');
+  const rs=filtered(), head=['Raised Date','Stage','Status','Input Item','Input Qty','Output Item','Thickness','Width','Length','Output Qty','Final Plate'];
+  const csv=[head.join(',')].concat(rs.map(r=>[r.raised,r.stage,r.status,`"${r.in}"`,r.iqty,`"${r.out}"`,r.thk,r.w,r.len,r.oqty,isLeaf(r)?'Yes':'No'].join(','))).join('\n');
   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
   a.download='wheels_production_schedule_'+new Date().toISOString().slice(0,10)+'.csv';a.click();
 }
@@ -109,11 +142,16 @@ function dl(){
       in:r['Input Item Name']||'', iqty:r['Input Qty'], prod:r['Production Qty'],
       out:r['Output Item Name']||'', oqty:r['Output Qty'],
       thk:r['Thickness'], w:r['Output Width'], len:r['Output Length'],
-      next:r['Next Schedule No']||'', status:r['Status']||''
+      next:r['Next Schedule No']||'', status:r['Status']||'', raised:r['Raised Date']||''
     }));
   }catch(e){ $('errbox').innerHTML='<div class="err">Couldn\'t load the production schedule.</div>'; return; }
   $('foot').textContent=`${ROWS.length} schedule lines`;
-  draw();
+  // If the data doesn't carry Raised Date yet (data refresh not updated), the plan view can't work — fall back.
+  if(!ROWS.some(r=>r.raised)){
+    $('view').value='open';
+    $('planNote').textContent='Next-day plan view needs the updated data refresh (Raised Date column). Showing all open schedules for now.';
+  }
+  onView();
 })();
 </script>
 </body></html>
