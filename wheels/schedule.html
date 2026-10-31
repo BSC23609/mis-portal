@@ -44,6 +44,7 @@ const dint=v=>{const n=parseFloat(v);return isNaN(n)?'':(''+Math.round(n));};
 // Wheels India = grade token that STARTS with WIR (e.g. WIR006, WIR025, WIR025D), at a word boundary
 const isWIR=r=>/(^|[\s/])WIR/i.test(r.in+' '+r.out);
 const isLeaf=r=>{const n=(r.next||'').trim();return !n||n==='0';};  // final plate (no further stage; SAP uses "" or "0")
+const isScrap=r=>/\bSCRAP\b/i.test(r.out);   // scrap/offcut output (PRIME BLANKS/FLATS are kept)
 
 // ---- working-day calendar. Sundays are always off; add company holidays below (yyyy-mm-dd). ----
 const WEEKLY_OFF=[0];               // 0=Sunday. Add 6 here if Saturdays are also off.
@@ -61,6 +62,7 @@ function filtered(){
   const st = plan ? 'Open' : $('st').value;
   const wir = plan ? true : $('wir').checked;
   return ROWS.filter(r=>
+    !isScrap(r) &&
     (st==='all'||r.status===st) &&
     (!wir||isWIR(r)) &&
     (!plan || r.raised===TODAY) &&
