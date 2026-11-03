@@ -94,15 +94,17 @@ function dl(){
     in:r['Input Item Name']||'', out:r['Output Item Name']||'', oqty:r['Output Qty'],
     thk:r['Thickness'], w:r['Output Width'], len:r['Output Length'],
     next:r['Next Schedule No']||'', status:r['Status']||'',
-    sm:r['Schedule Master Date']||'', wio:r['Schedule Master WIO Date']||r['Schedule Output WIO Date']||'',
+    wipp:r['Schedule Master WI Production Plan Date']||r['Schedule Output WI Production Plan Date']||'',
+    sm:r['Schedule Master Date']||'',
+    wio:r['Schedule Master WIO Date']||r['Schedule Output WIO Date']||'',
     prog:r['Program Date']||r['Raised Date']||''
   })).filter(r=>r.status==='Open' && isWIR(r) && isLeaf(r) && !isScrap(r));
 
-  // Planned production date: prefer Schedule Master Date; else Program Date + 1 working day.
+  // Planned production date = WI Production Plan Date (WIPP); else Schedule Master Date; else Program Date + 1 working day.
+  // Plan received = WIO (Wheels India order date).
   ROWS.forEach(r=>{
-    const sm=parseYMD(r.sm);
-    r.planD = sm || (parseYMD(r.prog)?nextWorkingDay(parseYMD(r.prog)):null);
-    r.recvD = parseYMD(r.wio);   // plan received (WIO); may be null until entered in SAP
+    r.planD = parseYMD(r.wipp) || parseYMD(r.sm) || (parseYMD(r.prog)?nextWorkingDay(parseYMD(r.prog)):null);
+    r.recvD = parseYMD(r.wio);
   });
 
   const tomorrow=nextWorkingDay(new Date()); const tKey=ymd(tomorrow);
@@ -124,8 +126,9 @@ function dl(){
   $('t2c').textContent=pending.length?('('+pending.length+' open)'):'';
   $('t1').innerHTML=tableHTML(plan);
   $('t2').innerHTML=tableHTML(pending);
-  const usingSM=ROWS.some(r=>r.sm);
-  $('note').textContent='Approx. quantities in MT. Planned production date from '+(usingSM?'the Schedule Master Date':'program date + next working day (Schedule Master Date not yet in use)')+'. "Plan received" is the Wheels India order date where entered.';
+  const usingWIPP=ROWS.some(r=>r.wipp), usingSM=ROWS.some(r=>r.sm);
+  const src = usingWIPP?'the WI Production Plan date' : (usingSM?'the Schedule Master date' : 'program date + next working day (plan dates not yet entered)');
+  $('note').textContent='Approx. quantities in MT. Planned production date from '+src+'. "Plan received" is the Wheels India order date (WIO) where entered.';
   $('foot').textContent=`${ROWS.length} open Wheels India items`;
 })();
 </script>

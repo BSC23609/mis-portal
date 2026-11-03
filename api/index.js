@@ -628,7 +628,7 @@ function recipientMobiles(recips, flag){
 // Report-image cache. renderAndCachePng() builds the PNG and stores it; cachedPng() serves the stored
 // copy when it is fresh (default 5 min) and otherwise rebuilds. Priming the cache right before a
 // WhatsApp send makes Meta's image fetch instant, so the message is never dropped for a slow render.
-const PNG_BUILDERS = { stock: () => buildWheelsStockPng(), production: () => buildWheelsProdPng(), daily: () => buildDailyStockPng() };
+const PNG_BUILDERS = { stock: () => buildWheelsStockPng(), production: () => buildWheelsProdPng(), daily: () => buildDailyStockPng(), plan: () => buildWheelsPlanPng() };
 async function renderAndCachePng(name){
   const png = await PNG_BUILDERS[name]();
   const b64 = png.toString("base64");
@@ -683,7 +683,7 @@ async function handlerWheels(req, res){
     await ensureWheelsTable();
     // GET /api/wheels?fmt=pdf  ->  the statement as a PDF (same data/structure as the email).
     // Public, no-auth: this is the URL WATI fetches for the WhatsApp document template.
-    const fmt = (req.query && req.query.fmt) || ((/[?&]fmt=(pdf|xlsx|stockpng|prodpdf|prodpng|dailypng|wadiag|sendlog)\b/.exec(req.url || "")) || [])[1] || "";
+    const fmt = (req.query && req.query.fmt) || ((/[?&]fmt=(pdf|xlsx|stockpng|prodpdf|prodpng|dailypng|planpng|planpdf|wadiag|sendlog)\b/.exec(req.url || "")) || [])[1] || "";
     if (req.method === "GET" && fmt === "pdf"){
       const pdf = await buildWheelsPdf();
       res.setHeader("Content-Type", "application/pdf");
@@ -725,6 +725,20 @@ async function handlerWheels(req, res){
       res.setHeader("Content-Disposition", 'inline; filename="BSC_DailyStock_' + new Date().toISOString().slice(0,10).replace(/-/g,"") + '.png"');
       res.setHeader("Cache-Control", "public, max-age=300");
       return res.status(200).end(png);
+    }
+    if (req.method === "GET" && fmt === "planpng"){
+      const png = await cachedPng("plan", 300);
+      res.setHeader("Content-Type", "image/png");
+      res.setHeader("Content-Disposition", 'inline; filename="WheelsIndia_Plan_' + new Date().toISOString().slice(0,10).replace(/-/g,"") + '.png"');
+      res.setHeader("Cache-Control", "public, max-age=300");
+      return res.status(200).end(png);
+    }
+    if (req.method === "GET" && fmt === "planpdf"){
+      const pdf = await buildWheelsPlanPdf();
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", 'inline; filename="WheelsIndia_Plan_' + new Date().toISOString().slice(0,10).replace(/-/g,"") + '.pdf"');
+      res.setHeader("Cache-Control", "no-store");
+      return res.status(200).end(pdf);
     }
     // Delivery log: recent WhatsApp/email send results for the daily reminders (read by wheels/log.html).
     if (req.method === "GET" && fmt === "sendlog"){
@@ -1464,6 +1478,180 @@ async function buildWheelsProdPdf(holidays){
   doc.end(); await done; return Buffer.concat(chunks);
 }
 
+// ================= Wheels India PRODUCTION PLAN (Job Processing Plan) — image + PDF + email HTML =================
+// Mirrors wheels/plan.html. Planned production date = WIPP (WI Production Plan date), else Schedule Master
+// date, else Program date + next working day. Plan received = WIO (Wheels India order date).
+const PLAN_MN=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const pFmtD=d=>{ if(!d) return "-"; const z=new Date(d); return String(z.getDate()).padStart(2,"0")+"-"+PLAN_MN[z.getMonth()]+"-"+z.getFullYear(); };
+const pQty=v=>{ const n=parseFloat(v)||0; return n.toFixed(2); };
+const pNum=v=>{ const n=parseFloat(v); return isNaN(n)?null:n; };
+const pHasSize=r=>[r.thk,r.w,r.len].some(v=>{ const n=pNum(v); return n!==null&&n>0; });
+const pDimTh=v=>{ const n=pNum(v); return n===null?"":(""+ +n.toFixed(2)); };
+const pDimInt=v=>{ const n=pNum(v); return n===null?"":(""+Math.round(n)); };
+async function planModel(){
+  const DATA_BASE = process.env.DATA_BASE || "https://raw.githubusercontent.com/BSC23609/bsc-stock-data/main";
+  const txt = await fetch(DATA_BASE + "/wheels_prod_schedule.csv?t=" + Date.now()).then(r=>r.ok?r.text():"").catch(()=>"");
+  const raw = parseCsvSrv(txt);
+  const HOL = (process.env.WHEELS_HOLIDAYS||"").split(/[,\s]+/).filter(Boolean);
+  const WEEKLY_OFF=[0];   // Sundays off; Saturdays working
+  const ymd=d=>{ const z=new Date(d); return z.getFullYear()+"-"+String(z.getMonth()+1).padStart(2,"0")+"-"+String(z.getDate()).padStart(2,"0"); };
+  const isOff=d=>WEEKLY_OFF.includes(new Date(d).getDay())||HOL.includes(ymd(d));
+  const nextWorkingDay=from=>{ const d=new Date(from); d.setDate(d.getDate()+1); let i=0; while(isOff(d)&&i<60){ d.setDate(d.getDate()+1); i++; } return d; };
+  const parseYMD=s=>{ const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(s||""); return m?new Date(+m[1],+m[2]-1,+m[3]):null; };
+  const isWIR=r=>/(^|[\s/])WIR/i.test(r.in+" "+r.out);
+  const isLeaf=r=>{ const n=(r.next||"").trim(); return !n||n==="0"; };
+  const isScrap=r=>/\bSCRAP\b/i.test(r.out);
+  const rows = raw.map(r=>({
+    in:r["Input Item Name"]||"", out:r["Output Item Name"]||"", oqty:r["Output Qty"],
+    thk:r["Thickness"], w:r["Output Width"], len:r["Output Length"],
+    next:r["Next Schedule No"]||"", status:r["Status"]||"",
+    wipp:r["Schedule Master WI Production Plan Date"]||r["Schedule Output WI Production Plan Date"]||"",
+    sm:r["Schedule Master Date"]||"",
+    wio:r["Schedule Master WIO Date"]||r["Schedule Output WIO Date"]||"",
+    prog:r["Program Date"]||r["Raised Date"]||""
+  })).filter(r=>r.status==="Open"&&isWIR(r)&&isLeaf(r)&&!isScrap(r));
+  rows.forEach(r=>{
+    r.planD = parseYMD(r.wipp) || parseYMD(r.sm) || (parseYMD(r.prog)?nextWorkingDay(parseYMD(r.prog)):null);
+    r.recvD = parseYMD(r.wio);
+  });
+  const tomorrow=nextWorkingDay(new Date()); const tKey=ymd(tomorrow);
+  const plan = rows.filter(r=>r.planD&&ymd(r.planD)===tKey).sort((a,b)=>a.out.localeCompare(b.out));
+  const pending = rows.filter(r=>!(r.planD&&ymd(r.planD)===tKey)).sort((a,b)=>(a.planD&&b.planD)?(a.planD-b.planD):0);
+  return { plan, pending, tomorrow, planDate:pFmtD(tomorrow), asof:pFmtD(new Date()), total: rows.length };
+}
+// --- plan image (tomorrow's plan table) for WhatsApp ---
+function planSvg(M){
+  const L=14, W=760; const els=[]; let y=0;
+  const C={recv:92,plan:92,item:300,thk:50,wid:50,len:54,qty:0}; C.qty=W-2*L-(C.recv+C.plan+C.item+C.thk+C.wid+C.len);
+  const rect=(x,yy,w,h,fill)=>els.push(`<rect x="${x}" y="${yy}" width="${w}" height="${h}" fill="${fill}"/>`);
+  const txt=(x,yy,s,o)=>{ o=o||{}; els.push(`<text x="${x}" y="${yy}" font-family="DejaVu Sans" font-size="${o.size||11}"${o.bold?' font-weight="bold"':''} fill="${o.fill||'#222'}" text-anchor="${o.anchor||'start'}">${esc2(s)}</text>`); };
+  const wrap=(s,maxC)=>{ const w=String(s).split(/\s+/); const lines=[]; let cur=""; for(const t of w){ if((cur+" "+t).trim().length>maxC){ if(cur)lines.push(cur); cur=t; } else cur=(cur+" "+t).trim(); } if(cur)lines.push(cur); return lines.length?lines:[""]; };
+  rect(0,0,W,56,"#0e2a47");
+  txt(L,26,"Job Processing on "+M.planDate,{size:19,bold:true,fill:"#fff"});
+  txt(L,46,"Bharat Steel (Chennai) Pvt. Ltd.  -  Wheels India  -  Qty approx. in MT",{size:11,fill:"#cfe0ef"});
+  y=56; txt(L,y+17,"As on: "+M.asof,{size:10,fill:"#556"}); y+=28;
+  const cols=[["recv","Plan recd. from Wheels India"],["plan","Planned prodn. date"],["item","Item"],["thk","Thk"],["wid","Wid"],["len","Len"],["qty","Qty (MT)"]];
+  const xs={}; let cx=L; for(const c of cols){ xs[c[0]]=cx; cx+=C[c[0]]; } const tw=cx-L;
+  rect(L,y,tw,24,"#0e2a47"); txt(L+8,y+16,"Job Processing Plan (on "+M.planDate+")",{size:13,bold:true,fill:"#fff"}); y+=24;
+  const hH=34; rect(L,y,tw,hH,"#eef3f7");
+  for(const c of cols){ const k=c[0], label=c[1]; const lines=wrap(label,Math.max(6,Math.floor(C[k]/5.5))); const sy=y+hH/2-((lines.length-1)*6)-2; const start=(k==="item"); const tx=start?xs[k]+5:xs[k]+C[k]/2; lines.forEach((ln,i)=>txt(tx,sy+i*12+4,ln,{size:9,bold:true,fill:"#1a2a3a",anchor:start?"start":"middle"})); }
+  y+=hH;
+  const list=M.plan; let ri=0, tot=0;
+  if(!list.length){ rect(L,y,tw,24,"#fff"); txt(L+tw/2,y+16,"No jobs planned for the next working day.",{size:11,fill:"#777",anchor:"middle"}); y+=24; }
+  for(const r of list){
+    const il=wrap(r.out,Math.floor(C.item/6.0)); const rH=Math.max(22,8+il.length*13);
+    rect(L,y,tw,rH, ri%2?"#f7fafc":"#ffffff");
+    txt(xs.recv+C.recv/2,y+rH/2+4,pFmtD(r.recvD),{size:10,anchor:"middle"});
+    txt(xs.plan+C.plan/2,y+rH/2+4,pFmtD(r.planD),{size:10,anchor:"middle"});
+    il.forEach((ln,i)=>txt(xs.item+5,y+16+i*13,ln,{size:10}));
+    if(pHasSize(r)){ txt(xs.thk+C.thk/2,y+rH/2+4,pDimTh(r.thk),{size:10,anchor:"middle"}); txt(xs.wid+C.wid/2,y+rH/2+4,pDimInt(r.w),{size:10,anchor:"middle"}); txt(xs.len+C.len/2,y+rH/2+4,pDimInt(r.len),{size:10,anchor:"middle"}); }
+    else txt(xs.thk+(C.thk+C.wid+C.len)/2,y+rH/2+4,"Size not received",{size:9,fill:"#b36b00",anchor:"middle"});
+    txt(xs.qty+C.qty-6,y+rH/2+4,pQty(r.oqty),{size:11,bold:true,anchor:"end"});
+    y+=rH; tot+=parseFloat(r.oqty)||0; ri++;
+  }
+  rect(L,y,tw,24,"#0e2a47"); txt(L+8,y+16,"TOTAL - "+list.length+" item(s)",{size:11,bold:true,fill:"#fff"}); txt(xs.qty+C.qty-6,y+16,tot.toFixed(2),{size:11,bold:true,fill:"#fff",anchor:"end"}); y+=24;
+  txt(L,y+16,M.pending.length+" other pending order(s) - see the attached PDF / email for the full list.",{size:10,fill:"#556"}); y+=24;
+  const H=y+8;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><rect width="${W}" height="${H}" fill="#ffffff"/>${els.join("")}</svg>`;
+}
+async function buildWheelsPlanPng(){
+  let Resvg; try{ Resvg=(await import("@resvg/resvg-js")).Resvg; }catch(e){ throw new Error("resvg-js not available on server: "+e.message); }
+  const ff=prodFontFiles();
+  const svg=planSvg(await planModel());
+  const r=new Resvg(svg,{ fitTo:{ mode:"zoom", value:2 }, font:{ fontFiles:ff, loadSystemFonts: ff.length===0, defaultFontFamily:"DejaVu Sans" }, background:"#ffffff" });
+  return Buffer.from(r.render().asPng());
+}
+async function buildWheelsPlanPdf(){
+  let PDFDocument; try{ PDFDocument=(await import("pdfkit")).default; }catch(e){ throw new Error("pdfkit not available on server: "+e.message); }
+  const M=await planModel();
+  const doc=new PDFDocument({size:"A4",margin:28}); const chunks=[]; doc.on("data",c=>chunks.push(c)); const done=new Promise(r=>doc.on("end",r));
+  const ff=prodFontFiles();
+  if(ff.length){ doc.registerFont("N",ff[0]); doc.registerFont("B",ff[1]); } else { doc.registerFont("N","Helvetica"); doc.registerFont("B","Helvetica-Bold"); }
+  const L=28,R=567,W=R-L; let y=28;
+  const C={recv:66,plan:66,item:196,thk:44,wid:44,len:50,qty:67};
+  const colX={recv:L,plan:L+C.recv,item:L+C.recv+C.plan,thk:L+C.recv+C.plan+C.item,wid:L+C.recv+C.plan+C.item+C.thk,len:L+C.recv+C.plan+C.item+C.thk+C.wid,qty:L+C.recv+C.plan+C.item+C.thk+C.wid+C.len};
+  function head(){
+    doc.rect(L,y,W,40).fill("#0e2a47");
+    doc.fillColor("#fff").font("B").fontSize(15).text("Job Processing on "+M.planDate,L+10,y+8,{lineBreak:false});
+    doc.font("N").fontSize(8).fillColor("#cfe0ef").text("Bharat Steel (Chennai) Pvt. Ltd.   Wheels India   Qty approx. in MT",L+10,y+26,{lineBreak:false});
+    y+=46; doc.fillColor("#445").font("N").fontSize(8).text("As on: "+M.asof+"   -   Approx. quantities rounded to 2 decimals (MT).",L,y); y+=14;
+  }
+  function tableHeader(){
+    const hH=26; doc.rect(L,y,W,hH).fill("#eef3f7");
+    const hd=(x,w,t)=>doc.fillColor("#1a2a3a").font("B").fontSize(7).text(t,x+2,y+4,{width:w-4,align:"center"});
+    hd(colX.recv,C.recv,"Plan recd. from\nWheels India"); hd(colX.plan,C.plan,"Planned\nprodn. date");
+    doc.fillColor("#1a2a3a").font("B").fontSize(7.5).text("Item",colX.item+4,y+9,{width:C.item-6,align:"left"});
+    hd(colX.thk,C.thk,"Thk"); hd(colX.wid,C.wid,"Wid"); hd(colX.len,C.len,"Len"); hd(colX.qty,C.qty,"Qty (MT)");
+    y+=hH;
+  }
+  function section(title,list){
+    if(y>740){ doc.addPage(); y=28; }
+    doc.rect(L,y,W,18).fill("#0e2a47"); doc.fillColor("#fff").font("B").fontSize(10).text(title,L+8,y+5,{lineBreak:false}); y+=18;
+    tableHeader();
+    if(!list.length){ doc.rect(L,y,W,20).fill("#fff"); doc.fillColor("#777").font("N").fontSize(9).text("None.",L,y+5,{width:W,align:"center"}); y+=20; }
+    let tot=0, ri=0;
+    for(const r of list){
+      const itemH=doc.font("N").fontSize(8).heightOfString(r.out,{width:C.item-8});
+      const rH=Math.max(16,itemH)+6;
+      if(y+rH>812){ doc.addPage(); y=28; tableHeader(); }
+      if(ri%2) doc.rect(L,y,W,rH).fill("#f7fafc");
+      doc.fillColor("#222");
+      doc.font("N").fontSize(8).text(pFmtD(r.recvD),colX.recv,y+4,{width:C.recv,align:"center",lineBreak:false});
+      doc.font("N").fontSize(8).text(pFmtD(r.planD),colX.plan,y+4,{width:C.plan,align:"center",lineBreak:false});
+      doc.font("N").fontSize(8).text(r.out,colX.item+4,y+4,{width:C.item-8,align:"left"});
+      if(pHasSize(r)){
+        doc.font("N").fontSize(8).text(pDimTh(r.thk),colX.thk,y+4,{width:C.thk,align:"center",lineBreak:false});
+        doc.text(pDimInt(r.w),colX.wid,y+4,{width:C.wid,align:"center",lineBreak:false});
+        doc.text(pDimInt(r.len),colX.len,y+4,{width:C.len,align:"center",lineBreak:false});
+      } else {
+        doc.fillColor("#b36b00").font("N").fontSize(7.5).text("Size not received",colX.thk,y+4,{width:C.thk+C.wid+C.len,align:"center",lineBreak:false}); doc.fillColor("#222");
+      }
+      doc.font("B").fontSize(8.5).text(pQty(r.oqty),colX.qty,y+4,{width:C.qty-3,align:"right",lineBreak:false});
+      y+=rH; tot+=parseFloat(r.oqty)||0; ri++;
+    }
+    doc.rect(L,y,W,18).fill("#0e2a47"); doc.font("B").fontSize(8.5).fillColor("#fff").text("TOTAL - "+list.length+" item(s)",L,y+4,{width:C.recv+C.plan+C.item+C.thk+C.wid+C.len-4,align:"left",lineBreak:false});
+    doc.text(tot.toFixed(2),colX.qty,y+4,{width:C.qty-3,align:"right",lineBreak:false}); y+=18+12;
+  }
+  head();
+  section("JOB PROCESSING PLAN (on "+M.planDate+")", M.plan);
+  if(y>770){ doc.addPage(); y=28; }
+  section("OTHER PENDING ORDERS", M.pending);
+  if(y>800){ doc.addPage(); y=28; }
+  doc.fillColor("#999").font("N").fontSize(7).text("Computer-generated report - may contain mistakes. Bharat Steel (Chennai) Pvt. Ltd. - info@bharatsteels.in",L,y,{width:W});
+  doc.end(); await done; return Buffer.concat(chunks);
+}
+function planRowHtml(r){
+  const size = pHasSize(r)
+    ? `<td align="right">${pDimTh(r.thk)}</td><td align="right">${pDimInt(r.w)}</td><td align="right">${pDimInt(r.len)}</td>`
+    : `<td colspan="3" align="center" style="color:#b36b00;font-style:italic">Size not received</td>`;
+  return `<tr><td align="center">${pFmtD(r.recvD)}</td><td align="center">${pFmtD(r.planD)}</td><td>${esc2(r.out)}</td>${size}<td align="right"><b>${pQty(r.oqty)}</b></td></tr>`;
+}
+function planTableHtml(list){
+  if(!list.length) return `<p style="color:#667">None.</p>`;
+  const tot=list.reduce((a,r)=>a+(parseFloat(r.oqty)||0),0);
+  const th='style="background:#eef3f7;color:#0e2a47;font-size:11px;text-transform:uppercase;padding:6px 8px;border:1px solid #d8dee6"';
+  return `<table cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;font-family:Arial,sans-serif;font-size:12px">
+    <thead><tr><th ${th}>Plan received dated from Wheels India</th><th ${th}>Planned production date</th><th ${th} align="left">Item</th>
+    <th ${th}>Thk</th><th ${th}>Wid</th><th ${th}>Len</th><th ${th}>Qty (MT)</th></tr></thead>
+    <tbody style="color:#1a2634">${list.map(r=>planRowHtml(r).replace(/<td/g,'<td style="padding:6px 8px;border:1px solid #d8dee6"')).join("")}
+    <tr style="background:#0e2a47;color:#fff;font-weight:bold"><td colspan="6" style="padding:6px 8px">TOTAL - ${list.length} item(s)</td><td align="right" style="padding:6px 8px">${tot.toFixed(2)}</td></tr>
+    </tbody></table>`;
+}
+async function buildWheelsPlanHtml(M){
+  M = M || await planModel();
+  return `<div style="font-family:Arial,sans-serif;color:#1a2634">
+    <div style="background:#0e2a47;color:#fff;padding:14px 16px;border-radius:8px">
+      <div style="font-size:20px;font-weight:bold">Job Processing on ${M.planDate}</div>
+      <div style="font-size:12px;opacity:.85">Bharat Steel (Chennai) Pvt. Ltd. &middot; Wheels India &middot; Qty approx. in MT</div></div>
+    <p style="font-size:12px;color:#667">As on: ${M.asof}. Approx. quantities rounded to 2 decimals (MT).</p>
+    <h3 style="color:#0e2a47;margin:14px 0 6px">Job Processing Plan (on ${M.planDate})</h3>
+    ${planTableHtml(M.plan)}
+    <h3 style="color:#0e2a47;margin:18px 0 6px">Other Pending Orders (${M.pending.length} open)</h3>
+    ${planTableHtml(M.pending)}
+    <p style="font-size:11px;color:#999;margin-top:14px">Computer-generated report - may contain mistakes. Bharat Steel (Chennai) Pvt. Ltd. &middot; info@bharatsteels.in</p>
+  </div>`;
+}
+
 // ================= Company-wide DAILY STOCK report (PNG) — mirrors stock/daily.html =================
 const DS_SHOWN_WH=["11","38","22","07","39","50","51","52"];
 const DS_FYMON=["Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb","Mar"];
@@ -1739,57 +1927,6 @@ async function handlerAuth(req, res){
   }catch(e){ return json(res,500,{error:String(e.message||e)}); }
 }
 
-// ================= Group single sign-on (app.thebharatsteelgroup.com) =================
-// The group portal signs the person in once, then sends them to /auth/sso with a one-minute HS256
-// token signed with GROUP_SSO_SECRET (shared only by the portal and this app). We check it, find the
-// portal user by email and set the normal MIS session cookie. The email + password login still works.
-function _ssoPage(res, msg){
-  const esc = String(msg).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-  res.statusCode = 401; res.setHeader("Content-Type","text/html; charset=utf-8"); res.setHeader("Cache-Control","no-store");
-  res.end(`<!doctype html><meta name=viewport content="width=device-width,initial-scale=1"><body style="font-family:system-ui,sans-serif;max-width:440px;margin:15vh auto;padding:0 16px"><h2>Could not sign you in</h2><p style="color:#5b6b7b">${esc}</p><p><a href="/login.html">Sign in with your email and password</a></p>`);
-}
-function _verifyGroupToken(token, secret, audience){
-  const parts = String(token||"").split(".");
-  if (parts.length !== 3) throw new Error("bad");
-  const [h, p, sig] = parts;
-  const header = JSON.parse(_b64uToBuf(h).toString("utf8"));
-  if (header.alg !== "HS256") throw new Error("bad");
-  const expect = _b64u(crypto.createHmac("sha256", secret).update(h + "." + p).digest());
-  const a = Buffer.from(expect), b = Buffer.from(sig);
-  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) throw new Error("bad");
-  const c = JSON.parse(_b64uToBuf(p).toString("utf8"));
-  const now = Math.floor(Date.now()/1000);
-  if (c.iss !== "bsg-hub") throw new Error("bad");
-  if ((Array.isArray(c.aud) ? !c.aud.includes(audience) : c.aud !== audience)) throw new Error("bad");
-  if (!c.exp || now > c.exp + 10) { const e = new Error("expired"); e.expired = true; throw e; }
-  return c;
-}
-async function handlerGroupSso(req, res){
-  try{
-    const secret = process.env.GROUP_SSO_SECRET || "";
-    if (!secret) return _ssoPage(res, "Group sign-in is not set up on this app yet.");
-    const qs = new URL(req.url || "/", "http://x").searchParams;
-    let claims;
-    try { claims = _verifyGroupToken(qs.get("token"), secret, process.env.GROUP_SSO_APP_KEY || "mis"); }
-    catch(e){ return _ssoPage(res, e.expired ? "That sign-in link expired. Open MIS again from the group portal." : "Group sign-in could not be verified."); }
-    await ensurePortalUsers();
-    const tries = [String(claims.sub||"").trim().toLowerCase(), String(claims.email||"").trim().toLowerCase()].filter(v => v.includes("@"));
-    let u = null;
-    for (const e of tries){ const r = await sql`select * from portal_users where lower(email)=${e}`; if (r[0]) { u = r[0]; break; } }
-    if (!u) return _ssoPage(res, "Your group account is not linked to an MIS user. Ask IT to check your email in the group portal.");
-    const modules = u.is_admin ? PORTAL_MODULES : (u.modules||[]);
-    const tok = await authSign({uid:u.id, email:u.email, admin:!!u.is_admin, modules, exp:Date.now()+AUTH_DAYS*864e5});
-    if (!tok) return _ssoPage(res, "AUTH_SECRET is not set on this app.");
-    const next = qs.get("next") || "";
-    res.statusCode = 303;
-    res.setHeader("Set-Cookie", authCookie(tok, AUTH_DAYS*86400));
-    res.setHeader("Location", next.startsWith("/") && !next.startsWith("//") ? next : "/");
-    res.setHeader("Referrer-Policy", "no-referrer");
-    res.setHeader("Cache-Control", "no-store");
-    return res.end();
-  }catch(e){ res.statusCode = 500; return res.end("error"); }
-}
-
 // _router.js
 async function handler5(req, res) {
   const url = req.url || "";
@@ -1800,7 +1937,6 @@ async function handler5(req, res) {
   if (route === "sync") return handler2(req, res);
   if (route === "wheels") return handlerWheels(req, res);
   if (route === "auth") return handlerAuth(req, res);
-  if (route === "sso" || /^\/auth\/sso(\?|$)/.test(url)) return handlerGroupSso(req, res);
   res.setHeader("Cache-Control", "no-store");
   res.status(404).json({ error: "unknown route: " + route });
 }

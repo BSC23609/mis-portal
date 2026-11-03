@@ -34,6 +34,14 @@
       "destination": "/api/index?route=wheels&fmt=dailypng"
     },
     {
+      "source": "/wheels-plan.png",
+      "destination": "/api/index?route=wheels&fmt=planpng"
+    },
+    {
+      "source": "/wheels-plan.pdf",
+      "destination": "/api/index?route=wheels&fmt=planpdf"
+    },
+    {
       "source": "/api/:route",
       "destination": "/api/index?route=:route"
     }
