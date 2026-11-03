@@ -44,6 +44,7 @@
         {id:'report',   label:'Stock Statement', href:BASE+'/wheels/index.html'},
         {id:'prod',     label:'Daily Production Report', href:BASE+'/wheels/index.html#prod'},
         {id:'schedule', label:'Production Schedule', href:BASE+'/wheels/schedule.html'},
+        {id:'plan',     label:'Production Plan', href:BASE+'/wheels/plan.html'},
         {id:'settings', label:'Settings', href:BASE+'/wheels/settings.html'},
         {id:'sendlog',  label:'Send Log', href:BASE+'/wheels/log.html'},
     ]},

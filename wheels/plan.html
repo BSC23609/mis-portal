@@ -1,0 +1,132 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Production Plan — Wheels India — Bharat Steel MIS</title><link rel="icon" type="image/png" href="../stock/BSC.png"/>
+<script>window.PORTAL={module:'wheels',screen:'plan'}</script>
+<style>
+  .planhead{background:#0e2a47;color:#fff;border-radius:10px;padding:12px 16px;margin:6px 0 12px}
+  .planhead .k{font-size:11px;opacity:.75;text-transform:uppercase;letter-spacing:.09em}
+  .planhead .d{font-size:21px;font-weight:800;margin:2px 0}
+  .planhead .s{font-size:12px;opacity:.85}
+  .sec{margin:14px 0 0}
+  .sec h3{margin:0;background:#0e2a47;color:#fff;font-size:14px;font-weight:700;padding:9px 13px;border-radius:8px 8px 0 0}
+  .sec h3 .c{font-weight:600;font-size:11px;opacity:.8;margin-left:6px}
+  #wrap table{width:100%;border-collapse:collapse;font-size:13px}
+  #wrap thead th{background:var(--z,#eef3f8);color:#0e2a47;font-size:10px;text-transform:uppercase;letter-spacing:.03em;
+    padding:8px 9px;border:1px solid var(--line);text-align:left;vertical-align:bottom}
+  #wrap tbody td{padding:6px 9px;border:1px solid var(--line);vertical-align:top}
+  #wrap td.num,#wrap th.num{text-align:right;font-family:var(--mono);white-space:nowrap}
+  #wrap td.c,#wrap th.c{text-align:center}
+  #wrap tbody tr:nth-child(even){background:#fafcfe}
+  .nosize{color:#b36b00;font-style:italic}
+  .emptyrow{padding:14px;text-align:center;color:var(--gray);border:1px solid var(--line);border-top:0}
+  .tot td{background:#0e2a47;color:#fff;font-weight:700;border-color:#0e2a47}
+  .note{font-size:12px;color:var(--gray);font-style:italic;margin:2px 0 0}
+</style>
+</head><body>
+<div class="pw" id="wrap">
+  <div id="errbox"></div>
+  <div class="filters" style="margin:6px 0">
+    <span class="fcount" id="intro">Wheels India production plan for the next working day, plus other pending orders</span>
+    <button class="pbtn" style="background:var(--blue);border-color:var(--blue);margin-left:auto" onclick="dl()">Download CSV</button>
+  </div>
+  <div class="planhead" id="planhead"></div>
+  <div class="kpis" id="kpis" style="margin:8px 0"></div>
+
+  <div class="sec"><h3 id="h1">Job Processing Plan</h3><div id="t1"></div></div>
+  <div class="sec"><h3>Other Pending Orders <span class="c" id="t2c"></span></h3><div id="t2"></div></div>
+  <div class="note" id="note"></div>
+  <footer id="foot" style="margin-top:8px"></footer>
+</div>
+<script src="../_portal.js"></script>
+<script>
+let ROWS=[];
+const f2=n=>Number(n||0).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
+// ---- working-day calendar: Sundays off, Saturdays working; add holidays yyyy-mm-dd ----
+const WEEKLY_OFF=[0];
+const HOLIDAYS=[ /* '2026-11-xx', */ ];
+const MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const ymd=d=>{const z=new Date(d);return z.getFullYear()+'-'+String(z.getMonth()+1).padStart(2,'0')+'-'+String(z.getDate()).padStart(2,'0');};
+const isOff=d=>WEEKLY_OFF.includes(new Date(d).getDay())||HOLIDAYS.includes(ymd(d));
+function nextWorkingDay(from){const d=new Date(from);d.setDate(d.getDate()+1);let i=0;while(isOff(d)&&i<60){d.setDate(d.getDate()+1);i++;}return d;}
+const parseYMD=s=>{const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(s||'');return m?new Date(+m[1],+m[2]-1,+m[3]):null;};
+const fmtD=d=>{if(!d)return'-';const z=new Date(d);return String(z.getDate()).padStart(2,'0')+'-'+MN[z.getMonth()]+'-'+z.getFullYear();};
+const isWIR=r=>/(^|[\s/])WIR/i.test(r.in+' '+r.out);
+const isLeaf=r=>{const n=(r.next||'').trim();return !n||n==='0';};
+const isScrap=r=>/\bSCRAP\b/i.test(r.out);
+const numish=v=>{const n=parseFloat(v);return isNaN(n)?null:n;};
+const hasSize=r=>[r.thk,r.w,r.len].some(v=>{const n=numish(v);return n!==null&&n>0;});
+const dimTh=v=>{const n=numish(v);return n===null?'':(''+ +n.toFixed(2));};
+const dimInt=v=>{const n=numish(v);return n===null?'':(''+Math.round(n));};
+
+function rowHTML(r){
+  const size = hasSize(r)
+    ? `<td class="num">${dimTh(r.thk)}</td><td class="num">${dimInt(r.w)}</td><td class="num">${dimInt(r.len)}</td>`
+    : `<td class="nosize c" colspan="3">Size not received</td>`;
+  return `<tr><td class="c">${fmtD(r.recvD)}</td><td class="c">${fmtD(r.planD)}</td>
+    <td>${esc(r.out)}</td>${size}<td class="num"><b>${f2(r.oqty)}</b></td></tr>`;
+}
+function tableHTML(list){
+  if(!list.length) return `<div class="emptyrow">None.</div>`;
+  const tot=list.reduce((a,r)=>a+(+r.oqty||0),0);
+  return `<table><thead><tr>
+    <th class="c">Plan received dated<br>from Wheels India</th>
+    <th class="c">Planned<br>production date</th>
+    <th>Item</th><th class="num">Thk</th><th class="num">Wid</th><th class="num">Len</th><th class="num">Qty (MT)</th>
+    </tr></thead><tbody>${list.map(rowHTML).join('')}
+    <tr class="tot"><td colspan="6">TOTAL &middot; ${list.length} item(s)</td><td class="num">${f2(tot)}</td></tr>
+    </tbody></table>`;
+}
+function dl(){
+  const all=ROWS.slice().sort((a,b)=>(a.planD-b.planD));
+  const head=['Plan received (WIO)','Planned production date','Item','Thk','Wid','Len','Qty (MT)','Bucket'];
+  const line=r=>[fmtD(r.recvD),fmtD(r.planD),`"${r.out}"`,dimTh(r.thk),dimInt(r.w),dimInt(r.len),(+r.oqty||0).toFixed(2),r.bucket].join(',');
+  const csv=[head.join(',')].concat(all.map(line)).join('\n');
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+  a.download='wheels_production_plan_'+new Date().toISOString().slice(0,10)+'.csv';a.click();
+}
+
+(async function(){
+  let txt='';
+  try{ txt=await fetch(DATA_BASE+'/wheels_prod_schedule.csv?t='+Date.now()).then(r=>r.ok?r.text():''); }
+  catch(e){ $('errbox').innerHTML='<div class="err">Couldn\'t load the production plan.</div>'; return; }
+  const raw=parseCSV(txt);
+  ROWS=raw.map(r=>({
+    in:r['Input Item Name']||'', out:r['Output Item Name']||'', oqty:r['Output Qty'],
+    thk:r['Thickness'], w:r['Output Width'], len:r['Output Length'],
+    next:r['Next Schedule No']||'', status:r['Status']||'',
+    sm:r['Schedule Master Date']||'', wio:r['Schedule Master WIO Date']||r['Schedule Output WIO Date']||'',
+    prog:r['Program Date']||r['Raised Date']||''
+  })).filter(r=>r.status==='Open' && isWIR(r) && isLeaf(r) && !isScrap(r));
+
+  // Planned production date: prefer Schedule Master Date; else Program Date + 1 working day.
+  ROWS.forEach(r=>{
+    const sm=parseYMD(r.sm);
+    r.planD = sm || (parseYMD(r.prog)?nextWorkingDay(parseYMD(r.prog)):null);
+    r.recvD = parseYMD(r.wio);   // plan received (WIO); may be null until entered in SAP
+  });
+
+  const tomorrow=nextWorkingDay(new Date()); const tKey=ymd(tomorrow);
+  const plan   = ROWS.filter(r=>r.planD && ymd(r.planD)===tKey);
+  const pending= ROWS.filter(r=>!(r.planD && ymd(r.planD)===tKey));
+  plan.forEach(r=>r.bucket='PLAN'); pending.forEach(r=>r.bucket='PENDING');
+  plan.sort((a,b)=>a.out.localeCompare(b.out));
+  pending.sort((a,b)=>(a.planD&&b.planD)?(a.planD-b.planD):0);
+
+  const planMT=plan.reduce((a,r)=>a+(+r.oqty||0),0);
+  $('planhead').innerHTML=`<div class="k">Wheels India &middot; Production Plan</div>
+    <div class="d">For ${fmtD(tomorrow)}</div>
+    <div class="s">Jobs planned for the next working day</div>`;
+  $('kpis').innerHTML=`
+    <div class="kpi"><div class="lab">Jobs planned (next day)</div><div class="val">${plan.length}</div></div>
+    <div class="kpi"><div class="lab">Planned output</div><div class="val">${f2(planMT)} <small>MT</small></div></div>
+    <div class="kpi"><div class="lab">Other pending orders</div><div class="val">${pending.length}</div></div>`;
+  $('h1').textContent='Job Processing Plan (on '+fmtD(tomorrow)+')';
+  $('t2c').textContent=pending.length?('('+pending.length+' open)'):'';
+  $('t1').innerHTML=tableHTML(plan);
+  $('t2').innerHTML=tableHTML(pending);
+  const usingSM=ROWS.some(r=>r.sm);
+  $('note').textContent='Approx. quantities in MT. Planned production date from '+(usingSM?'the Schedule Master Date':'program date + next working day (Schedule Master Date not yet in use)')+'. "Plan received" is the Wheels India order date where entered.';
+  $('foot').textContent=`${ROWS.length} open Wheels India items`;
+})();
+</script>
+</body></html>
