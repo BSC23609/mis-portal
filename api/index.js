@@ -1550,7 +1550,6 @@ function planSvg(M){
     y+=rH; tot+=parseFloat(r.oqty)||0; ri++;
   }
   rect(L,y,tw,24,"#0e2a47"); txt(L+8,y+16,"TOTAL - "+list.length+" item(s)",{size:11,bold:true,fill:"#fff"}); txt(xs.qty+C.qty-6,y+16,tot.toFixed(2),{size:11,bold:true,fill:"#fff",anchor:"end"}); y+=24;
-  txt(L,y+16,M.pending.length+" other pending order(s) - see the attached PDF / email for the full list.",{size:10,fill:"#556"}); y+=24;
   const H=y+8;
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><rect width="${W}" height="${H}" fill="#ffffff"/>${els.join("")}</svg>`;
 }
