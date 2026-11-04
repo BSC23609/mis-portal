@@ -1,9 +1,9 @@
-﻿<#
-  refresh_stock.ps1 — stock / sales / purchase pipeline for stock.bharatsteels.in
+<#
+  refresh_stock.ps1 - stock / sales / purchase pipeline for stock.bharatsteels.in
   Queries SAP MSSQL, writes coils.csv + plates.csv (HR stock pages) and
   mis_stock.csv + mis_sales.csv + mis_purchase.csv + mis_meta.json (MIS page)
   into the repo, then pushes to GitHub. One job, one push.
-  Run from PowerShell (NOT cmd — a .ps1 opens in Notepad from cmd):
+  Run from PowerShell (NOT cmd - a .ps1 opens in Notepad from cmd):
       powershell -ExecutionPolicy Bypass -File C:\scripts\refresh_stock.ps1
   Schedule it the same way as the weighbridge refresh.
 
@@ -29,7 +29,7 @@ $ini=@{}; Get-Content $Cfg | ForEach-Object {
 }
 # accept either  user=  (old header)  or  username=  (weighbridge / discovery config)
 $dbUser = if($ini.username){$ini.username}else{$ini.user}
-if(-not $ini.server -or -not $dbUser){ Log "ERROR: config.ini missing server/username — check $Cfg"; exit 1 }
+if(-not $ini.server -or -not $dbUser){ Log "ERROR: config.ini missing server/username - check $Cfg"; exit 1 }
 $connStr="Server=$($ini.server);Database=$($ini.database);User Id=$dbUser;Password=$($ini.password);TrustServerCertificate=True;Connect Timeout=30"
 
 function Invoke-Sql($sql){
@@ -266,6 +266,91 @@ LEFT JOIN OITB G ON G.ItmsGrpCod = WI.ItmsGrpCod
 ORDER BY WI.ItemName
 "@
 
+# ---- Production plan schedule (recursive SMS schedule flow: coil -> cut plates, all stages) ----
+# Feeds the Wheels India "Production Schedule" portal tab. Returns ALL production; the tab
+# defaults the view to Open + WIR grades. One row per output line per stage.
+# [Next Schedule No] = 0 or NULL means the plate is a final deliverable (not fed to a further stage).
+$wheelsSchedSql = @'
+;WITH ProductionFlow AS
+(
+    SELECT
+        H.DocNum AS [Schedule Master No],
+        H.DocEntry AS [Schedule Master Entry],
+        CAST(H.U_DocDate   AS DATE) AS [Schedule Master Date],       -- schedule document date
+        CAST(H.U_WIO_Date  AS DATE) AS [Schedule Master WIO Date],   -- Wheels India ORDER date (plan received)
+        CAST(H.U_WIPPDate  AS DATE) AS [Schedule Master WI Production Plan Date], -- WI PRODUCTION PLANNED date
+        CAST(OH.CreateDate AS DATE) AS [Program Date],               -- program creation date (fallback)
+        1 AS [Stage No],
+        CAST(S.U_IPItem AS NVARCHAR(100)) AS [Input Item Code],
+        CAST(S.U_IPDesrp AS NVARCHAR(254)) AS [Input Item Name],
+        TRY_CONVERT(DECIMAL(19,6), S.U_IOnStock) AS [Input Qty],
+        TRY_CONVERT(DECIMAL(19,6), S.U_ProdQty) AS [Production Qty],
+        OH.DocNum AS [Output Schedule No],
+        CAST(OH.U_DocDate  AS DATE) AS [Schedule Output Date],
+        CAST(OH.U_WIO_Date AS DATE) AS [Schedule Output WIO Date],
+        CAST(OH.U_WIPPDate AS DATE) AS [Schedule Output WI Production Plan Date],
+        CAST(O.U_OPItem AS NVARCHAR(100)) AS [Output Item Code],
+        CAST(O.U_OPDesrp AS NVARCHAR(254)) AS [Output Item Name],
+        TRY_CONVERT(DECIMAL(19,6), O.U_OPQty) AS [Output Qty],
+        CAST(O.U_OPThick AS NVARCHAR(50)) AS [Thickness],
+        CAST(O.U_OPWidth AS NVARCHAR(50)) AS [Output Width],
+        CAST(O.U_OPLength AS NVARCHAR(50)) AS [Output Length],
+        TRY_CONVERT(INT, O.U_OutPcs) AS [Actual Pcs],           -- No. of pieces (output)
+        CAST(CAST(O.U_Remarks AS NVARCHAR(500)) AS NVARCHAR(500)) AS [Remarks],
+        TRY_CONVERT(INT, O.U_SHONum) AS [Next Schedule No],
+        CAST(CASE WHEN OH.Status='O' THEN 'Open' WHEN OH.Status='C' THEN 'Close' ELSE OH.Status END AS NVARCHAR(20)) AS [Status],
+        CAST('|' + CAST(OH.DocNum AS NVARCHAR(20)) + '|' AS NVARCHAR(MAX)) AS [Document Path]
+    FROM [@SMS_OSCH] H
+    INNER JOIN [@SMS_SCH1] S ON H.DocEntry = S.DocEntry
+    INNER JOIN [@SMS_OSHO] OH ON TRY_CONVERT(INT, S.U_SHONum) = OH.DocNum
+    INNER JOIN [@SMS_SHO1] O ON OH.DocEntry = O.DocEntry
+    UNION ALL
+    SELECT
+        P.[Schedule Master No],
+        P.[Schedule Master Entry],
+        P.[Schedule Master Date],
+        P.[Schedule Master WIO Date],
+        P.[Schedule Master WI Production Plan Date],
+        CAST(OH2.CreateDate AS DATE) AS [Program Date],
+        P.[Stage No] + 1 AS [Stage No],
+        P.[Output Item Code] AS [Input Item Code],
+        P.[Output Item Name] AS [Input Item Name],
+        P.[Output Qty] AS [Input Qty],
+        CAST(NULL AS DECIMAL(19,6)) AS [Production Qty],
+        OH2.DocNum AS [Output Schedule No],
+        CAST(OH2.U_DocDate  AS DATE) AS [Schedule Output Date],
+        CAST(OH2.U_WIO_Date AS DATE) AS [Schedule Output WIO Date],
+        CAST(OH2.U_WIPPDate AS DATE) AS [Schedule Output WI Production Plan Date],
+        CAST(O2.U_OPItem AS NVARCHAR(100)) AS [Output Item Code],
+        CAST(O2.U_OPDesrp AS NVARCHAR(254)) AS [Output Item Name],
+        TRY_CONVERT(DECIMAL(19,6), O2.U_OPQty) AS [Output Qty],
+        CAST(O2.U_OPThick AS NVARCHAR(50)) AS [Thickness],
+        CAST(O2.U_OPWidth AS NVARCHAR(50)) AS [Output Width],
+        CAST(O2.U_OPLength AS NVARCHAR(50)) AS [Output Length],
+        TRY_CONVERT(INT, O2.U_OutPcs) AS [Actual Pcs],
+        CAST(CAST(O2.U_Remarks AS NVARCHAR(500)) AS NVARCHAR(500)) AS [Remarks],
+        TRY_CONVERT(INT, O2.U_SHONum) AS [Next Schedule No],
+        CAST(CASE WHEN OH2.Status='O' THEN 'Open' WHEN OH2.Status='C' THEN 'Close' ELSE OH2.Status END AS NVARCHAR(20)) AS [Status],
+        CAST(P.[Document Path] + CAST(OH2.DocNum AS NVARCHAR(20)) + '|' AS NVARCHAR(MAX)) AS [Document Path]
+    FROM ProductionFlow P
+    INNER JOIN [@SMS_OSHO] OH2 ON P.[Next Schedule No] = OH2.DocNum
+    INNER JOIN [@SMS_SHO1] O2 ON OH2.DocEntry = O2.DocEntry
+    WHERE P.[Next Schedule No] IS NOT NULL
+      AND CHARINDEX('|' + CAST(OH2.DocNum AS NVARCHAR(20)) + '|', P.[Document Path]) = 0
+)
+SELECT
+    [Schedule Master No],[Schedule Master Entry],
+    [Schedule Master Date],[Schedule Master WIO Date],[Schedule Master WI Production Plan Date],[Program Date],
+    [Stage No],
+    [Input Item Code],[Input Item Name],[Input Qty],[Production Qty],
+    [Output Schedule No],[Schedule Output Date],[Schedule Output WIO Date],[Schedule Output WI Production Plan Date],
+    [Output Item Code],[Output Item Name],[Output Qty],
+    [Thickness],[Output Width],[Output Length],[Actual Pcs],[Remarks],[Next Schedule No],[Status]
+FROM ProductionFlow
+ORDER BY [Schedule Master No],[Stage No],[Output Schedule No],[Output Item Code]
+OPTION (MAXRECURSION 100);
+'@
+
 function Invoke-SqlDated($sql, [string]$startDate){
   $conn=New-Object System.Data.SqlClient.SqlConnection $connStr
   $conn.Open()
@@ -310,11 +395,11 @@ $now=Get-Date; $fy= if($now.Month -ge 4){$now.Year}else{$now.Year-1}
 $StartDate=(Get-Date -Year ($fy-1) -Month 4 -Day 1).ToString('yyyy-MM-dd')
 
 try{
-  Log "Querying coils…"
+  Log "Querying coils..."
   $coils = Invoke-Sql $coilSql
   Log "  $($coils.Rows.Count) coil rows"
 
-  Log "Querying plates…"
+  Log "Querying plates..."
   $plates = Invoke-Sql $plateSql
   Log "  $($plates.Rows.Count) plate rows"
 
@@ -344,12 +429,12 @@ try{
   Log "CSVs written."
 
   # ---- MIS: stock / sales / purchase ----
-  Log "Querying MIS stock…";    $misStock=Invoke-Sql $misStockSql;                 Log "  $($misStock.Rows.Count) rows"
-  Log "Querying MIS sales…";    $misSales=Invoke-SqlDated $misSalesSql $StartDate;  Log "  $($misSales.Rows.Count) rows"
-  Log "Querying MIS purchase…"; $misPurch=Invoke-SqlDated $misPurchSql $StartDate;  Log "  $($misPurch.Rows.Count) rows"
-  Log "Querying job work…";     $jwFlow=Invoke-SqlDated $misJwFlowSql $StartDate;    $jwDocs=Invoke-SqlDated $misJwDocsSql $StartDate;  $jwBal=Invoke-Sql $misJwBalanceSql
-  Log "  flow $($jwFlow.Rows.Count) · docs $($jwDocs.Rows.Count) · balance $($jwBal.Rows.Count) rows"
-  Log "Querying Wheels India (WH45)…"; $wheels=Invoke-Sql $wheelsSql; Log "  $($wheels.Rows.Count) rows"
+  Log "Querying MIS stock...";    $misStock=Invoke-Sql $misStockSql;                 Log "  $($misStock.Rows.Count) rows"
+  Log "Querying MIS sales...";    $misSales=Invoke-SqlDated $misSalesSql $StartDate;  Log "  $($misSales.Rows.Count) rows"
+  Log "Querying MIS purchase..."; $misPurch=Invoke-SqlDated $misPurchSql $StartDate;  Log "  $($misPurch.Rows.Count) rows"
+  Log "Querying job work...";     $jwFlow=Invoke-SqlDated $misJwFlowSql $StartDate;    $jwDocs=Invoke-SqlDated $misJwDocsSql $StartDate;  $jwBal=Invoke-Sql $misJwBalanceSql
+  Log "  flow $($jwFlow.Rows.Count) - docs $($jwDocs.Rows.Count) - balance $($jwBal.Rows.Count) rows"
+  Log "Querying Wheels India (WH45)..."; $wheels=Invoke-Sql $wheelsSql; Log "  $($wheels.Rows.Count) rows"
 
   # Wheels production - daily machine-wise feed for the current calendar year.
   # The portal aggregates this into the 3-section report (Total / Wheels India / Monthly)
@@ -377,8 +462,10 @@ ORDER BY 1, 2
 '@
   Log "Querying Wheels production (daily)..."; $wdaily=Invoke-Sql $wheelsDailySql; Log "  $($wdaily.Rows.Count) rows"
 
+  Log "Querying production schedule..."; $wsched=Invoke-Sql $wheelsSchedSql; Log "  $($wsched.Rows.Count) rows"
 
-  # production per machine (SMS shift-entry UDTs) — today + month-to-date, prime/defective/scrap
+
+  # production per machine (SMS shift-entry UDTs) - today + month-to-date, prime/defective/scrap
   $prodSql = @'
 SELECT
     T1.U_Machcode AS [Machine Code],
@@ -405,9 +492,9 @@ ORDER BY CASE T1.U_Machcode
     WHEN 'MACHINE02' THEN 4 WHEN 'MACHINE02 (MDS)' THEN 5 WHEN 'MACHINE 02 SLITTING' THEN 6
     WHEN 'MACHINE15 (MDS)' THEN 7 ELSE 99 END, T1.U_Machcode
 '@
-  Log "Querying production (SMS)…"; $prod=Invoke-Sql $prodSql; Log "  $($prod.Rows.Count) rows"
+  Log "Querying production (SMS)..."; $prod=Invoke-Sql $prodSql; Log "  $($prod.Rows.Count) rows"
 
-  if(@($misStock.Rows).Count -eq 0){ throw "MIS stock query returned 0 rows — not overwriting dashboard data." }
+  if(@($misStock.Rows).Count -eq 0){ throw "MIS stock query returned 0 rows - not overwriting dashboard data." }
   [IO.File]::WriteAllText("$StockDir\mis_stock.csv",    (ConvertTo-CsvText $misStock), $enc)
   [IO.File]::WriteAllText("$StockDir\mis_sales.csv",    (ConvertTo-CsvText $misSales), $enc)
   [IO.File]::WriteAllText("$StockDir\mis_purchase.csv", (ConvertTo-CsvText $misPurch), $enc)
@@ -420,6 +507,7 @@ ORDER BY CASE T1.U_Machcode
   if(-not (Test-Path $WheelsDir)){ New-Item $WheelsDir -ItemType Directory -Force | Out-Null }
   [IO.File]::WriteAllText("$WheelsDir\wheels_stock.csv", (ConvertTo-CsvText $wheels), $enc)
   [IO.File]::WriteAllText("$WheelsDir\wheels_proddaily.csv",         (ConvertTo-CsvText $wdaily), $enc)
+  [IO.File]::WriteAllText("$WheelsDir\wheels_prod_schedule.csv",     (ConvertTo-CsvText $wsched), $enc)
   [IO.File]::WriteAllText("$WheelsDir\wheels_meta.json", (@{ generated=$now.ToString('yyyy-MM-ddTHH:mm:ss'); rows=$wheels.Rows.Count } | ConvertTo-Json -Compress), $enc)
   $meta=@{ generated=$now.ToString('yyyy-MM-ddTHH:mm:ss'); fyStart="$fy-04-01"; dataFrom=$StartDate;
            rows=@{ coils=$coils.Rows.Count; plates=$plates.Rows.Count; stock=$misStock.Rows.Count; sales=$misSales.Rows.Count; purchase=$misPurch.Rows.Count; jobwork=$jwDocs.Rows.Count } }
@@ -432,7 +520,7 @@ ORDER BY CASE T1.U_Machcode
   # Judge git by exit code only.
   $prevEap=$ErrorActionPreference; $ErrorActionPreference='Continue'
   try{
-    git add coils.csv plates.csv mis_stock.csv mis_sales.csv mis_purchase.csv production.csv mis_jobwork_flow.csv mis_jobwork_docs.csv mis_jobwork_balance.csv mis_meta.json wheels_stock.csv wheels_proddaily.csv wheels_meta.json 2>&1 | Out-Null
+    git add coils.csv plates.csv mis_stock.csv mis_sales.csv mis_purchase.csv production.csv mis_jobwork_flow.csv mis_jobwork_docs.csv mis_jobwork_balance.csv mis_meta.json wheels_stock.csv wheels_proddaily.csv wheels_prod_schedule.csv wheels_meta.json 2>&1 | Out-Null
     $stamp=[DateTime]::Now.ToString('yyyy-MM-dd HH:mm')
     git commit -m "stock refresh $stamp" 2>&1 | Out-Null          # no-op if nothing changed
     # commit first, THEN rebase: -X theirs = keep our freshly generated CSVs on conflict,

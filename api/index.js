@@ -1488,6 +1488,7 @@ const pNum=v=>{ const n=parseFloat(v); return isNaN(n)?null:n; };
 const pHasSize=r=>[r.thk,r.w,r.len].some(v=>{ const n=pNum(v); return n!==null&&n>0; });
 const pDimTh=v=>{ const n=pNum(v); return n===null?"":(""+ +n.toFixed(2)); };
 const pDimInt=v=>{ const n=pNum(v); return n===null?"":(""+Math.round(n)); };
+const pSize=r=>pHasSize(r)?[pDimTh(r.thk),pDimInt(r.w),pDimInt(r.len)].filter(x=>x!=="").join(" x "):"Size not received";
 async function planModel(){
   const DATA_BASE = process.env.DATA_BASE || "https://raw.githubusercontent.com/BSC23609/bsc-stock-data/main";
   const txt = await fetch(DATA_BASE + "/wheels_prod_schedule.csv?t=" + Date.now()).then(r=>r.ok?r.text():"").catch(()=>"");
@@ -1504,6 +1505,7 @@ async function planModel(){
   const rows = raw.map(r=>({
     in:r["Input Item Name"]||"", out:r["Output Item Name"]||"", oqty:r["Output Qty"],
     thk:r["Thickness"], w:r["Output Width"], len:r["Output Length"],
+    pcs:r["Actual Pcs"]||"", remarks:r["Remarks"]||"",
     next:r["Next Schedule No"]||"", status:r["Status"]||"",
     wipp:r["Schedule Master WI Production Plan Date"]||r["Schedule Output WI Production Plan Date"]||"",
     sm:r["Schedule Master Date"]||"",
@@ -1522,31 +1524,31 @@ async function planModel(){
 // --- plan image (tomorrow's plan table) for WhatsApp ---
 function planSvg(M){
   const L=14, W=760; const els=[]; let y=0;
-  const C={recv:92,plan:92,item:300,thk:50,wid:50,len:54,qty:0}; C.qty=W-2*L-(C.recv+C.plan+C.item+C.thk+C.wid+C.len);
+  const C={recv:102,plan:100,size:150,qty:78,pcs:66,rem:0}; C.rem=W-2*L-(C.recv+C.plan+C.size+C.qty+C.pcs);
   const rect=(x,yy,w,h,fill)=>els.push(`<rect x="${x}" y="${yy}" width="${w}" height="${h}" fill="${fill}"/>`);
   const txt=(x,yy,s,o)=>{ o=o||{}; els.push(`<text x="${x}" y="${yy}" font-family="DejaVu Sans" font-size="${o.size||11}"${o.bold?' font-weight="bold"':''} fill="${o.fill||'#222'}" text-anchor="${o.anchor||'start'}">${esc2(s)}</text>`); };
   const wrap=(s,maxC)=>{ const w=String(s).split(/\s+/); const lines=[]; let cur=""; for(const t of w){ if((cur+" "+t).trim().length>maxC){ if(cur)lines.push(cur); cur=t; } else cur=(cur+" "+t).trim(); } if(cur)lines.push(cur); return lines.length?lines:[""]; };
   rect(0,0,W,56,"#0e2a47");
-  txt(L,26,"Job Processing on "+M.planDate,{size:19,bold:true,fill:"#fff"});
-  txt(L,46,"Bharat Steel (Chennai) Pvt. Ltd.  -  Wheels India  -  Qty approx. in MT",{size:11,fill:"#cfe0ef"});
-  y=56; txt(L,y+17,"As on: "+M.asof,{size:10,fill:"#556"}); y+=28;
-  const cols=[["recv","Plan recd. from Wheels India"],["plan","Planned prodn. date"],["item","Item"],["thk","Thk"],["wid","Wid"],["len","Len"],["qty","Qty (MT)"]];
+  txt(L,26,"Wheels India Production Plan",{size:19,bold:true,fill:"#fff"});
+  txt(L,46,"Bharat Steel (Chennai) Pvt. Ltd.  -  Qty approx. in MT",{size:11,fill:"#cfe0ef"});
+  y=56; txt(L,y+17,"Date of report: "+M.asof,{size:10,fill:"#556"}); y+=28;
+  const cols=[["recv","Date of order receipt"],["plan","Processing date"],["size","Size"],["qty","Qty (MT)"],["pcs","No. of pcs"],["rem","Remarks"]];
   const xs={}; let cx=L; for(const c of cols){ xs[c[0]]=cx; cx+=C[c[0]]; } const tw=cx-L;
-  rect(L,y,tw,24,"#0e2a47"); txt(L+8,y+16,"Job Processing Plan (on "+M.planDate+")",{size:13,bold:true,fill:"#fff"}); y+=24;
-  const hH=34; rect(L,y,tw,hH,"#eef3f7");
-  for(const c of cols){ const k=c[0], label=c[1]; const lines=wrap(label,Math.max(6,Math.floor(C[k]/5.5))); const sy=y+hH/2-((lines.length-1)*6)-2; const start=(k==="item"); const tx=start?xs[k]+5:xs[k]+C[k]/2; lines.forEach((ln,i)=>txt(tx,sy+i*12+4,ln,{size:9,bold:true,fill:"#1a2a3a",anchor:start?"start":"middle"})); }
+  rect(L,y,tw,24,"#0e2a47"); txt(L+8,y+16,"Processing Plan ("+M.planDate+")",{size:13,bold:true,fill:"#fff"}); y+=24;
+  const hH=32; rect(L,y,tw,hH,"#eef3f7");
+  for(const c of cols){ const k=c[0], label=c[1]; const lines=wrap(label,Math.max(6,Math.floor(C[k]/5.5))); const sy=y+hH/2-((lines.length-1)*6)-2; const start=(k==="size"||k==="rem"); const tx=start?xs[k]+5:xs[k]+C[k]/2; lines.forEach((ln,i)=>txt(tx,sy+i*12+4,ln,{size:9,bold:true,fill:"#1a2a3a",anchor:start?"start":"middle"})); }
   y+=hH;
   const list=M.plan; let ri=0, tot=0;
   if(!list.length){ rect(L,y,tw,24,"#fff"); txt(L+tw/2,y+16,"No jobs planned for the next working day.",{size:11,fill:"#777",anchor:"middle"}); y+=24; }
   for(const r of list){
-    const il=wrap(r.out,Math.floor(C.item/6.0)); const rH=Math.max(22,8+il.length*13);
+    const rl=wrap(r.remarks||"",Math.max(8,Math.floor(C.rem/6.0))); const rH=Math.max(22,8+rl.length*13);
     rect(L,y,tw,rH, ri%2?"#f7fafc":"#ffffff");
     txt(xs.recv+C.recv/2,y+rH/2+4,pFmtD(r.recvD),{size:10,anchor:"middle"});
     txt(xs.plan+C.plan/2,y+rH/2+4,pFmtD(r.planD),{size:10,anchor:"middle"});
-    il.forEach((ln,i)=>txt(xs.item+5,y+16+i*13,ln,{size:10}));
-    if(pHasSize(r)){ txt(xs.thk+C.thk/2,y+rH/2+4,pDimTh(r.thk),{size:10,anchor:"middle"}); txt(xs.wid+C.wid/2,y+rH/2+4,pDimInt(r.w),{size:10,anchor:"middle"}); txt(xs.len+C.len/2,y+rH/2+4,pDimInt(r.len),{size:10,anchor:"middle"}); }
-    else txt(xs.thk+(C.thk+C.wid+C.len)/2,y+rH/2+4,"Size not received",{size:9,fill:"#b36b00",anchor:"middle"});
+    txt(xs.size+5,y+rH/2+4,pSize(r),pHasSize(r)?{size:10}:{size:9,fill:"#b36b00"});
     txt(xs.qty+C.qty-6,y+rH/2+4,pQty(r.oqty),{size:11,bold:true,anchor:"end"});
+    txt(xs.pcs+C.pcs/2,y+rH/2+4,String(r.pcs||""),{size:10,anchor:"middle"});
+    rl.forEach((ln,i)=>txt(xs.rem+5,y+16+i*13,ln,{size:10}));
     y+=rH; tot+=parseFloat(r.oqty)||0; ri++;
   }
   rect(L,y,tw,24,"#0e2a47"); txt(L+8,y+16,"TOTAL - "+list.length+" item(s)",{size:11,bold:true,fill:"#fff"}); txt(xs.qty+C.qty-6,y+16,tot.toFixed(2),{size:11,bold:true,fill:"#fff",anchor:"end"}); y+=24;
@@ -1620,30 +1622,29 @@ async function buildWheelsPlanPdf(){
   doc.end(); await done; return Buffer.concat(chunks);
 }
 function planRowHtml(r){
-  const size = pHasSize(r)
-    ? `<td align="right">${pDimTh(r.thk)}</td><td align="right">${pDimInt(r.w)}</td><td align="right">${pDimInt(r.len)}</td>`
-    : `<td colspan="3" align="center" style="color:#b36b00;font-style:italic">Size not received</td>`;
-  return `<tr><td align="center">${pFmtD(r.recvD)}</td><td align="center">${pFmtD(r.planD)}</td><td>${esc2(r.out)}</td>${size}<td align="right"><b>${pQty(r.oqty)}</b></td></tr>`;
+  const td='style="padding:6px 8px;border:1px solid #d8dee6"';
+  const size = pHasSize(r) ? `<td ${td}>${esc2(pSize(r))}</td>` : `<td ${td} style="padding:6px 8px;border:1px solid #d8dee6;color:#b36b00;font-style:italic">Size not received</td>`;
+  return `<tr><td ${td} align="center">${pFmtD(r.recvD)}</td><td ${td} align="center">${pFmtD(r.planD)}</td>${size}<td ${td} align="right"><b>${pQty(r.oqty)}</b></td><td ${td} align="right">${esc2(r.pcs||"")}</td><td ${td}>${esc2(r.remarks||"")}</td></tr>`;
 }
 function planTableHtml(list){
   if(!list.length) return `<p style="color:#667">None.</p>`;
   const tot=list.reduce((a,r)=>a+(parseFloat(r.oqty)||0),0);
   const th='style="background:#eef3f7;color:#0e2a47;font-size:11px;text-transform:uppercase;padding:6px 8px;border:1px solid #d8dee6"';
   return `<table cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;font-family:Arial,sans-serif;font-size:12px">
-    <thead><tr><th ${th}>Plan received dated from Wheels India</th><th ${th}>Planned production date</th><th ${th} align="left">Item</th>
-    <th ${th}>Thk</th><th ${th}>Wid</th><th ${th}>Len</th><th ${th}>Qty (MT)</th></tr></thead>
-    <tbody style="color:#1a2634">${list.map(r=>planRowHtml(r).replace(/<td/g,'<td style="padding:6px 8px;border:1px solid #d8dee6"')).join("")}
-    <tr style="background:#0e2a47;color:#fff;font-weight:bold"><td colspan="6" style="padding:6px 8px">TOTAL - ${list.length} item(s)</td><td align="right" style="padding:6px 8px">${tot.toFixed(2)}</td></tr>
+    <thead><tr><th ${th}>Date of order receipt</th><th ${th}>Processing date</th><th ${th} align="left">Size</th>
+    <th ${th}>Qty (MT)</th><th ${th}>No. of pcs</th><th ${th} align="left">Remarks</th></tr></thead>
+    <tbody style="color:#1a2634">${list.map(planRowHtml).join("")}
+    <tr style="background:#0e2a47;color:#fff;font-weight:bold"><td colspan="3" style="padding:6px 8px">TOTAL - ${list.length} item(s)</td><td align="right" style="padding:6px 8px">${tot.toFixed(2)}</td><td colspan="2" style="padding:6px 8px"></td></tr>
     </tbody></table>`;
 }
 async function buildWheelsPlanHtml(M){
   M = M || await planModel();
   return `<div style="font-family:Arial,sans-serif;color:#1a2634">
     <div style="background:#0e2a47;color:#fff;padding:14px 16px;border-radius:8px">
-      <div style="font-size:20px;font-weight:bold">Job Processing on ${M.planDate}</div>
-      <div style="font-size:12px;opacity:.85">Bharat Steel (Chennai) Pvt. Ltd. &middot; Wheels India &middot; Qty approx. in MT</div></div>
-    <p style="font-size:12px;color:#667">As on: ${M.asof}. Approx. quantities rounded to 2 decimals (MT).</p>
-    <h3 style="color:#0e2a47;margin:14px 0 6px">Job Processing Plan (on ${M.planDate})</h3>
+      <div style="font-size:20px;font-weight:bold">Wheels India Production Plan</div>
+      <div style="font-size:12px;opacity:.85">Bharat Steel (Chennai) Pvt. Ltd. &middot; Qty approx. in MT</div></div>
+    <p style="font-size:12px;color:#667">Date of report: ${M.asof}. Approx. quantities rounded to 2 decimals (MT).</p>
+    <h3 style="color:#0e2a47;margin:14px 0 6px">Processing Plan (${M.planDate})</h3>
     ${planTableHtml(M.plan)}
     <h3 style="color:#0e2a47;margin:18px 0 6px">Other Pending Orders (${M.pending.length} open)</h3>
     ${planTableHtml(M.pending)}
