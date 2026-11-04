@@ -35,7 +35,7 @@
       <table class="rc">
         <thead><tr>
           <th>Name</th><th>Email</th><th>Group</th><th>Number</th>
-          <th class="ck">Job Work<br>Stock</th><th class="ck">Daily<br>Stock</th><th class="ck">Daily<br>Production</th><th></th>
+          <th class="ck">Job Work<br>Stock</th><th class="ck">Daily<br>Stock</th><th class="ck">Daily<br>Production</th><th class="ck">Production<br>Plan</th><th></th>
         </tr></thead>
         <tbody id="rcRows"></tbody>
         <tfoot><tr id="rcAdd">
@@ -46,6 +46,7 @@
           <td class="ck"><input type="checkbox" id="aJw"/></td>
           <td class="ck"><input type="checkbox" id="aDs"/></td>
           <td class="ck"><input type="checkbox" id="aDp"/></td>
+          <td class="ck"><input type="checkbox" id="aPp"/></td>
           <td><button class="addbtn" id="addBtn" onclick="addRecip()">Add</button></td>
         </tr></tfoot>
       </table>
@@ -128,6 +129,15 @@
           <button class="pbtn" style="margin-top:8px;background:#128c7e;border-color:#128c7e" id="prodWaBtn" onclick="sendProdWaTest()">Send test WhatsApp</button>
           <span class="saved" id="savedPW"></span></div>
       </div>
+      <div>
+        <div style="font-weight:700;color:#0e2a47;margin-bottom:8px">Production Plan</div>
+        <div class="fld"><label>Test email to</label><input type="text" id="planTestTo" placeholder="you@bharatsteels.in"/>
+          <button class="pbtn" style="margin-top:8px;background:var(--blue);border-color:var(--blue)" id="planMailBtn" onclick="sendPlanMailTest()">Send test email</button>
+          <span class="saved" id="savedLM"></span></div>
+        <div class="fld"><label>Test WhatsApp to</label><input type="text" id="planWaTestTo" placeholder="919500680093"/>
+          <button class="pbtn" style="margin-top:8px;background:#128c7e;border-color:#128c7e" id="planWaBtn" onclick="sendPlanWaTest()">Send test WhatsApp</button>
+          <span class="saved" id="savedLW"></span></div>
+      </div>
     </div>
   </div>
 
@@ -158,9 +168,9 @@ async function load(){
 
 function renderRecips(){
   const tb=$('rcRows');
-  if(!RECIPS.length){ tb.innerHTML='<tr><td colspan="8" class="hint" style="padding:14px">No recipients yet. Fill the bottom row and press <b>Add</b>.</td></tr>'; return; }
+  if(!RECIPS.length){ tb.innerHTML='<tr><td colspan="9" class="hint" style="padding:14px">No recipients yet. Fill the bottom row and press <b>Add</b>.</td></tr>'; return; }
   tb.innerHTML=RECIPS.map(r=>{
-    const jw=!!(r.jw_email||r.jw_wa), ds=!!(r.ds_email||r.ds_wa), dp=!!(r.dp_email||r.dp_wa);
+    const jw=!!(r.jw_email||r.jw_wa), ds=!!(r.ds_email||r.ds_wa), dp=!!(r.dp_email||r.dp_wa), pp=!!(r.pp_email||r.pp_wa);
     return `<tr data-id="${r.id}">
       <td><input type="text" class="r-name" value="${esc(r.name)}"/></td>
       <td><input type="email" class="r-email" value="${esc(r.email)}"/></td>
@@ -169,6 +179,7 @@ function renderRecips(){
       <td class="ck"><input type="checkbox" class="r-jw"${jw?' checked':''}/></td>
       <td class="ck"><input type="checkbox" class="r-ds"${ds?' checked':''}/></td>
       <td class="ck"><input type="checkbox" class="r-dp"${dp?' checked':''}/></td>
+      <td class="ck"><input type="checkbox" class="r-pp"${pp?' checked':''}/></td>
       <td><a class="rcbtn" onclick="saveRow(${r.id},this);return false">Save</a><a class="rcbtn del" onclick="delRecip(${r.id});return false">Delete</a></td>
     </tr>`;
   }).join('');
@@ -177,11 +188,11 @@ function renderRecips(){
 function rowPayload(tr,id){
   const g=s=>tr.querySelector(s);
   const ck=s=>g(s).checked;
-  const jw=ck('.r-jw'), ds=ck('.r-ds'), dp=ck('.r-dp');
+  const jw=ck('.r-jw'), ds=ck('.r-ds'), dp=ck('.r-dp'), pp=ck('.r-pp');
   // one tick per report → set both channels (email + whatsapp) the same
   return { id:id||undefined, name:g('.r-name').value.trim(), email:g('.r-email').value.trim(),
     grp:g('.r-grp').value, mobile:g('.r-mobile').value.trim(),
-    jw_email:jw, jw_wa:jw, ds_email:ds, ds_wa:ds, dp_email:dp, dp_wa:dp };
+    jw_email:jw, jw_wa:jw, ds_email:ds, ds_wa:ds, dp_email:dp, dp_wa:dp, pp_email:pp, pp_wa:pp };
 }
 async function saveRow(id,el){
   const tr=el.closest('tr'); const old=el.textContent; el.textContent='Saving…';
@@ -191,14 +202,14 @@ async function saveRow(id,el){
 async function addRecip(){
   const b=$('addBtn');
   const g=s=>$(s).checked;
-  const jw=g('aJw'), ds=g('aDs'), dp=g('aDp');
+  const jw=g('aJw'), ds=g('aDs'), dp=g('aDp'), pp=g('aPp');
   const r={ name:$('aName').value.trim(), email:$('aEmail').value.trim(), grp:$('aGrp').value, mobile:$('aMobile').value.trim(),
-    jw_email:jw, jw_wa:jw, ds_email:ds, ds_wa:ds, dp_email:dp, dp_wa:dp };
+    jw_email:jw, jw_wa:jw, ds_email:ds, ds_wa:ds, dp_email:dp, dp_wa:dp, pp_email:pp, pp_wa:pp };
   if(!r.name && !r.email && !r.mobile){ alert('Enter at least a name, email or number'); return; }
   b.disabled=true; b.textContent='Adding…';
   try{
     await post({recip_save:r});
-    ['aName','aEmail','aMobile'].forEach(i=>$(i).value=''); $('aGrp').value=''; ['aJw','aDs','aDp'].forEach(i=>$(i).checked=false);
+    ['aName','aEmail','aMobile'].forEach(i=>$(i).value=''); $('aGrp').value=''; ['aJw','aDs','aDp','aPp'].forEach(i=>$(i).checked=false);
     await load();
   }catch(e){ alert(e.message); }
   finally{ b.disabled=false; b.textContent='Add'; }
@@ -273,6 +284,24 @@ async function sendProdWaTest(){
   const b=$('prodWaBtn'); b.disabled=true; b.textContent='Sending…';
   const msg=$('savedPW'); msg.style.display='inline'; msg.style.color='var(--gray)'; msg.textContent='sending…';
   try{ await post({prod_format:$('prodFormat').value}); const r=await post({prod_whatsapp_test:true, prod_wa_test_to:to});
+    if(r.skipped){ msg.style.color='var(--gray)'; msg.textContent='• '+r.skipped; } else{ const s=(r.sent||[])[0]||{}; if(s.error){ msg.style.color='var(--red)'; msg.textContent='✗ '+s.error; } else{ msg.style.color='var(--good)'; msg.textContent='✓ Sent to '+(s.num||to); } }
+  }catch(e){ msg.style.color='var(--red)'; msg.textContent='✗ '+e.message; }
+  finally{ b.disabled=false; b.textContent='Send test WhatsApp'; }
+}
+async function sendPlanMailTest(){
+  const to=$('planTestTo').value.trim(); if(!to){ alert('Enter a test email'); return; }
+  const b=$('planMailBtn'); b.disabled=true; b.textContent='Sending…';
+  const msg=$('savedLM'); msg.style.display='inline'; msg.style.color='var(--gray)'; msg.textContent='sending…';
+  try{ const r=await post({plan_mail_test:true, test_to:to});
+    if(r.error){ msg.style.color='var(--red)'; msg.textContent='✗ '+r.error; } else{ msg.style.color='var(--good)'; msg.textContent='✓ Sent to '+(r.sent_to||[]).join(', '); }
+  }catch(e){ msg.style.color='var(--red)'; msg.textContent='✗ '+e.message; }
+  finally{ b.disabled=false; b.textContent='Send test email'; }
+}
+async function sendPlanWaTest(){
+  const to=$('planWaTestTo').value.trim(); if(!to){ alert('Enter a test WhatsApp number'); return; }
+  const b=$('planWaBtn'); b.disabled=true; b.textContent='Sending…';
+  const msg=$('savedLW'); msg.style.display='inline'; msg.style.color='var(--gray)'; msg.textContent='sending…';
+  try{ const r=await post({plan_whatsapp_test:true, plan_wa_test_to:to});
     if(r.skipped){ msg.style.color='var(--gray)'; msg.textContent='• '+r.skipped; } else{ const s=(r.sent||[])[0]||{}; if(s.error){ msg.style.color='var(--red)'; msg.textContent='✗ '+s.error; } else{ msg.style.color='var(--good)'; msg.textContent='✓ Sent to '+(s.num||to); } }
   }catch(e){ msg.style.color='var(--red)'; msg.textContent='✗ '+e.message; }
   finally{ b.disabled=false; b.textContent='Send test WhatsApp'; }
