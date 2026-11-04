@@ -7,12 +7,12 @@
   @media(max-width:900px){.mgrid{grid-template-columns:1fr}}
   #tbl table td,#tbl table th{padding:5px 10px}
   #chart svg{width:100%;height:auto;display:block}
-  #oldtbl table{width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed}
-  #oldtbl th,#oldtbl td{padding:5px 8px;border-bottom:1px solid #eef2f5;vertical-align:top}
-  #oldtbl th{font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:#5b6b78;text-align:left}
+  #oldtbl{overflow-x:hidden}
+  #oldtbl table{width:100%;border-collapse:collapse;font-size:11.5px;table-layout:fixed}
+  #oldtbl th,#oldtbl td{padding:4px 6px;border-bottom:1px solid #eef2f5;vertical-align:top;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #oldtbl th{font-size:9.5px;text-transform:uppercase;letter-spacing:.02em;color:#5b6b78;text-align:left}
   #oldtbl td.num,#oldtbl th.num{text-align:right;font-variant-numeric:tabular-nums}
-  #oldtbl .sub{font-size:10px;color:#8794a1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  #oldtbl .mat{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #oldtbl .sub{font-size:9.5px;color:#8794a1;overflow:hidden;text-overflow:ellipsis}
   #oldtbl tr:first-child td{border-top:0}
   .age{display:inline-block;font-size:10px;font-weight:700;padding:1px 6px;border-radius:999px;background:#fdecea;color:#a3271b}
   .age.a2{background:#fff6e0;color:#8a5b00}
@@ -127,20 +127,21 @@ function drawOldest(){
   if(!list.length){ $('oldtbl').innerHTML='<div class="empty">No dated coils.</div>'; return; }
   const ageBadge=d=>{ if(d==null) return ''; const cls=d>=180?'':(d>=90?'a2':'a3'); return `<span class="age ${cls}">${d}d</span>`; };
   const sizeOf=c=>[c.T?(+c.T.toFixed(2)):null,c.W?Math.round(c.W):null, (c.Length&&+c.Length)?Math.round(+c.Length):null].filter(v=>v).join(' x ');
+  const binShort=b=>String(b||'').replace(/^38-/,'').replace(/SHED-/i,'').replace(/-/g,'-');
+  const fmtD=d=>{ const p=String(d).slice(0,10).split('-'); return p.length===3?(p[2]+' '+MN[(+p[1]||1)-1]+' '+p[0].slice(2)):d; };
   const rows=list.map((c,i)=>{
-    const dt=c.GRPODate.slice(0,10);
     const mat=(c.Grade||c.ItemName||'').trim();
     return `<tr>
       <td class="rk">${i+1}</td>
-      <td style="white-space:nowrap">${esc(dt)}<br>${ageBadge(c.age)}</td>
+      <td>${esc(fmtD(c.GRPODate))}<br>${ageBadge(c.age)}</td>
       <td><b>${esc(c.BatchNum||'-')}</b><div class="sub">${esc(c.CoilNo||'')}</div></td>
-      <td><span class="mat" title="${esc(c.ItemName||'')}">${esc(mat)}</span><div class="sub">${esc(sizeOf(c)||'')}</div></td>
+      <td title="${esc(c.ItemName||'')}">${esc(mat)}<div class="sub">${esc(sizeOf(c)||'')}</div></td>
       <td class="num">${f3(c.Quantity)}</td>
-      <td><span class="sub" title="${esc(c.Bin||'')}">${esc(c.Bin||'')}</span></td>
+      <td title="${esc(c.Bin||'')}">${esc(binShort(c.Bin))}</td>
     </tr>`;
   }).join('');
   $('oldtbl').innerHTML=`<table>
-    <colgroup><col style="width:22px"><col style="width:88px"><col style="width:21%"><col><col style="width:60px"><col style="width:16%"></colgroup>
+    <colgroup><col style="width:6%"><col style="width:17%"><col style="width:26%"><col style="width:23%"><col style="width:14%"><col style="width:14%"></colgroup>
     <thead><tr><th>#</th><th>Purchased</th><th>Batch / Coil</th><th>Material</th><th class="num">Qty (MT)</th><th>Bin</th></tr></thead>
     <tbody>${rows}</tbody></table>`;
 }
