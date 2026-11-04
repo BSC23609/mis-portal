@@ -608,21 +608,31 @@ async function ensureWheelsTable(){
     jw_email boolean default false, jw_wa boolean default false,
     ds_email boolean default false, ds_wa boolean default false,
     dp_email boolean default false, dp_wa boolean default false,
+    pp_email boolean default false, pp_wa boolean default false,
     created_at timestamptz default now()
   )`;
+  // Production Plan columns were added after the table shipped; migrate existing tables.
+  await sql`alter table wheels_recipients add column if not exists pp_email boolean default false`;
+  await sql`alter table wheels_recipients add column if not exists pp_wa boolean default false`;
   // Short-lived cache of the rendered report PNGs, so WhatsApp/Meta fetches an already-built image
   // instead of waiting on a slow live render (which caused silently-dropped sends that still logged "ok").
   await sql`create table if not exists wheels_img_cache ( name text primary key, png_b64 text, ts timestamptz default now() )`;
 }
 // All recipients as plain objects (for the settings UI, the scripts, and the WhatsApp routes).
 async function wheelsRecipients(){
-  try { return (await sql`select id,name,grp,email,mobile,jw_email,jw_wa,ds_email,ds_wa,dp_email,dp_wa from wheels_recipients order by id`).map(r=>({...r})); }
+  try { return (await sql`select id,name,grp,email,mobile,jw_email,jw_wa,ds_email,ds_wa,dp_email,dp_wa,pp_email,pp_wa from wheels_recipients order by id`).map(r=>({...r})); }
   catch(e){ return []; }
 }
 // Distinct WhatsApp numbers of everyone subscribed to a report's WhatsApp channel. flag: 'jw_wa'|'ds_wa'|'dp_wa'
 function recipientMobiles(recips, flag){
   const seen = new Set(), out = [];
   for (const r of recips) { if (r[flag] && String(r.mobile||"").trim()) { const m=String(r.mobile).trim(); if(!seen.has(m)){ seen.add(m); out.push(m); } } }
+  return out;
+}
+// Distinct email addresses of everyone subscribed to a report's email channel. flag: 'jw_email'|'ds_email'|'dp_email'|'pp_email'
+function recipientEmails(recips, flag){
+  const seen = new Set(), out = [];
+  for (const r of recips) { if (r[flag] && String(r.email||"").trim()) { const e=String(r.email).trim(); const k=e.toLowerCase(); if(!seen.has(k)){ seen.add(k); out.push(e); } } }
   return out;
 }
 // Report-image cache. renderAndCachePng() builds the PNG and stores it; cachedPng() serves the stored
@@ -793,15 +803,15 @@ async function handlerWheels(req, res){
         const nm = String(r.name||"").slice(0,120), gp = String(r.grp||"").slice(0,60);
         const em = String(r.email||"").trim().slice(0,160), mo = String(r.mobile||"").trim().slice(0,30);
         const b = k => r[k] === true || r[k] === "true" || r[k] === 1;
-        const flags = [b("jw_email"), b("jw_wa"), b("ds_email"), b("ds_wa"), b("dp_email"), b("dp_wa")];
+        const flags = [b("jw_email"), b("jw_wa"), b("ds_email"), b("ds_wa"), b("dp_email"), b("dp_wa"), b("pp_email"), b("pp_wa")];
         if (r.id) {
           await sql`update wheels_recipients set name=${nm},grp=${gp},email=${em},mobile=${mo},
-            jw_email=${flags[0]},jw_wa=${flags[1]},ds_email=${flags[2]},ds_wa=${flags[3]},dp_email=${flags[4]},dp_wa=${flags[5]}
+            jw_email=${flags[0]},jw_wa=${flags[1]},ds_email=${flags[2]},ds_wa=${flags[3]},dp_email=${flags[4]},dp_wa=${flags[5]},pp_email=${flags[6]},pp_wa=${flags[7]}
             where id=${Number(r.id)}`;
           return json(res, 200, { ok: true, id: Number(r.id) });
         }
-        const ins = await sql`insert into wheels_recipients (name,grp,email,mobile,jw_email,jw_wa,ds_email,ds_wa,dp_email,dp_wa)
-          values (${nm},${gp},${em},${mo},${flags[0]},${flags[1]},${flags[2]},${flags[3]},${flags[4]},${flags[5]}) returning id`;
+        const ins = await sql`insert into wheels_recipients (name,grp,email,mobile,jw_email,jw_wa,ds_email,ds_wa,dp_email,dp_wa,pp_email,pp_wa)
+          values (${nm},${gp},${em},${mo},${flags[0]},${flags[1]},${flags[2]},${flags[3]},${flags[4]},${flags[5]},${flags[6]},${flags[7]}) returning id`;
         return json(res, 200, { ok: true, id: ins[0].id });
       }
       if (body.recip_delete) {
@@ -906,6 +916,69 @@ async function handlerWheels(req, res){
         const sent = [];
         try { const r = await send(num, tmpl, [{ name: "report", value: url }]); sent.push({ num, ...(r || { ok: true }) }); } catch (e) { sent.push({ num, error: String(e.message || e) }); }
         return json(res, 200, { ok: true, url, template: tmpl, sent });
+      }
+      // Production Plan WhatsApp — daily 6:30pm trigger (CRON_SECRET). Template WHEELS_WA_PLAN_TEMPLATE,
+      // image header variable "report" = /wheels-plan.png. Numbers = everyone who ticked Production Plan WhatsApp.
+      if (body.plan_whatsapp) {
+        const auth = req.headers.authorization || "";
+        if (!process.env.CRON_SECRET) return json(res, 503, { error: "CRON_SECRET not set" });
+        if (auth !== "Bearer " + process.env.CRON_SECRET) return json(res, 401, { error: "unauthorized" });
+        const tmpl = process.env.WHEELS_WA_PLAN_TEMPLATE;
+        if (!tmpl) return json(res, 400, { error: "WHEELS_WA_PLAN_TEMPLATE not set" });
+        const recips = await wheelsRecipients();
+        const nums = recipientMobiles(recips, "pp_wa");
+        if (!nums.length) { await logSend({report:'plan', channel:'whatsapp', status:'skipped', detail:'no recipients ticked for Production Plan WhatsApp'}); return json(res, 200, { ok: true, skipped: "no whatsapp recipients ticked for Production Plan" }); }
+        const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
+        const url = base + "/wheels-plan.png?d=" + imgStamp();
+        await renderAndCachePng("plan").catch(()=>{}); // pre-build so Meta's image fetch is instant (prevents silent drops)
+        const sent = [];
+        for (const num of nums) { try { const r = await sendRetry(num, tmpl, [{ name: "report", value: url }]); sent.push({ num, ...(r || { ok: true }) }); } catch (e) { sent.push({ num, error: String(e.message || e) }); } }
+        await logSend({ report:'plan', channel:'whatsapp', ...waSummary(sent, nameByMobile(recips)) });
+        return json(res, 200, { ok: true, url, template: tmpl, sent });
+      }
+      // Production Plan email — daily 6:30pm trigger (CRON_SECRET). Emails the plan tables to everyone
+      // who ticked Production Plan email in Recipients.
+      if (body.plan_mail) {
+        const auth = req.headers.authorization || "";
+        if (!process.env.CRON_SECRET) return json(res, 503, { error: "CRON_SECRET not set" });
+        if (auth !== "Bearer " + process.env.CRON_SECRET) return json(res, 401, { error: "unauthorized" });
+        const recips = await wheelsRecipients();
+        const to = recipientEmails(recips, "pp_email");
+        if (!to.length) { await logSend({report:'plan', channel:'email', status:'skipped', detail:'no recipients ticked for Production Plan email'}); return json(res, 200, { ok: true, skipped: "no email recipients ticked for Production Plan" }); }
+        const html = await buildWheelsPlanHtml();
+        try {
+          await sendWheelsMail(to, [], html, "Wheels India — Production Plan — "+new Date().toLocaleDateString("en-IN"), null);
+          await logSend({ report:'plan', channel:'email', status:'ok', total:to.length, ok:to.length, fail:0, detail:to.length+' recipient(s): '+to.join(', ') });
+        } catch (e) {
+          await logSend({ report:'plan', channel:'email', status:'fail', total:to.length, ok:0, fail:to.length, detail:String(e.message||e) });
+          return json(res, 500, { error: String(e.message||e) });
+        }
+        return json(res, 200, { ok: true, sent_to: to });
+      }
+      // Production Plan WhatsApp — test send from the settings page (no CRON_SECRET)
+      if (body.plan_whatsapp_test) {
+        const tmpl = process.env.WHEELS_WA_PLAN_TEMPLATE;
+        if (!tmpl) return json(res, 200, { ok: true, skipped: "WHEELS_WA_PLAN_TEMPLATE not set on server" });
+        if (!watiBase() || !watiKey()) return json(res, 200, { ok: true, skipped: "WATI not configured on server (need WATI_API_URL + token)" });
+        const recips = await wheelsRecipients();
+        let num = String(body.plan_wa_test_to || "").trim();
+        if (!num) num = recipientMobiles(recips, "pp_wa")[0] || "";
+        if (!num) return json(res, 200, { ok: true, skipped: "no test number (enter one or tick someone for Production Plan WhatsApp first)" });
+        const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
+        const url = base + "/wheels-plan.png?d=" + imgStamp();
+        await renderAndCachePng("plan").catch(()=>{});
+        const sent = [];
+        try { const r = await send(num, tmpl, [{ name: "report", value: url }]); sent.push({ num, ...(r || { ok: true }) }); } catch (e) { sent.push({ num, error: String(e.message || e) }); }
+        return json(res, 200, { ok: true, url, template: tmpl, sent });
+      }
+      // Production Plan email — test send from the settings page
+      if (body.plan_mail_test) {
+        const recips = await wheelsRecipients();
+        const to = body.test_to ? [String(body.test_to)] : recipientEmails(recips, "pp_email");
+        if (!to.length) return json(res, 400, { error: "no recipient (enter one or tick someone for Production Plan email first)" });
+        const html = await buildWheelsPlanHtml();
+        await sendWheelsMail(to, [], html, (body.test_to?"[TEST] ":"")+"Wheels India — Production Plan — "+new Date().toLocaleDateString("en-IN"), null);
+        return json(res, 200, { ok:true, sent_to:to });
       }
       // Daily Stock (company-wide) WhatsApp — daily trigger (CRON_SECRET). Goes to Management only.
       // Template WHEELS_WA_DAILY_TEMPLATE (image header, variable "report" = /daily-stock.png).
@@ -1539,7 +1612,7 @@ function planSvg(M){
   for(const c of cols){ const k=c[0], label=c[1]; const lines=wrap(label,Math.max(6,Math.floor(C[k]/5.5))); const sy=y+hH/2-((lines.length-1)*6)-2; const start=(k==="size"||k==="rem"); const tx=start?xs[k]+5:xs[k]+C[k]/2; lines.forEach((ln,i)=>txt(tx,sy+i*12+4,ln,{size:9,bold:true,fill:"#1a2a3a",anchor:start?"start":"middle"})); }
   y+=hH;
   const list=M.plan; let ri=0, tot=0;
-  if(!list.length){ rect(L,y,tw,24,"#fff"); txt(L+tw/2,y+16,"No jobs planned for the next working day.",{size:11,fill:"#777",anchor:"middle"}); y+=24; }
+  if(!list.length){ rect(L,y,tw,30,"#fff7ec"); txt(L+tw/2,y+19,"No Production planned on "+M.planDate,{size:12,bold:true,fill:"#8a5b00",anchor:"middle"}); y+=30; }
   for(const r of list){
     const rl=wrap(r.remarks||"",Math.max(8,Math.floor(C.rem/6.0))); const rH=Math.max(22,8+rl.length*13);
     rect(L,y,tw,rH, ri%2?"#f7fafc":"#ffffff");
@@ -1645,7 +1718,7 @@ async function buildWheelsPlanHtml(M){
       <div style="font-size:12px;opacity:.85">Bharat Steel (Chennai) Pvt. Ltd. &middot; Qty approx. in MT</div></div>
     <p style="font-size:12px;color:#667">Date of report: ${M.asof}. Approx. quantities rounded to 2 decimals (MT).</p>
     <h3 style="color:#0e2a47;margin:14px 0 6px">Processing Plan (${M.planDate})</h3>
-    ${planTableHtml(M.plan)}
+    ${M.plan.length ? planTableHtml(M.plan) : `<p style="background:#fff7ec;color:#8a5b00;font-weight:bold;padding:10px 12px;border:1px solid #f0dc9a;border-radius:6px;margin:0">No Production planned on ${M.planDate}</p>`}
     <h3 style="color:#0e2a47;margin:18px 0 6px">Other Pending Orders (${M.pending.length} open)</h3>
     ${planTableHtml(M.pending)}
     <p style="font-size:11px;color:#999;margin-top:14px">Computer-generated report - may contain mistakes. Bharat Steel (Chennai) Pvt. Ltd. &middot; info@bharatsteels.in</p>
