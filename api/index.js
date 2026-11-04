@@ -931,8 +931,10 @@ async function handlerWheels(req, res){
         const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
         const url = base + "/wheels-plan.png?d=" + imgStamp();
         await renderAndCachePng("plan").catch(()=>{}); // pre-build so Meta's image fetch is instant (prevents silent drops)
+        const M = await planModel();
+        const params = [{ name: "report", value: url }, { name: "1", value: "Team" }, { name: "2", value: M.planDate }]; // header image + body {{1}} greeting + {{2}} processing date
         const sent = [];
-        for (const num of nums) { try { const r = await sendRetry(num, tmpl, [{ name: "report", value: url }]); sent.push({ num, ...(r || { ok: true }) }); } catch (e) { sent.push({ num, error: String(e.message || e) }); } }
+        for (const num of nums) { try { const r = await sendRetry(num, tmpl, params); sent.push({ num, ...(r || { ok: true }) }); } catch (e) { sent.push({ num, error: String(e.message || e) }); } }
         await logSend({ report:'plan', channel:'whatsapp', ...waSummary(sent, nameByMobile(recips)) });
         return json(res, 200, { ok: true, url, template: tmpl, sent });
       }
@@ -967,8 +969,10 @@ async function handlerWheels(req, res){
         const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
         const url = base + "/wheels-plan.png?d=" + imgStamp();
         await renderAndCachePng("plan").catch(()=>{});
+        const M = await planModel();
+        const params = [{ name: "report", value: url }, { name: "1", value: "Team" }, { name: "2", value: M.planDate }]; // header image + body {{1}} greeting + {{2}} processing date
         const sent = [];
-        try { const r = await send(num, tmpl, [{ name: "report", value: url }]); sent.push({ num, ...(r || { ok: true }) }); } catch (e) { sent.push({ num, error: String(e.message || e) }); }
+        try { const r = await send(num, tmpl, params); sent.push({ num, ...(r || { ok: true }) }); } catch (e) { sent.push({ num, error: String(e.message || e) }); }
         return json(res, 200, { ok: true, url, template: tmpl, sent });
       }
       // Production Plan email — test send from the settings page
