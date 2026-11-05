@@ -38,12 +38,22 @@
       "destination": "/api/index?route=wheels&fmt=planpng"
     },
     {
+      "source": "/api/plan-cron",
+      "destination": "/api/index?route=wheels&fmt=plancron"
+    },
+    {
       "source": "/wheels-plan.pdf",
       "destination": "/api/index?route=wheels&fmt=planpdf"
     },
     {
       "source": "/api/:route",
       "destination": "/api/index?route=:route"
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/plan-cron",
+      "schedule": "0 13 * * *"
     }
   ]
 }

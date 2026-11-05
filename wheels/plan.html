@@ -16,6 +16,7 @@
   #wrap td.c,#wrap th.c{text-align:center}
   #wrap tbody tr:nth-child(even){background:#fafcfe}
   .nosize{color:#b36b00;font-style:italic}
+  #wrap .sub{font-size:11px;color:var(--gray)}
   .emptyrow{padding:14px;text-align:center;color:var(--gray);border:1px solid var(--line);border-top:0}
   .tot td{background:#0e2a47;color:#fff;font-weight:700;border-color:#0e2a47}
   .note{font-size:12px;color:var(--gray);font-style:italic;margin:8px 0 0}
@@ -55,25 +56,28 @@ const dimTh=v=>{const n=numish(v);return n===null?'':(''+ +n.toFixed(2));};
 const dimInt=v=>{const n=numish(v);return n===null?'':(''+Math.round(n));};
 const sizeStr=r=>hasSize(r)?[dimTh(r.thk),dimInt(r.w),dimInt(r.len)].filter(x=>x!=='').join(' x '):'';
 
+function coilHTML(r){
+  return `<td><b>${esc(r.coilNo||'-')}</b>${r.coilItem?`<div class="sub">${esc(r.coilItem)}</div>`:''}</td>`;
+}
 function rowHTML(r){
   const size = hasSize(r) ? `<td>${esc(sizeStr(r))}</td>` : `<td class="nosize">Size not received</td>`;
-  return `<tr><td class="c">${fmtD(r.recvD)}</td><td class="c">${fmtD(r.planD)}</td>${size}
+  return `<tr><td class="c">${fmtD(r.recvD)}</td><td class="c">${fmtD(r.planD)}</td>${coilHTML(r)}${size}
     <td class="num"><b>${f2(r.oqty)}</b></td><td class="num">${esc(r.pcs||'')}</td><td>${esc(r.remarks||'')}</td></tr>`;
 }
 function tableHTML(list){
   if(!list.length) return `<div class="emptyrow">None.</div>`;
   const tot=list.reduce((a,r)=>a+(+r.oqty||0),0);
   return `<table><thead><tr>
-    <th class="c">Date of order<br>receipt</th><th class="c">Processing<br>date</th><th>Size</th>
+    <th class="c">Date of order<br>receipt</th><th class="c">Processing<br>date</th><th>Input coil</th><th>Size</th>
     <th class="num">Qty (MT)</th><th class="num">No. of pcs</th><th>Remarks</th></tr></thead>
     <tbody>${list.map(rowHTML).join('')}
-    <tr class="tot"><td colspan="3">TOTAL &middot; ${list.length} item(s)</td><td class="num">${f2(tot)}</td><td colspan="2"></td></tr>
+    <tr class="tot"><td colspan="4">TOTAL &middot; ${list.length} item(s)</td><td class="num">${f2(tot)}</td><td colspan="2"></td></tr>
     </tbody></table>`;
 }
 function dl(){
   const all=ROWS.slice().sort((a,b)=>(a.planD-b.planD));
-  const head=['Date of order receipt','Processing date','Size','Qty (MT)','No of pcs','Remarks','Bucket'];
-  const line=r=>[fmtD(r.recvD),fmtD(r.planD),`"${sizeStr(r)||'Size not received'}"`,(+r.oqty||0).toFixed(2),r.pcs||'',`"${(r.remarks||'').replace(/"/g,'""')}"`,r.bucket].join(',');
+  const head=['Date of order receipt','Processing date','Coil No','Coil item','Size','Qty (MT)','No of pcs','Remarks','Bucket'];
+  const line=r=>[fmtD(r.recvD),fmtD(r.planD),`"${(r.coilNo||'').replace(/"/g,'""')}"`,`"${(r.coilItem||'').replace(/"/g,'""')}"`,`"${sizeStr(r)||'Size not received'}"`,(+r.oqty||0).toFixed(2),r.pcs||'',`"${(r.remarks||'').replace(/"/g,'""')}"`,r.bucket].join(',');
   const csv=[head.join(',')].concat(all.map(line)).join('\n');
   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
   a.download='wheels_production_plan_'+new Date().toISOString().slice(0,10)+'.csv';a.click();
@@ -88,6 +92,7 @@ function dl(){
     in:r['Input Item Name']||'', out:r['Output Item Name']||'', oqty:r['Output Qty'],
     thk:r['Thickness'], w:r['Output Width'], len:r['Output Length'],
     pcs:r['Actual Pcs']||'', remarks:r['Remarks']||'',
+    coilNo:r['Coil No']||'', coilItem:r['Coil Item']||r['Input Item Name']||'',
     next:r['Next Schedule No']||'', status:r['Status']||'',
     wipp:r['Schedule Master WI Production Plan Date']||r['Schedule Output WI Production Plan Date']||'',
     sm:r['Schedule Master Date']||'',

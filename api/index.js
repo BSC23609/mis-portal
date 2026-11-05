@@ -181,6 +181,9 @@ async function send(mobile, template, parameters) {
   });
   const j = await r.json().catch(() => ({}));
   if (!r.ok || j.result === false) throw new Error("WATI: " + (j.info || j.message || r.status));
+  // WATI accepts the request (result:true) even for numbers not on WhatsApp; it flags those with
+  // validWhatsAppNumber:false. Treat that as a real failure so the Send Log doesn't show a false "ok".
+  if (j.validWhatsAppNumber === false) { const e = new Error("not a valid WhatsApp number"); e.noRetry = true; throw e; }
   return { ok: true };
 }
 var sendDispatchLink = ({ mobile, name, coils, doNo, link }) => send(mobile, process.env.WATI_TEMPLATE || "nmdc_dispatch_link", [{ name: "name", value: name || "Partner" }, { name: "coils", value: String(coils) }, { name: "do_no", value: doNo || "-" }, { name: "link", value: link }]);
@@ -658,7 +661,7 @@ async function sendRetry(num, tmpl, params, tries){
   let last;
   for (let i = 0; i < (tries || 2); i++){
     try { return await send(num, tmpl, params); }
-    catch(e){ last = e; await new Promise(r => setTimeout(r, 1500)); }
+    catch(e){ last = e; if (e && e.noRetry) break; await new Promise(r => setTimeout(r, 1500)); }
   }
   throw last;
 }
@@ -687,13 +690,56 @@ function nameByMobile(recips){
   for (const r of recips) { const k = String(r.mobile||"").trim(); if (k && r.name) m[k] = r.name; }
   return n => m[String(n).trim()] || n;
 }
+// ===== Production Plan senders — shared by the POST triggers and the auto cron =====
+// Idempotent per channel: true if a non-failed plan send for this channel is already logged today (IST).
+async function planAlreadyDone(channel){
+  try{
+    const r = await sql`select 1 from wheels_send_log
+      where report='plan' and channel=${channel}
+        and run_date=(now() at time zone 'Asia/Kolkata')::date
+        and status in ('ok','partial','skipped') limit 1`;
+    return r.length>0;
+  }catch(e){ return false; }
+}
+async function planSendEmail(req, once){
+  if(once && await planAlreadyDone('email')) return { skipped:'already sent today' };
+  const recips = await wheelsRecipients();
+  const to = recipientEmails(recips, "pp_email");
+  if(!to.length){ await logSend({report:'plan',channel:'email',status:'skipped',detail:'no recipients ticked for Production Plan email'}); return { skipped:'no email recipients' }; }
+  const html = await buildWheelsPlanHtml();
+  try{
+    await sendWheelsMail(to, [], html, "Wheels India — Production Plan — "+new Date().toLocaleDateString("en-IN"), null);
+    await logSend({report:'plan',channel:'email',status:'ok',total:to.length,ok:to.length,fail:0,detail:to.length+' recipient(s): '+to.join(', ')});
+    return { ok:true, sent_to:to };
+  }catch(e){
+    await logSend({report:'plan',channel:'email',status:'fail',total:to.length,ok:0,fail:to.length,detail:String(e.message||e)});
+    return { error:String(e.message||e) };
+  }
+}
+async function planSendWhatsapp(req, once){
+  if(once && await planAlreadyDone('whatsapp')) return { skipped:'already sent today' };
+  const tmpl = process.env.WHEELS_WA_PLAN_TEMPLATE;
+  if(!tmpl){ await logSend({report:'plan',channel:'whatsapp',status:'skipped',detail:'WHEELS_WA_PLAN_TEMPLATE not set'}); return { skipped:'WHEELS_WA_PLAN_TEMPLATE not set' }; }
+  const recips = await wheelsRecipients();
+  const nums = recipientMobiles(recips, "pp_wa");
+  if(!nums.length){ await logSend({report:'plan',channel:'whatsapp',status:'skipped',detail:'no recipients ticked for Production Plan WhatsApp'}); return { skipped:'no whatsapp recipients' }; }
+  const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
+  const url = base + "/wheels-plan.png?d=" + imgStamp();
+  await renderAndCachePng("plan").catch(()=>{});
+  const M = await planModel();
+  const params = [{ name:"report", value:url }, { name:"1", value:"Team" }, { name:"2", value:M.planDate }];
+  const sent = [];
+  for(const num of nums){ try{ const r = await sendRetry(num, tmpl, params); sent.push({ num, ...(r||{ok:true}) }); }catch(e){ sent.push({ num, error:String(e.message||e) }); } }
+  await logSend({ report:'plan', channel:'whatsapp', ...waSummary(sent, nameByMobile(recips)) });
+  return { ok:true, url, template:tmpl, sent };
+}
 async function handlerWheels(req, res){
   if (cors(req, res)) return;
   try{
     await ensureWheelsTable();
     // GET /api/wheels?fmt=pdf  ->  the statement as a PDF (same data/structure as the email).
     // Public, no-auth: this is the URL WATI fetches for the WhatsApp document template.
-    const fmt = (req.query && req.query.fmt) || ((/[?&]fmt=(pdf|xlsx|stockpng|prodpdf|prodpng|dailypng|planpng|planpdf|wadiag|sendlog)\b/.exec(req.url || "")) || [])[1] || "";
+    const fmt = (req.query && req.query.fmt) || ((/[?&]fmt=(pdf|xlsx|stockpng|prodpdf|prodpng|dailypng|planpng|planpdf|plancron|wadiag|sendlog)\b/.exec(req.url || "")) || [])[1] || "";
     if (req.method === "GET" && fmt === "pdf"){
       const pdf = await buildWheelsPdf();
       res.setHeader("Content-Type", "application/pdf");
@@ -749,6 +795,24 @@ async function handlerWheels(req, res){
       res.setHeader("Content-Disposition", 'inline; filename="WheelsIndia_Plan_' + new Date().toISOString().slice(0,10).replace(/-/g,"") + '.pdf"');
       res.setHeader("Cache-Control", "no-store");
       return res.status(200).end(pdf);
+    }
+    // Production Plan AUTO-SEND. No SAP box / Task Scheduler needed: a Vercel cron (in vercel.json)
+    // and/or an external pinger (cron-job.org) hits this at 18:30 IST. Guarded by CRON_SECRET.
+    // Idempotent + time-guarded: sends once per working day only after 18:30 IST, so it is safe to
+    // call as often as you like (extra calls are no-ops; a failed channel retries next call).
+    if (req.method === "GET" && fmt === "plancron"){
+      const auth = req.headers.authorization || "";
+      if (!process.env.CRON_SECRET) return json(res, 503, { error: "CRON_SECRET not set" });
+      if (auth !== "Bearer " + process.env.CRON_SECRET) return json(res, 401, { error: "unauthorized" });
+      const ist = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+      const todayIso = ist.getFullYear() + "-" + String(ist.getMonth()+1).padStart(2,"0") + "-" + String(ist.getDate()).padStart(2,"0");
+      if (ist.getDay() === 0) return json(res, 200, { ok: true, skipped: "Sunday" });
+      let hol = []; try { const s = await sql`select holidays from wheels_settings where id=1`; hol = (s[0]?.holidays) || []; } catch(e){}
+      if (hol.includes(todayIso)) return json(res, 200, { ok: true, skipped: "holiday " + todayIso });
+      if (ist.getHours()*60 + ist.getMinutes() < 18*60+30) return json(res, 200, { ok: true, waiting: "before 18:30 IST", ist_time: ist.getHours()+":"+String(ist.getMinutes()).padStart(2,"0") });
+      const email = await planSendEmail(req, true);
+      const whatsapp = await planSendWhatsapp(req, true);
+      return json(res, 200, { ok: true, date: todayIso, email, whatsapp });
     }
     // Delivery log: recent WhatsApp/email send results for the daily reminders (read by wheels/log.html).
     if (req.method === "GET" && fmt === "sendlog"){
@@ -923,20 +987,8 @@ async function handlerWheels(req, res){
         const auth = req.headers.authorization || "";
         if (!process.env.CRON_SECRET) return json(res, 503, { error: "CRON_SECRET not set" });
         if (auth !== "Bearer " + process.env.CRON_SECRET) return json(res, 401, { error: "unauthorized" });
-        const tmpl = process.env.WHEELS_WA_PLAN_TEMPLATE;
-        if (!tmpl) return json(res, 400, { error: "WHEELS_WA_PLAN_TEMPLATE not set" });
-        const recips = await wheelsRecipients();
-        const nums = recipientMobiles(recips, "pp_wa");
-        if (!nums.length) { await logSend({report:'plan', channel:'whatsapp', status:'skipped', detail:'no recipients ticked for Production Plan WhatsApp'}); return json(res, 200, { ok: true, skipped: "no whatsapp recipients ticked for Production Plan" }); }
-        const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
-        const url = base + "/wheels-plan.png?d=" + imgStamp();
-        await renderAndCachePng("plan").catch(()=>{}); // pre-build so Meta's image fetch is instant (prevents silent drops)
-        const M = await planModel();
-        const params = [{ name: "report", value: url }, { name: "1", value: "Team" }, { name: "2", value: M.planDate }]; // header image + body {{1}} greeting + {{2}} processing date
-        const sent = [];
-        for (const num of nums) { try { const r = await sendRetry(num, tmpl, params); sent.push({ num, ...(r || { ok: true }) }); } catch (e) { sent.push({ num, error: String(e.message || e) }); } }
-        await logSend({ report:'plan', channel:'whatsapp', ...waSummary(sent, nameByMobile(recips)) });
-        return json(res, 200, { ok: true, url, template: tmpl, sent });
+        const r = await planSendWhatsapp(req, true);   // idempotent: once per working day
+        return json(res, r.error ? 500 : 200, { ok: !r.error, ...r });
       }
       // Production Plan email — daily 6:30pm trigger (CRON_SECRET). Emails the plan tables to everyone
       // who ticked Production Plan email in Recipients.
@@ -944,18 +996,8 @@ async function handlerWheels(req, res){
         const auth = req.headers.authorization || "";
         if (!process.env.CRON_SECRET) return json(res, 503, { error: "CRON_SECRET not set" });
         if (auth !== "Bearer " + process.env.CRON_SECRET) return json(res, 401, { error: "unauthorized" });
-        const recips = await wheelsRecipients();
-        const to = recipientEmails(recips, "pp_email");
-        if (!to.length) { await logSend({report:'plan', channel:'email', status:'skipped', detail:'no recipients ticked for Production Plan email'}); return json(res, 200, { ok: true, skipped: "no email recipients ticked for Production Plan" }); }
-        const html = await buildWheelsPlanHtml();
-        try {
-          await sendWheelsMail(to, [], html, "Wheels India — Production Plan — "+new Date().toLocaleDateString("en-IN"), null);
-          await logSend({ report:'plan', channel:'email', status:'ok', total:to.length, ok:to.length, fail:0, detail:to.length+' recipient(s): '+to.join(', ') });
-        } catch (e) {
-          await logSend({ report:'plan', channel:'email', status:'fail', total:to.length, ok:0, fail:to.length, detail:String(e.message||e) });
-          return json(res, 500, { error: String(e.message||e) });
-        }
-        return json(res, 200, { ok: true, sent_to: to });
+        const r = await planSendEmail(req, true);       // idempotent: once per working day
+        return json(res, r.error ? 500 : 200, { ok: !r.error, ...r });
       }
       // Production Plan WhatsApp — test send from the settings page (no CRON_SECRET)
       if (body.plan_whatsapp_test) {
@@ -1583,6 +1625,7 @@ async function planModel(){
     in:r["Input Item Name"]||"", out:r["Output Item Name"]||"", oqty:r["Output Qty"],
     thk:r["Thickness"], w:r["Output Width"], len:r["Output Length"],
     pcs:r["Actual Pcs"]||"", remarks:r["Remarks"]||"",
+    coilNo:r["Coil No"]||"", coilItem:r["Coil Item"]||r["Input Item Name"]||"",
     next:r["Next Schedule No"]||"", status:r["Status"]||"",
     wipp:r["Schedule Master WI Production Plan Date"]||r["Schedule Output WI Production Plan Date"]||"",
     sm:r["Schedule Master Date"]||"",
@@ -1600,8 +1643,8 @@ async function planModel(){
 }
 // --- plan image (tomorrow's plan table) for WhatsApp ---
 function planSvg(M){
-  const L=14, W=760; const els=[]; let y=0;
-  const C={recv:102,plan:100,size:150,qty:78,pcs:66,rem:0}; C.rem=W-2*L-(C.recv+C.plan+C.size+C.qty+C.pcs);
+  const L=14, W=908; const els=[]; let y=0;
+  const C={recv:90,plan:88,coil:172,size:128,qty:72,pcs:58,rem:0}; C.rem=W-2*L-(C.recv+C.plan+C.coil+C.size+C.qty+C.pcs);
   const rect=(x,yy,w,h,fill)=>els.push(`<rect x="${x}" y="${yy}" width="${w}" height="${h}" fill="${fill}"/>`);
   const txt=(x,yy,s,o)=>{ o=o||{}; els.push(`<text x="${x}" y="${yy}" font-family="DejaVu Sans" font-size="${o.size||11}"${o.bold?' font-weight="bold"':''} fill="${o.fill||'#222'}" text-anchor="${o.anchor||'start'}">${esc2(s)}</text>`); };
   const wrap=(s,maxC)=>{ const w=String(s).split(/\s+/); const lines=[]; let cur=""; for(const t of w){ if((cur+" "+t).trim().length>maxC){ if(cur)lines.push(cur); cur=t; } else cur=(cur+" "+t).trim(); } if(cur)lines.push(cur); return lines.length?lines:[""]; };
@@ -1609,19 +1652,24 @@ function planSvg(M){
   txt(L,26,"Wheels India Production Plan",{size:19,bold:true,fill:"#fff"});
   txt(L,46,"Bharat Steel (Chennai) Pvt. Ltd.  -  Qty approx. in MT",{size:11,fill:"#cfe0ef"});
   y=56; txt(L,y+17,"Date of report: "+M.asof,{size:10,fill:"#556"}); y+=28;
-  const cols=[["recv","Date of order receipt"],["plan","Processing date"],["size","Size"],["qty","Qty (MT)"],["pcs","No. of pcs"],["rem","Remarks"]];
+  const cols=[["recv","Date of order receipt"],["plan","Processing date"],["coil","Input coil"],["size","Size"],["qty","Qty (MT)"],["pcs","No. of pcs"],["rem","Remarks"]];
   const xs={}; let cx=L; for(const c of cols){ xs[c[0]]=cx; cx+=C[c[0]]; } const tw=cx-L;
+  const startCol=k=>(k==="coil"||k==="size"||k==="rem");
   rect(L,y,tw,24,"#0e2a47"); txt(L+8,y+16,"Processing Plan ("+M.planDate+")",{size:13,bold:true,fill:"#fff"}); y+=24;
   const hH=32; rect(L,y,tw,hH,"#eef3f7");
-  for(const c of cols){ const k=c[0], label=c[1]; const lines=wrap(label,Math.max(6,Math.floor(C[k]/5.5))); const sy=y+hH/2-((lines.length-1)*6)-2; const start=(k==="size"||k==="rem"); const tx=start?xs[k]+5:xs[k]+C[k]/2; lines.forEach((ln,i)=>txt(tx,sy+i*12+4,ln,{size:9,bold:true,fill:"#1a2a3a",anchor:start?"start":"middle"})); }
+  for(const c of cols){ const k=c[0], label=c[1]; const lines=wrap(label,Math.max(6,Math.floor(C[k]/5.5))); const sy=y+hH/2-((lines.length-1)*6)-2; const start=startCol(k); const tx=start?xs[k]+5:xs[k]+C[k]/2; lines.forEach((ln,i)=>txt(tx,sy+i*12+4,ln,{size:9,bold:true,fill:"#1a2a3a",anchor:start?"start":"middle"})); }
   y+=hH;
   const list=M.plan; let ri=0, tot=0;
   if(!list.length){ rect(L,y,tw,30,"#fff7ec"); txt(L+tw/2,y+19,"No Production planned on "+M.planDate,{size:12,bold:true,fill:"#8a5b00",anchor:"middle"}); y+=30; }
   for(const r of list){
-    const rl=wrap(r.remarks||"",Math.max(8,Math.floor(C.rem/6.0))); const rH=Math.max(22,8+rl.length*13);
+    const rl=wrap(r.remarks||"",Math.max(8,Math.floor(C.rem/6.0)));
+    const ci=(r.coilItem||"").trim(); const cl=ci?wrap(ci,Math.max(8,Math.floor(C.coil/5.6))):[];
+    const rH=Math.max(24, 8+rl.length*13, 8+(1+cl.length)*12);
     rect(L,y,tw,rH, ri%2?"#f7fafc":"#ffffff");
     txt(xs.recv+C.recv/2,y+rH/2+4,pFmtD(r.recvD),{size:10,anchor:"middle"});
     txt(xs.plan+C.plan/2,y+rH/2+4,pFmtD(r.planD),{size:10,anchor:"middle"});
+    txt(xs.coil+5,y+14,(r.coilNo||"-"),{size:10,bold:true});
+    cl.forEach((ln,i)=>txt(xs.coil+5,y+14+(i+1)*12,ln,{size:8.5,fill:"#667"}));
     txt(xs.size+5,y+rH/2+4,pSize(r),pHasSize(r)?{size:10}:{size:9,fill:"#b36b00"});
     txt(xs.qty+C.qty-6,y+rH/2+4,pQty(r.oqty),{size:11,bold:true,anchor:"end"});
     txt(xs.pcs+C.pcs/2,y+rH/2+4,String(r.pcs||""),{size:10,anchor:"middle"});
@@ -1701,17 +1749,18 @@ async function buildWheelsPlanPdf(){
 function planRowHtml(r){
   const td='style="padding:6px 8px;border:1px solid #d8dee6"';
   const size = pHasSize(r) ? `<td ${td}>${esc2(pSize(r))}</td>` : `<td ${td} style="padding:6px 8px;border:1px solid #d8dee6;color:#b36b00;font-style:italic">Size not received</td>`;
-  return `<tr><td ${td} align="center">${pFmtD(r.recvD)}</td><td ${td} align="center">${pFmtD(r.planD)}</td>${size}<td ${td} align="right"><b>${pQty(r.oqty)}</b></td><td ${td} align="right">${esc2(r.pcs||"")}</td><td ${td}>${esc2(r.remarks||"")}</td></tr>`;
+  const coil = `<td ${td}><b>${esc2(r.coilNo||"-")}</b>${r.coilItem?`<div style="font-size:10px;color:#667">${esc2(r.coilItem)}</div>`:""}</td>`;
+  return `<tr><td ${td} align="center">${pFmtD(r.recvD)}</td><td ${td} align="center">${pFmtD(r.planD)}</td>${coil}${size}<td ${td} align="right"><b>${pQty(r.oqty)}</b></td><td ${td} align="right">${esc2(r.pcs||"")}</td><td ${td}>${esc2(r.remarks||"")}</td></tr>`;
 }
 function planTableHtml(list){
   if(!list.length) return `<p style="color:#667">None.</p>`;
   const tot=list.reduce((a,r)=>a+(parseFloat(r.oqty)||0),0);
   const th='style="background:#eef3f7;color:#0e2a47;font-size:11px;text-transform:uppercase;padding:6px 8px;border:1px solid #d8dee6"';
   return `<table cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;font-family:Arial,sans-serif;font-size:12px">
-    <thead><tr><th ${th}>Date of order receipt</th><th ${th}>Processing date</th><th ${th} align="left">Size</th>
+    <thead><tr><th ${th}>Date of order receipt</th><th ${th}>Processing date</th><th ${th} align="left">Input coil</th><th ${th} align="left">Size</th>
     <th ${th}>Qty (MT)</th><th ${th}>No. of pcs</th><th ${th} align="left">Remarks</th></tr></thead>
     <tbody style="color:#1a2634">${list.map(planRowHtml).join("")}
-    <tr style="background:#0e2a47;color:#fff;font-weight:bold"><td colspan="3" style="padding:6px 8px">TOTAL - ${list.length} item(s)</td><td align="right" style="padding:6px 8px">${tot.toFixed(2)}</td><td colspan="2" style="padding:6px 8px"></td></tr>
+    <tr style="background:#0e2a47;color:#fff;font-weight:bold"><td colspan="4" style="padding:6px 8px">TOTAL - ${list.length} item(s)</td><td align="right" style="padding:6px 8px">${tot.toFixed(2)}</td><td colspan="2" style="padding:6px 8px"></td></tr>
     </tbody></table>`;
 }
 async function buildWheelsPlanHtml(M){
@@ -1723,8 +1772,6 @@ async function buildWheelsPlanHtml(M){
     <p style="font-size:12px;color:#667">Date of report: ${M.asof}. Approx. quantities rounded to 2 decimals (MT).</p>
     <h3 style="color:#0e2a47;margin:14px 0 6px">Processing Plan (${M.planDate})</h3>
     ${M.plan.length ? planTableHtml(M.plan) : `<p style="background:#fff7ec;color:#8a5b00;font-weight:bold;padding:10px 12px;border:1px solid #f0dc9a;border-radius:6px;margin:0">No Production planned on ${M.planDate}</p>`}
-    <h3 style="color:#0e2a47;margin:18px 0 6px">Other Pending Orders (${M.pending.length} open)</h3>
-    ${planTableHtml(M.pending)}
     <p style="font-size:11px;color:#999;margin-top:14px">Computer-generated report - may contain mistakes. Bharat Steel (Chennai) Pvt. Ltd. &middot; info@bharatsteels.in</p>
   </div>`;
 }
