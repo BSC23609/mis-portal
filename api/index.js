@@ -727,7 +727,7 @@ async function planSendWhatsapp(req, once){
   const url = base + "/wheels-plan.png?d=" + imgStamp();
   await renderAndCachePng("plan").catch(()=>{});
   const M = await planModel();
-  const params = [{ name:"report", value:url }, { name:"1", value:"Team" }, { name:"2", value:M.planDate }];
+  const params = [{ name:"report", value:url }, { name:"1", value:M.planDate }]; // header image + body {{1}} = processing (next) date
   const sent = [];
   for(const num of nums){ try{ const r = await sendRetry(num, tmpl, params); sent.push({ num, ...(r||{ok:true}) }); }catch(e){ sent.push({ num, error:String(e.message||e) }); } }
   await logSend({ report:'plan', channel:'whatsapp', ...waSummary(sent, nameByMobile(recips)) });
@@ -1012,7 +1012,7 @@ async function handlerWheels(req, res){
         const url = base + "/wheels-plan.png?d=" + imgStamp();
         await renderAndCachePng("plan").catch(()=>{});
         const M = await planModel();
-        const params = [{ name: "report", value: url }, { name: "1", value: "Team" }, { name: "2", value: M.planDate }]; // header image + body {{1}} greeting + {{2}} processing date
+        const params = [{ name: "report", value: url }, { name: "1", value: M.planDate }]; // header image + body {{1}} = processing (next) date
         const sent = [];
         try { const r = await send(num, tmpl, params); sent.push({ num, ...(r || { ok: true }) }); } catch (e) { sent.push({ num, error: String(e.message || e) }); }
         return json(res, 200, { ok: true, url, template: tmpl, sent });
