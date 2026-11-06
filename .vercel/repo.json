@@ -1,0 +1,11 @@
+{
+  "remoteName": "origin",
+  "projects": [
+    {
+      "id": "prj_EityeAzlyRWQH0kNpujbWvp6cPFX",
+      "name": "mis-portal",
+      "directory": ".",
+      "orgId": "team_sRcCTRo12t7l1sWeGq1XP7Qs"
+    }
+  ]
+}
