@@ -1648,14 +1648,13 @@ function planSvg(M){
   const rect=(x,yy,w,h,fill)=>els.push(`<rect x="${x}" y="${yy}" width="${w}" height="${h}" fill="${fill}"/>`);
   const txt=(x,yy,s,o)=>{ o=o||{}; els.push(`<text x="${x}" y="${yy}" font-family="DejaVu Sans" font-size="${o.size||11}"${o.bold?' font-weight="bold"':''} fill="${o.fill||'#222'}" text-anchor="${o.anchor||'start'}">${esc2(s)}</text>`); };
   const wrap=(s,maxC)=>{ const w=String(s).split(/\s+/); const lines=[]; let cur=""; for(const t of w){ if((cur+" "+t).trim().length>maxC){ if(cur)lines.push(cur); cur=t; } else cur=(cur+" "+t).trim(); } if(cur)lines.push(cur); return lines.length?lines:[""]; };
-  rect(0,0,W,56,"#0e2a47");
-  txt(L,26,"Wheels India Production Plan",{size:19,bold:true,fill:"#fff"});
-  txt(L,46,"Bharat Steel (Chennai) Pvt. Ltd.  -  Qty approx. in MT",{size:11,fill:"#cfe0ef"});
-  y=56; txt(L,y+17,"Date of report: "+M.asof,{size:10,fill:"#556"}); y+=28;
+  rect(0,0,W,44,"#0e2a47");
+  txt(L,28,"Wheels India Production Plan",{size:19,bold:true,fill:"#fff"});
+  txt(W-L,28,M.planDate,{size:14,bold:true,fill:"#cfe0ef",anchor:"end"});
+  y=44;
   const cols=[["recv","Date of order receipt"],["plan","Processing date"],["coil","Input coil"],["size","Size"],["qty","Qty (MT)"],["pcs","No. of pcs"],["rem","Remarks"]];
   const xs={}; let cx=L; for(const c of cols){ xs[c[0]]=cx; cx+=C[c[0]]; } const tw=cx-L;
   const startCol=k=>(k==="coil"||k==="size"||k==="rem");
-  rect(L,y,tw,24,"#0e2a47"); txt(L+8,y+16,"Processing Plan ("+M.planDate+")",{size:13,bold:true,fill:"#fff"}); y+=24;
   const hH=32; rect(L,y,tw,hH,"#eef3f7");
   for(const c of cols){ const k=c[0], label=c[1]; const lines=wrap(label,Math.max(6,Math.floor(C[k]/5.5))); const sy=y+hH/2-((lines.length-1)*6)-2; const start=startCol(k); const tx=start?xs[k]+5:xs[k]+C[k]/2; lines.forEach((ln,i)=>txt(tx,sy+i*12+4,ln,{size:9,bold:true,fill:"#1a2a3a",anchor:start?"start":"middle"})); }
   y+=hH;
