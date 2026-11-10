@@ -1427,7 +1427,7 @@ async function prodHolidays(){
 }
 function istYMD(){ const o={}; new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Kolkata",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(new Date()).forEach(x=>o[x.type]=x.value); return {y:+o.year,m:+o.month,d:+o.day}; }
 // daily cache-buster for WhatsApp image URLs (YYYYMMDD, IST) so Meta/WATI re-fetches a fresh image each day
-function imgStamp(){ const {y,m,d}=istYMD(); return ""+y+String(m).padStart(2,"0")+String(d).padStart(2,"0"); }
+function imgStamp(){ const {y,m,d}=istYMD(); return ""+y+String(m).padStart(2,"0")+String(d).padStart(2,"0")+"-"+Date.now(); } // per-send unique: WhatsApp/Meta must never serve a cached old image
 function isoUTC(dt){ return dt.getUTCFullYear()+"-"+String(dt.getUTCMonth()+1).padStart(2,"0")+"-"+String(dt.getUTCDate()).padStart(2,"0"); }
 function ddmmUTC(dt){ return String(dt.getUTCDate()).padStart(2,"0")+"-"+String(dt.getUTCMonth()+1).padStart(2,"0")+"-"+dt.getUTCFullYear(); }
 // last working day strictly before `today`, skipping Sundays and holidays (array of 'YYYY-MM-DD').
