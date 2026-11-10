@@ -1177,7 +1177,7 @@ async function renderWheelsHtml(baseUrl, wipSet, note){
       `<tr style="background:#eef3f7"><th>#</th><th>Mill</th><th>Grade</th><th>Thk</th><th>Width</th><th>Length</th><th>Coil / Batch No</th><th>Qty (MT)</th><th>Aging (d)</th></tr>`;
     rs.forEach((x,i)=>{ const mill=(x.ItemName||"").split(" ")[0];
       const bc=(+x.BatchCount>1)?` <span style="color:#999">(${x.BatchCount} batches)</span>`:"";
-      const old=(parseInt(x.AgeDays)||0)>=5;                 // 5 days and older -> flag in red
+      const old=k==="PLATE" && (parseInt(x.AgeDays)||0)>=5;   // Plate only: 5 days and older -> red
       const trS=old?' style="background:#fdecea;color:#c0392b"':'';
       body+=`<tr${trS}><td style="text-align:center;color:${old?'#c0392b':'#888'}">${i+1}</td><td style="text-align:center">${esc2(mill)}</td><td style="text-align:center">${esc2(x.Grade)}</td><td style="text-align:center">${dimS(x.Thick)}</td><td style="text-align:center">${dimS(x.Width)}</td><td style="text-align:center">${lenS(x.Length)}</td><td style="text-align:center;font-family:monospace;font-size:11px">${esc2(x.CoilNo||x.BatchNum)}${bc}</td><td style="text-align:center;font-weight:600">${x.Quantity.toFixed(3)}</td><td style="text-align:center;color:${old?'#c0392b':'#888'};font-weight:${old?'700':'400'}">${esc2(x.AgeDays)}</td></tr>`; });
     body+=`<tr><td colspan="8" style="text-align:right;font-weight:700;padding:6px 10px;border-top:2px solid #333">${t} total</td><td style="text-align:right;font-weight:700;border-top:2px solid #333">${tq.toFixed(3)}</td><td style="border-top:2px solid #333"></td></tr>`;
@@ -1308,7 +1308,7 @@ async function buildWheelsPdf(){
     drawHeadRow();
     rs.forEach((x,i)=>{
       if(ensure(rowH)) drawHeadRow();
-      const old=(parseInt(x.AgeDays)||0)>=5;                  // 5 days and older -> red
+      const old=form==="PLATE" && (parseInt(x.AgeDays)||0)>=5; // Plate only: 5 days and older -> red
       if(old){ doc.rect(L,y,W,rowH).fill("#fdecea"); }
       else if(i%2){ doc.rect(L,y,W,rowH).fill("#f7fafc"); }
       doc.fillColor(old?"#c0392b":"#222").font(old?"Helvetica-Bold":"Helvetica").fontSize(7.5);
@@ -1385,7 +1385,7 @@ function wheelsStockSvg(rows, asof){
     const rowYs=[y];
     rect(L,y,R-L,21,"#eef3f7"); cols.forEach(c=>put(c,y+14,c.t,{size:10,bold:true,fill:"#1a2a3a"})); y+=21; rowYs.push(y);
     const rH=19;
-    rs.forEach((xr,i)=>{ const old=(parseInt(xr.AgeDays)||0)>=5;   // 5 days and older -> red
+    rs.forEach((xr,i)=>{ const old=form==="PLATE" && (parseInt(xr.AgeDays)||0)>=5;   // Plate only: 5 days and older -> red
       if(old) rect(L,y,R-L,rH,"#fdecea"); else if(i%2) rect(L,y,R-L,rH,"#f7fafc");
       const mill=(xr.ItemName||"").split(" ")[0];
       const v={n:String(i+1),mill,grade:xr.Grade||"",thk:dimS(xr.Thick),wid:dimS(xr.Width),len:lenS(xr.Length),coil:(xr.CoilNo||xr.BatchNum||""),qty:xr.Quantity.toFixed(3),age:(xr.AgeDays||"")};

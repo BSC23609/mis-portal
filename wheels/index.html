@@ -165,7 +165,7 @@ function sectionTable(rows){
       <tr><th style="width:24px">#</th><th class="l">Mill</th><th class="l">Grade</th><th>Thk</th><th>Width</th><th>Length</th><th class="l">Coil / Batch No</th><th class="l">Mother Coil</th><th>Qty (MT)</th><th>Age (d)</th></tr>`;
     rs.forEach((x,i)=>{
       const mill=(x.ItemName||'').split(' ')[0];
-      const old=(parseInt(x.AgeDays)||0)>=5;                 // 5 days and older -> red
+      const old=key==="PLATE" && (parseInt(x.AgeDays)||0)>=5;   // Plate only: 5 days and older -> red
       const trS=old?' style="background:#fdecea;color:#c0392b"':'';
       html+=`<tr${trS}><td class="r" style="color:${old?'#c0392b':'#888'}">${i+1}</td><td>${esc(mill)}</td><td>${esc(x.Grade)}</td>
         <td class="r">${fdim(x.Thick)}</td><td class="r">${fdim(x.Width)}</td><td class="r">${flen(x.Length)}</td>
