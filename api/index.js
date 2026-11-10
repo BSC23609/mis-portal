@@ -1158,8 +1158,8 @@ function esc2(s){ return String(s??"").replace(/[&<>]/g,c=>({"&":"&amp;","<":"&l
 // Other sections (Plate/Strip) keep quantity-desc.
 function wheelsSortCmp(formKey){
   const num=v=>{const n=parseFloat(v);return isNaN(n)?0:n;};
-  if(formKey==="COIL") return (a,b)=>(num(b.AgeDays)-num(a.AgeDays))||(num(b.Thick)-num(a.Thick))||(b.Quantity-a.Quantity);
-  return (a,b)=>b.Quantity-a.Quantity;
+  // Every section: oldest material first (Aging descending), then thicker, then larger qty.
+  return (a,b)=>(num(b.AgeDays)-num(a.AgeDays))||(num(b.Thick)-num(a.Thick))||(b.Quantity-a.Quantity);
 }
 
 async function renderWheelsHtml(baseUrl, wipSet, note){
@@ -1168,7 +1168,7 @@ async function renderWheelsHtml(baseUrl, wipSet, note){
   const rows = parseCsvSrv(csvRes.ok ? await csvRes.text() : "").map(r=>({...r, Quantity:parseFloat(r.Quantity)||0, form:wheelsFormOf(r.ItemName)}))
     .filter(r=>!wipSet.has(String(r.BatchNum)))
     .filter(r=>!((r.form==="PLATE"&&r.Quantity<0.1)||(r.form==="STRIP"&&r.Quantity<0.011))); // plate <0.1 MT, strip <0.011 MT not listed
-  const SEC=[["PLATE","Plate Stock (WIP / FG)","#0e7a4b"],["STRIP","Strip / Blank Stock","#b5651d"],["COIL","Coil Stock","#1367a6"]]; // WIP/FG (plate+strip) first, coil last
+  const SEC=[["PLATE","Plate Stock","#0e7a4b"],["STRIP","Strip Stock","#b5651d"],["COIL","Coil Stock","#1367a6"]]; // plate + strip first, coil last
   let body="", gb=0, gq=0;
   for(const [k,t,c] of SEC){
     const rs=rows.filter(r=>r.form===k).sort(wheelsSortCmp(k)); if(!rs.length)continue;
@@ -1177,16 +1177,18 @@ async function renderWheelsHtml(baseUrl, wipSet, note){
       `<tr style="background:#eef3f7"><th>#</th><th>Mill</th><th>Grade</th><th>Thk</th><th>Width</th><th>Length</th><th>Coil / Batch No</th><th>Qty (MT)</th><th>Aging (d)</th></tr>`;
     rs.forEach((x,i)=>{ const mill=(x.ItemName||"").split(" ")[0];
       const bc=(+x.BatchCount>1)?` <span style="color:#999">(${x.BatchCount} batches)</span>`:"";
-      body+=`<tr><td style="text-align:center;color:#888">${i+1}</td><td style="text-align:center">${esc2(mill)}</td><td style="text-align:center">${esc2(x.Grade)}</td><td style="text-align:center">${dimS(x.Thick)}</td><td style="text-align:center">${dimS(x.Width)}</td><td style="text-align:center">${lenS(x.Length)}</td><td style="text-align:center;font-family:monospace;font-size:11px">${esc2(x.CoilNo||x.BatchNum)}${bc}</td><td style="text-align:center;font-weight:600">${x.Quantity.toFixed(3)}</td><td style="text-align:center;color:#888">${esc2(x.AgeDays)}</td></tr>`; });
+      const old=(parseInt(x.AgeDays)||0)>=5;                 // 5 days and older -> flag in red
+      const trS=old?' style="background:#fdecea;color:#c0392b"':'';
+      body+=`<tr${trS}><td style="text-align:center;color:${old?'#c0392b':'#888'}">${i+1}</td><td style="text-align:center">${esc2(mill)}</td><td style="text-align:center">${esc2(x.Grade)}</td><td style="text-align:center">${dimS(x.Thick)}</td><td style="text-align:center">${dimS(x.Width)}</td><td style="text-align:center">${lenS(x.Length)}</td><td style="text-align:center;font-family:monospace;font-size:11px">${esc2(x.CoilNo||x.BatchNum)}${bc}</td><td style="text-align:center;font-weight:600">${x.Quantity.toFixed(3)}</td><td style="text-align:center;color:${old?'#c0392b':'#888'};font-weight:${old?'700':'400'}">${esc2(x.AgeDays)}</td></tr>`; });
     body+=`<tr><td colspan="8" style="text-align:right;font-weight:700;padding:6px 10px;border-top:2px solid #333">${t} total</td><td style="text-align:right;font-weight:700;border-top:2px solid #333">${tq.toFixed(3)}</td><td style="border-top:2px solid #333"></td></tr>`;
   }
   const asof=new Date().toLocaleString("en-IN",{timeZone:"Asia/Kolkata",day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"});
   const noteHtml = note && note.trim() ? `<div style="padding:14px 22px 0;font-size:13px;color:#222;line-height:1.6">${esc2(note).replace(/\n/g,"<br>")}</div>` : "";
   const html=`<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>@media only screen and (max-width:600px){.wk-tbl{font-size:10px !important}.wk-tbl th,.wk-tbl td{padding:2px 3px !important}.wk-pad{padding:12px 8px 4px !important}.wk-hd{padding:12px 12px !important}}</style></head><body style="margin:0;padding:0;background:#fff;-webkit-text-size-adjust:100%">`+
     `<div style="font-family:Arial,Helvetica,sans-serif;color:#1a1a1a;max-width:920px;width:100%;margin:auto;border:1px solid #d0d7dd;box-sizing:border-box">
-    <div style="background:#0e2a47;color:#fff;padding:14px 22px"><div style="font-size:18px;font-weight:700">Job Work Stock Statement &mdash; Wheels India Limited</div><div style="font-size:12px;opacity:.85;margin-top:3px">Bharat Steel (Chennai) Pvt. Ltd. &middot; Material held at BSC on customer's account</div></div>
+    <div style="background:#0e2a47;color:#fff;padding:16px 22px"><div style="font-size:18px;font-weight:700">Job Work Stock Statement &mdash; Wheels India Limited</div></div>
     ${noteHtml}
-    <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;padding:11px 22px;background:#f7f9fb;border-bottom:1px solid #e3e8ec;font-size:13px"><div>Customer: <b>Wheels India Limited</b></div><div>As on: <b>${asof}</b></div><div>Warehouse: <b>Job Work (WH 45)</b></div></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;padding:11px 22px;background:#f7f9fb;border-bottom:1px solid #e3e8ec;font-size:13px"><div>Customer: <b>Wheels India Limited</b></div><div style="background:#0e2a47;color:#fff;padding:4px 12px;border-radius:5px;font-weight:600;white-space:nowrap">As on: ${asof}</div><div>Warehouse: <b>Job Work (WH 45)</b></div></div>
     <div class="wk-pad" style="padding:14px 22px 4px;overflow-x:auto;-webkit-overflow-scrolling:touch"><table class="wk-tbl" style="width:100%;border-collapse:collapse;font-size:12px">${body}</table></div>
     <div style="margin:14px 22px;padding:12px 16px;background:#0e2a47;color:#fff;border-radius:5px;display:flex;justify-content:space-between;font-size:15px;font-weight:700"><span>TOTAL MATERIAL HELD</span><span>${gb} items &middot; ${gq.toFixed(3)} MT</span></div>
     <div style="margin:0 22px 14px;padding:9px 13px;background:#fff8e1;border:1px solid #f0dc9a;color:#6b5200;font-size:11px;border-radius:5px">Plates currently under process (awaiting shearing) are excluded from this statement.</div>
@@ -1197,7 +1199,7 @@ async function renderWheelsHtml(baseUrl, wipSet, note){
 async function buildWheelsXlsx(rows){
   let XLSX;
   try { XLSX = await import("xlsx"); } catch(e){ throw new Error("xlsx module not available on server: "+e.message); }
-  const SEC=[["PLATE","Plate Stock (WIP / FG)"],["STRIP","Strip / Blank Stock"],["COIL","Coil Stock"]]; // WIP/FG (plate+strip) first, coil last
+  const SEC=[["PLATE","Plate Stock"],["STRIP","Strip Stock"],["COIL","Coil Stock"]]; // plate + strip first, coil last
   const aoa=[["BHARAT STEEL (CHENNAI) PRIVATE LIMITED"],
              ["Job Work Stock Statement — Wheels India Limited"],
              ["As on: "+new Date().toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})+"   |   Customer: Wheels India Limited   |   Warehouse: Job Work (WH 45)"],
@@ -1238,8 +1240,8 @@ async function buildWheelsPdf(){
   const rows = await wheelsRows();
   const SECDEF = {
     COIL:  ["Coil Stock","#1367a6"],
-    PLATE: ["Plate Stock (WIP / FG)","#0e7a4b"],
-    STRIP: ["Strip / Blank Stock","#b5651d"]
+    PLATE: ["Plate Stock","#0e7a4b"],
+    STRIP: ["Strip Stock","#b5651d"]
   };
   // Page 1 = WIP / FG (plate + strip) ; Page 2 = Coil Stock
   const PAGES = [
@@ -1281,12 +1283,12 @@ async function buildWheelsPdf(){
 
   function drawBrandHeader(pageTitle){
     y=28;
-    doc.rect(L,y,W,42).fill("#0e2a47");
-    doc.fillColor("#fff").font("Helvetica-Bold").fontSize(14).text("Job Work Stock Statement — Wheels India Limited", L+10, y+9, {width:W-20});
-    doc.font("Helvetica").fontSize(8).fillColor("#cfe0ef").text("Bharat Steel (Chennai) Pvt. Ltd.  ·  Material held at BSC on customer's account", L+10, y+28, {width:W-20});
-    y+=50;
-    doc.fillColor("#333").font("Helvetica").fontSize(8.5)
-       .text("Customer: Wheels India Limited        As on: "+asof+"        Warehouse: Job Work (WH 45)", L, y, {width:W});
+    doc.rect(L,y,W,30).fill("#0e2a47");
+    doc.fillColor("#fff").font("Helvetica-Bold").fontSize(14).text("Job Work Stock Statement — Wheels India Limited", L+10, y+8, {width:W-20});
+    y+=38;
+    doc.font("Helvetica").fontSize(8.5).fillColor("#333").text("Customer: Wheels India Limited        ", L, y, {continued:true})
+       .font("Helvetica-Bold").fillColor("#0e7a4b").text("As on: "+asof, {continued:true})
+       .font("Helvetica").fillColor("#333").text("        Warehouse: Job Work (WH 45)");
     y+=16;
     doc.rect(L,y,W,20).fill("#0e2a47");
     doc.fillColor("#fff").font("Helvetica-Bold").fontSize(11).text(pageTitle, L+8, y+5, {lineBreak:false});
@@ -1306,8 +1308,10 @@ async function buildWheelsPdf(){
     drawHeadRow();
     rs.forEach((x,i)=>{
       if(ensure(rowH)) drawHeadRow();
-      if(i%2){ doc.rect(L,y,W,rowH).fill("#f7fafc"); }
-      doc.fillColor("#222").font("Helvetica").fontSize(7.5);
+      const old=(parseInt(x.AgeDays)||0)>=5;                  // 5 days and older -> red
+      if(old){ doc.rect(L,y,W,rowH).fill("#fdecea"); }
+      else if(i%2){ doc.rect(L,y,W,rowH).fill("#f7fafc"); }
+      doc.fillColor(old?"#c0392b":"#222").font(old?"Helvetica-Bold":"Helvetica").fontSize(7.5);
       const mill=(x.ItemName||"").split(" ")[0];
       const vals={ n:String(i+1), mill, grade:x.Grade||"", thk:dimS(x.Thick), wid:dimS(x.Width), len:lenS(x.Length), coil:(x.CoilNo||x.BatchNum||""), qty:x.Quantity.toFixed(3), age:(x.AgeDays||"") };
       cols.forEach(c=>doc.text(String(vals[c.k]), c.x+2, y+3.3, {width:c.w-4, align:c.a, lineBreak:false, ellipsis:true}));
@@ -1353,7 +1357,7 @@ async function buildWheelsPdf(){
 // Stock statement as a PNG (for the WhatsApp image header). Same sections/columns as the PDF/email.
 function wheelsStockSvg(rows, asof){
   const L=16;
-  const SEC=[["PLATE","Plate Stock (WIP / FG)","#0e7a4b"],["STRIP","Strip / Blank Stock","#b5651d"],["COIL","Coil Stock","#1367a6"]];
+  const SEC=[["PLATE","Plate Stock","#0e7a4b"],["STRIP","Strip Stock","#b5651d"],["COIL","Coil Stock","#1367a6"]];
   // content-sized columns (no stretch-to-fill) so the image stays compact on a phone
   const cols=[{k:"n",t:"#",w:22,a:"c"},{k:"mill",t:"Mill",w:52,a:"c"},{k:"grade",t:"Grade",w:54,a:"l"},{k:"thk",t:"Thk",w:40,a:"c"},{k:"wid",t:"Width",w:44,a:"c"},{k:"len",t:"Length",w:46,a:"c"},{k:"coil",t:"Coil / Batch No",w:142,a:"l"},{k:"qty",t:"Qty (MT)",w:64,a:"r"},{k:"age",t:"Aging",w:38,a:"c"}];
   let cx=L; cols.forEach(c=>{ c.x=cx; cx+=c.w; });
@@ -1364,10 +1368,11 @@ function wheelsStockSvg(rows, asof){
   const txt=(x,y,s,o={})=>els.push(`<text x="${x}" y="${y}" font-family="DejaVu Sans" font-size="${o.size||9}"${o.bold?' font-weight="bold"':''} fill="${o.fill||'#222'}" text-anchor="${o.anchor||'start'}">${esc2(s)}</text>`);
   const put=(c,y,s,o)=>{ if(c.a==="r") txt(c.x+c.w-5,y,s,{...o,anchor:"end"}); else if(c.a==="c") txt(c.x+c.w/2,y,s,{...o,anchor:"middle"}); else txt(c.x+5,y,s,{...o,anchor:"start"}); };
   let y=0;
-  rect(0,0,W,58,"#0e2a47");
-  txt(L,25,"Job Work Stock Statement - Wheels India Limited",{size:18,bold:true,fill:"#fff"});
-  txt(L,45,"Bharat Steel (Chennai) Pvt. Ltd.  ·  Material held at BSC on customer's account",{size:11.5,fill:"#cfe0ef"});
-  y=58; txt(L,y+16,"Customer: Wheels India Limited    As on: "+asof+"    Warehouse: Job Work (WH 45)",{size:10,fill:"#445"}); y+=28;
+  rect(0,0,W,44,"#0e2a47");
+  txt(L,28,"Job Work Stock Statement - Wheels India Limited",{size:18,bold:true,fill:"#fff"});
+  y=44;
+  els.push(`<text x="${L}" y="${y+16}" font-family="DejaVu Sans" font-size="10" fill="#445">Customer: Wheels India Limited    As on: <tspan font-weight="bold" fill="#0e7a4b">${esc2(asof)}</tspan>    Warehouse: Job Work (WH 45)</text>`);
+  y+=28;
   const GC="#c4d0da"; const colXs=cols.map(c=>c.x).concat(R);
   function grid(rowYs){ const lft=colXs[0],rgt=colXs[colXs.length-1],top=rowYs[0],bot=rowYs[rowYs.length-1];
     rowYs.forEach(yy=>rect(lft,yy,rgt-lft,1,GC)); colXs.forEach(xx=>rect(xx,top,1,bot-top,GC)); }
@@ -1380,10 +1385,11 @@ function wheelsStockSvg(rows, asof){
     const rowYs=[y];
     rect(L,y,R-L,21,"#eef3f7"); cols.forEach(c=>put(c,y+14,c.t,{size:10,bold:true,fill:"#1a2a3a"})); y+=21; rowYs.push(y);
     const rH=19;
-    rs.forEach((xr,i)=>{ if(i%2) rect(L,y,R-L,rH,"#f7fafc");
+    rs.forEach((xr,i)=>{ const old=(parseInt(xr.AgeDays)||0)>=5;   // 5 days and older -> red
+      if(old) rect(L,y,R-L,rH,"#fdecea"); else if(i%2) rect(L,y,R-L,rH,"#f7fafc");
       const mill=(xr.ItemName||"").split(" ")[0];
       const v={n:String(i+1),mill,grade:xr.Grade||"",thk:dimS(xr.Thick),wid:dimS(xr.Width),len:lenS(xr.Length),coil:(xr.CoilNo||xr.BatchNum||""),qty:xr.Quantity.toFixed(3),age:(xr.AgeDays||"")};
-      cols.forEach(c=>put(c,y+13,String(v[c.k]),{size:10,fill:"#222"})); y+=rH; rowYs.push(y); });
+      cols.forEach(c=>put(c,y+13,String(v[c.k]),{size:10,fill:old?"#c0392b":"#222",bold:old})); y+=rH; rowYs.push(y); });
     rect(L,y,R-L,21,"#e7eef4"); txt(qtyCol.x-6,y+14,title+" total",{size:10.5,bold:true,fill:"#1a2233",anchor:"end"}); put(qtyCol,y+14,tq.toFixed(3),{size:10.5,bold:true,fill:"#1a2233"}); y+=21; rowYs.push(y);
     grid(rowYs);
     y+=4;
