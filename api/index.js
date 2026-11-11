@@ -1165,10 +1165,10 @@ function wheelsSortCmp(formKey){
 async function renderWheelsHtml(baseUrl, wipSet, note){
   const DATA_BASE = process.env.DATA_BASE || "https://raw.githubusercontent.com/BSC23609/bsc-stock-data/main";
   const csvRes = await fetch(DATA_BASE + "/wheels_stock.csv?t=" + Date.now());
-  const rows = parseCsvSrv(csvRes.ok ? await csvRes.text() : "").map(r=>({...r, Quantity:parseFloat(r.Quantity)||0, form:wheelsFormOf(r.ItemName)}))
+  const rows = parseCsvSrv(csvRes.ok ? await csvRes.text() : "").map(r=>((()=>{const o={...r, Quantity:parseFloat(r.Quantity)||0, form:wheelsFormOf(r.ItemName)}; if(o.form==="PLATE"&&!(parseFloat(o.Length)>0))o.form="ENDBIT"; return o;})()))
     .filter(r=>!wipSet.has(String(r.BatchNum)))
-    .filter(r=>!((r.form==="PLATE"&&r.Quantity<0.1)||(r.form==="STRIP"&&r.Quantity<0.011))); // plate <0.1 MT, strip <0.011 MT not listed
-  const SEC=[["PLATE","Plate Stock","#0e7a4b"],["STRIP","Strip Stock","#b5651d"],["COIL","Coil Stock","#1367a6"]]; // plate + strip first, coil last
+    .filter(r=>!(((r.form==="PLATE"||r.form==="ENDBIT")&&r.Quantity<0.1)||(r.form==="STRIP"&&r.Quantity<0.011))); // plate <0.1 MT, strip <0.011 MT not listed
+  const SEC=[["PLATE","Plate Stock","#0e7a4b"],["ENDBIT","End Bit","#5b6670"],["STRIP","Strip Stock","#b5651d"],["COIL","Coil Stock","#1367a6"]]; // plate, end-bit, strip, coil
   let body="", gb=0, gq=0;
   for(const [k,t,c] of SEC){
     const rs=rows.filter(r=>r.form===k).sort(wheelsSortCmp(k)); if(!rs.length)continue;
@@ -1177,7 +1177,7 @@ async function renderWheelsHtml(baseUrl, wipSet, note){
       `<tr style="background:#eef3f7"><th>#</th><th>Mill</th><th>Grade</th><th>Thk</th><th>Width</th><th>Length</th><th>Coil / Batch No</th><th>Qty (MT)</th><th>Aging (d)</th></tr>`;
     rs.forEach((x,i)=>{ const mill=(x.ItemName||"").split(" ")[0];
       const bc=(+x.BatchCount>1)?` <span style="color:#999">(${x.BatchCount} batches)</span>`:"";
-      const old=k==="PLATE" && (parseInt(x.AgeDays)||0)>=5;   // Plate only: 5 days and older -> red AGING CELL only
+      const old=(k==="PLATE"||k==="ENDBIT") && (parseInt(x.AgeDays)||0)>=5;   // Plate only: 5 days and older -> red AGING CELL only
       const ageS=old?'text-align:center;color:#c0392b;font-weight:700;background:#fdecea':'text-align:center;color:#888';
       body+=`<tr><td style="text-align:center;color:#888">${i+1}</td><td style="text-align:center">${esc2(mill)}</td><td style="text-align:center">${esc2(x.Grade)}</td><td style="text-align:center">${dimS(x.Thick)}</td><td style="text-align:center">${dimS(x.Width)}</td><td style="text-align:center">${lenS(x.Length)}</td><td style="text-align:center;font-family:monospace;font-size:11px">${esc2(x.CoilNo||x.BatchNum)}${bc}</td><td style="text-align:center;font-weight:600">${x.Quantity.toFixed(3)}</td><td style="${ageS}">${esc2(x.AgeDays)}</td></tr>`; });
     body+=`<tr><td colspan="8" style="text-align:right;font-weight:700;padding:6px 10px;border-top:2px solid #333">${t} total</td><td style="text-align:right;font-weight:700;border-top:2px solid #333">${tq.toFixed(3)}</td><td style="border-top:2px solid #333"></td></tr>`;
@@ -1199,7 +1199,7 @@ async function renderWheelsHtml(baseUrl, wipSet, note){
 async function buildWheelsXlsx(rows){
   let XLSX;
   try { XLSX = await import("xlsx"); } catch(e){ throw new Error("xlsx module not available on server: "+e.message); }
-  const SEC=[["PLATE","Plate Stock"],["STRIP","Strip Stock"],["COIL","Coil Stock"]]; // plate + strip first, coil last
+  const SEC=[["PLATE","Plate Stock"],["ENDBIT","End Bit"],["STRIP","Strip Stock"],["COIL","Coil Stock"]]; // plate, end-bit, strip, coil
   const aoa=[["BHARAT STEEL (CHENNAI) PRIVATE LIMITED"],
              ["Job Work Stock Statement — Wheels India Limited"],
              ["As on: "+new Date().toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})+"   |   Customer: Wheels India Limited   |   Warehouse: Job Work (WH 45)"],
@@ -1229,8 +1229,8 @@ async function buildWheelsXlsx(rows){
 async function wheelsRows(){
   const DATA_BASE = process.env.DATA_BASE || "https://raw.githubusercontent.com/BSC23609/bsc-stock-data/main";
   const csvRes = await fetch(DATA_BASE + "/wheels_stock.csv?t=" + Date.now());
-  return parseCsvSrv(csvRes.ok ? await csvRes.text() : "").map(r=>({...r, Quantity:parseFloat(r.Quantity)||0, form:wheelsFormOf(r.ItemName)}))
-    .filter(r=>!((r.form==="PLATE"&&r.Quantity<0.1)||(r.form==="STRIP"&&r.Quantity<0.011))); // plate <0.1 MT, strip <0.011 MT not listed
+  return parseCsvSrv(csvRes.ok ? await csvRes.text() : "").map(r=>((()=>{const o={...r, Quantity:parseFloat(r.Quantity)||0, form:wheelsFormOf(r.ItemName)}; if(o.form==="PLATE"&&!(parseFloat(o.Length)>0))o.form="ENDBIT"; return o;})()))
+    .filter(r=>!(((r.form==="PLATE"||r.form==="ENDBIT")&&r.Quantity<0.1)||(r.form==="STRIP"&&r.Quantity<0.011))); // plate <0.1 MT, strip <0.011 MT not listed
 }
 // Build the statement as a PDF (same sections/columns as the email). Pure pdfkit,
 // no headless browser — safe on Vercel Hobby. Served at /api/wheels?fmt=pdf (and /wheels.pdf).
@@ -1241,11 +1241,12 @@ async function buildWheelsPdf(){
   const SECDEF = {
     COIL:  ["Coil Stock","#1367a6"],
     PLATE: ["Plate Stock","#0e7a4b"],
+    ENDBIT:["End Bit","#5b6670"],
     STRIP: ["Strip Stock","#b5651d"]
   };
   // Page 1 = WIP / FG (plate + strip) ; Page 2 = Coil Stock
   const PAGES = [
-    { title:"WIP / FG Stock", forms:["PLATE","STRIP"] },
+    { title:"WIP / FG Stock", forms:["PLATE","ENDBIT","STRIP"] },
     { title:"Coil Stock",     forms:["COIL"] }
   ];
 
@@ -1308,7 +1309,7 @@ async function buildWheelsPdf(){
     drawHeadRow();
     rs.forEach((x,i)=>{
       if(ensure(rowH)) drawHeadRow();
-      const old=form==="PLATE" && (parseInt(x.AgeDays)||0)>=5; // Plate only: 5 days and older -> red AGING CELL only
+      const old=(form==="PLATE"||form==="ENDBIT") && (parseInt(x.AgeDays)||0)>=5; // Plate only: 5 days and older -> red AGING CELL only
       if(i%2){ doc.rect(L,y,W,rowH).fill("#f7fafc"); }
       const ageCol=cols.find(c=>c.k==="age");
       if(old && ageCol){ doc.rect(ageCol.x,y,ageCol.w,rowH).fill("#fdecea"); } // red shade only on the Aging cell
@@ -1358,7 +1359,7 @@ async function buildWheelsPdf(){
 // Stock statement as a PNG (for the WhatsApp image header). Same sections/columns as the PDF/email.
 function wheelsStockSvg(rows, asof){
   const L=16;
-  const SEC=[["PLATE","Plate Stock","#0e7a4b"],["STRIP","Strip Stock","#b5651d"],["COIL","Coil Stock","#1367a6"]];
+  const SEC=[["PLATE","Plate Stock","#0e7a4b"],["ENDBIT","End Bit","#5b6670"],["STRIP","Strip Stock","#b5651d"],["COIL","Coil Stock","#1367a6"]];
   // content-sized columns (no stretch-to-fill) so the image stays compact on a phone
   const cols=[{k:"n",t:"#",w:22,a:"c"},{k:"mill",t:"Mill",w:52,a:"c"},{k:"grade",t:"Grade",w:54,a:"l"},{k:"thk",t:"Thk",w:40,a:"c"},{k:"wid",t:"Width",w:44,a:"c"},{k:"len",t:"Length",w:46,a:"c"},{k:"coil",t:"Coil / Batch No",w:142,a:"l"},{k:"qty",t:"Qty (MT)",w:64,a:"r"},{k:"age",t:"Aging",w:38,a:"c"}];
   let cx=L; cols.forEach(c=>{ c.x=cx; cx+=c.w; });
@@ -1386,7 +1387,7 @@ function wheelsStockSvg(rows, asof){
     const rowYs=[y];
     rect(L,y,R-L,21,"#eef3f7"); cols.forEach(c=>put(c,y+14,c.t,{size:10,bold:true,fill:"#1a2a3a"})); y+=21; rowYs.push(y);
     const rH=19;
-    rs.forEach((xr,i)=>{ const old=form==="PLATE" && (parseInt(xr.AgeDays)||0)>=5;   // Plate only: 5 days and older -> red AGING CELL only
+    rs.forEach((xr,i)=>{ const old=(form==="PLATE"||form==="ENDBIT") && (parseInt(xr.AgeDays)||0)>=5;   // Plate only: 5 days and older -> red AGING CELL only
       if(i%2) rect(L,y,R-L,rH,"#f7fafc");
       const ageCol=cols.find(c=>c.k==="age");
       if(old && ageCol) rect(ageCol.x,y,ageCol.w,rH,"#fdecea");   // red shade only on the Aging cell
