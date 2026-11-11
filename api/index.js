@@ -797,8 +797,8 @@ async function handlerWheels(req, res){
       return res.status(200).end(pdf);
     }
     // Production Plan AUTO-SEND. No SAP box / Task Scheduler needed: a Vercel cron (in vercel.json)
-    // and/or an external pinger (cron-job.org) hits this at 18:30 IST. Guarded by CRON_SECRET.
-    // Idempotent + time-guarded: sends once per working day only after 18:30 IST, so it is safe to
+    // and/or an external pinger (cron-job.org) hits this at 9:30 AM IST. Guarded by CRON_SECRET.
+    // Idempotent + time-guarded: sends once per working day only after 9:30 IST, so it is safe to
     // call as often as you like (extra calls are no-ops; a failed channel retries next call).
     if (req.method === "GET" && fmt === "plancron"){
       const auth = req.headers.authorization || "";
@@ -809,7 +809,7 @@ async function handlerWheels(req, res){
       if (ist.getDay() === 0) return json(res, 200, { ok: true, skipped: "Sunday" });
       let hol = []; try { const s = await sql`select holidays from wheels_settings where id=1`; hol = (s[0]?.holidays) || []; } catch(e){}
       if (hol.includes(todayIso)) return json(res, 200, { ok: true, skipped: "holiday " + todayIso });
-      if (ist.getHours()*60 + ist.getMinutes() < 18*60+30) return json(res, 200, { ok: true, waiting: "before 18:30 IST", ist_time: ist.getHours()+":"+String(ist.getMinutes()).padStart(2,"0") });
+      if (ist.getHours()*60 + ist.getMinutes() < 9*60+30) return json(res, 200, { ok: true, waiting: "before 9:30 IST", ist_time: ist.getHours()+":"+String(ist.getMinutes()).padStart(2,"0") });
       const email = await planSendEmail(req, true);
       const whatsapp = await planSendWhatsapp(req, true);
       return json(res, 200, { ok: true, date: todayIso, email, whatsapp });
@@ -1645,10 +1645,10 @@ async function planModel(){
     r.planD = parseYMD(r.wipp) || parseYMD(r.sm) || (parseYMD(r.prog)?nextWorkingDay(parseYMD(r.prog)):null);
     r.recvD = parseYMD(r.wio);
   });
-  const tomorrow=nextWorkingDay(new Date()); const tKey=ymd(tomorrow);
+  const target=new Date(new Date().toLocaleString("en-US",{timeZone:"Asia/Kolkata"})); const tKey=ymd(target);   // plan for TODAY (IST) - sent same day at 9:30 AM
   const plan = rows.filter(r=>r.planD&&ymd(r.planD)===tKey).sort((a,b)=>a.out.localeCompare(b.out));
   const pending = rows.filter(r=>!(r.planD&&ymd(r.planD)===tKey)).sort((a,b)=>(a.planD&&b.planD)?(a.planD-b.planD):0);
-  return { plan, pending, tomorrow, planDate:pFmtD(tomorrow), asof:pFmtD(new Date()), total: rows.length };
+  return { plan, pending, tomorrow:target, planDate:pFmtD(target), asof:pFmtD(new Date()), total: rows.length };
 }
 // --- plan image (tomorrow's plan table) for WhatsApp ---
 function planSvg(M){

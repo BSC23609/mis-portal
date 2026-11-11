@@ -53,7 +53,7 @@
   "crons": [
     {
       "path": "/api/plan-cron",
-      "schedule": "0 13 * * *"
+      "schedule": "0 4 * * *"
     }
   ]
 }
