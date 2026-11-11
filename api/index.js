@@ -1169,7 +1169,7 @@ async function renderWheelsHtml(baseUrl, wipSet, note){
   const rows = parseCsvSrv(csvRes.ok ? await csvRes.text() : "").map(r=>((()=>{const o={...r, Quantity:parseFloat(r.Quantity)||0, form:wheelsFormOf(r.ItemName)}; if(o.form==="PLATE"&&!(parseFloat(o.Length)>0))o.form="ENDBIT"; return o;})()))
     .filter(r=>!wipSet.has(String(r.BatchNum)))
     .filter(r=>!(((r.form==="PLATE"||r.form==="ENDBIT")&&r.Quantity<0.1)||(r.form==="STRIP"&&r.Quantity<0.011))); // plate <0.1 MT, strip <0.011 MT not listed
-  const SEC=[["PLATE","Plate Stock","#0e7a4b"],["ENDBIT","End Bit","#5b6670"],["STRIP","Strip Stock","#b5651d"],["COIL","Coil Stock","#1367a6"]]; // plate, end-bit, strip, coil
+  const SEC=[["PLATE","Plate Stock","#0e7a4b"],["ENDBIT","Plate-End Bit","#5b6670"],["STRIP","Strip Stock","#b5651d"],["COIL","Coil Stock","#1367a6"]]; // plate, end-bit, strip, coil
   let body="", gb=0, gq=0;
   for(const [k,t,c] of SEC){
     const rs=rows.filter(r=>r.form===k).sort(wheelsSortCmp(k)); if(!rs.length)continue;
@@ -1200,7 +1200,7 @@ async function renderWheelsHtml(baseUrl, wipSet, note){
 async function buildWheelsXlsx(rows){
   let XLSX;
   try { XLSX = await import("xlsx"); } catch(e){ throw new Error("xlsx module not available on server: "+e.message); }
-  const SEC=[["PLATE","Plate Stock"],["ENDBIT","End Bit"],["STRIP","Strip Stock"],["COIL","Coil Stock"]]; // plate, end-bit, strip, coil
+  const SEC=[["PLATE","Plate Stock"],["ENDBIT","Plate-End Bit"],["STRIP","Strip Stock"],["COIL","Coil Stock"]]; // plate, end-bit, strip, coil
   const aoa=[["BHARAT STEEL (CHENNAI) PRIVATE LIMITED"],
              ["Job Work Stock Statement — Wheels India Limited"],
              ["As on: "+new Date().toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})+"   |   Customer: Wheels India Limited   |   Warehouse: Job Work (WH 45)"],
@@ -1242,7 +1242,7 @@ async function buildWheelsPdf(){
   const SECDEF = {
     COIL:  ["Coil Stock","#1367a6"],
     PLATE: ["Plate Stock","#0e7a4b"],
-    ENDBIT:["End Bit","#5b6670"],
+    ENDBIT:["Plate-End Bit","#5b6670"],
     STRIP: ["Strip Stock","#b5651d"]
   };
   // Page 1 = WIP / FG (plate + strip) ; Page 2 = Coil Stock
@@ -1360,7 +1360,7 @@ async function buildWheelsPdf(){
 // Stock statement as a PNG (for the WhatsApp image header). Same sections/columns as the PDF/email.
 function wheelsStockSvg(rows, asof){
   const L=16;
-  const SEC=[["PLATE","Plate Stock","#0e7a4b"],["ENDBIT","End Bit","#5b6670"],["STRIP","Strip Stock","#b5651d"],["COIL","Coil Stock","#1367a6"]];
+  const SEC=[["PLATE","Plate Stock","#0e7a4b"],["ENDBIT","Plate-End Bit","#5b6670"],["STRIP","Strip Stock","#b5651d"],["COIL","Coil Stock","#1367a6"]];
   // content-sized columns (no stretch-to-fill) so the image stays compact on a phone
   const cols=[{k:"n",t:"#",w:22,a:"c"},{k:"mill",t:"Mill",w:52,a:"c"},{k:"grade",t:"Grade",w:54,a:"l"},{k:"thk",t:"Thk",w:40,a:"c"},{k:"wid",t:"Width",w:44,a:"c"},{k:"len",t:"Length",w:46,a:"c"},{k:"coil",t:"Coil / Batch No",w:142,a:"l"},{k:"qty",t:"Qty (MT)",w:64,a:"r"},{k:"age",t:"Aging",w:38,a:"c"}];
   let cx=L; cols.forEach(c=>{ c.x=cx; cx+=c.w; });
