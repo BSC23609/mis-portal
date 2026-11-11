@@ -571,7 +571,7 @@ async function ensureWheelsTable(){
   await sql`create table if not exists wheels_settings (
     id int primary key default 1,
     mail_to text[] default '{}', mail_cc text[] default '{}',
-    send_time text default '10:00', enabled boolean default true,
+    send_time text default '09:30', enabled boolean default true,
     wip text[] default '{}', mail_subject text default '', mail_body text default '', updated_at timestamptz default now()
   )`;
   await sql`insert into wheels_settings (id) values (1) on conflict (id) do nothing`;
@@ -1122,7 +1122,7 @@ async function handlerWheels(req, res){
     const s = rows[0] || {};
     return json(res, 200, {
       mail_to: s.mail_to || [], mail_cc: s.mail_cc || [],
-      send_time: s.send_time || "10:00", enabled: s.enabled !== false,
+      send_time: s.send_time || "09:30", enabled: s.enabled !== false,
       wip: s.wip || [], mail_subject: s.mail_subject || "", mail_body: s.mail_body || "",
       wa_to: s.wa_to || [], wa_enabled: s.wa_enabled !== false,
       prod_mail_to: s.prod_mail_to || [], prod_wa_to: s.prod_wa_to || [],
