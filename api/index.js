@@ -1156,7 +1156,7 @@ function lenS(v){ const n=parseFloat(v); return (n&&n>0)?(""+ +n.toFixed(0)):"â€
 function esc2(s){ return String(s??"").replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
 // Row sort per section. Coil Stock â†’ Aging (days) desc, tie-break by Thickness desc.
 // Other sections (Plate/Strip) keep quantity-desc.
-function ageThresh(form){ return form==="STRIP"?3 : form==="COIL"?45 : 5; }  // red when Aging >= : Strip 3, Coil 45, Plate/End-Bit 5
+function ageThresh(form){ return form==="STRIP"?3 : form==="COIL"?45 : form==="ENDBIT"?10 : 5; }  // red when Aging >= : Strip 3, Coil 45, Plate-End Bit 10, Plate 5
 function wheelsSortCmp(formKey){
   const num=v=>{const n=parseFloat(v);return isNaN(n)?0:n;};
   // Every section: oldest material first (Aging descending), then thicker, then larger qty.
@@ -1409,7 +1409,8 @@ async function buildWheelsStockPng(){
   const ff=prodFontFiles();
   const rows=await wheelsRows();
   const asof=new Date().toLocaleString("en-IN",{timeZone:"Asia/Kolkata",day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"});
-  const svg=wheelsStockSvg(rows, asof);
+  const M=await planModel();                       // Production Plan (today) on top, stock below
+  const svg=wheelsPlanStockSvg(M, rows, asof);
   const r=new Resvg(svg, { fitTo:{ mode:"zoom", value:2 }, font:{ fontFiles:ff, loadSystemFonts: ff.length===0, defaultFontFamily:"DejaVu Sans" }, background:"#ffffff" });
   return Buffer.from(r.render().asPng());
 }
@@ -1689,6 +1690,19 @@ function planSvg(M){
   rect(L,y,tw,24,"#0e2a47"); txt(L+8,y+16,"TOTAL - "+list.length+" item(s)",{size:11,bold:true,fill:"#fff"}); txt(xs.qty+C.qty-6,y+16,tot.toFixed(2),{size:11,bold:true,fill:"#fff",anchor:"end"}); y+=24;
   const H=y+8;
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><rect width="${W}" height="${H}" fill="#ffffff"/>${els.join("")}</svg>`;
+}
+// --- Production Plan (top) + Job Work Stock Statement (below), stacked into one image ---
+function wheelsPlanStockSvg(M, rows, asof){
+  const planS  = planSvg(M);
+  const stockS = wheelsStockSvg(rows, asof);
+  const gw=s=>(+((/width="(\d+)"/.exec(s))||[])[1])||0;
+  const gh=s=>(+((/height="(\d+)"/.exec(s))||[])[1])||0;
+  const Wp=gw(planS), Hp=gh(planS), Ws=gw(stockS), Hs=gh(stockS);
+  const gap=20, W=Math.max(Wp,Ws), H=Hp+gap+Hs;
+  const inner=s=>s.replace(/^<svg[^>]*>/,"").replace(/<\/svg>\s*$/,"");
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><rect width="${W}" height="${H}" fill="#ffffff"/>`+
+    `<svg x="0" y="0" width="${Wp}" height="${Hp}" viewBox="0 0 ${Wp} ${Hp}">${inner(planS)}</svg>`+
+    `<svg x="0" y="${Hp+gap}" width="${Ws}" height="${Hs}" viewBox="0 0 ${Ws} ${Hs}">${inner(stockS)}</svg></svg>`;
 }
 async function buildWheelsPlanPng(){
   let Resvg; try{ Resvg=(await import("@resvg/resvg-js")).Resvg; }catch(e){ throw new Error("resvg-js not available on server: "+e.message); }
