@@ -1180,7 +1180,7 @@ async function renderWheelsHtml(baseUrl, wipSet, note){
       const bc=(+x.BatchCount>1)?` <span style="color:#999">(${x.BatchCount} batches)</span>`:"";
       const old=(parseInt(x.AgeDays)||0)>=ageThresh(k);   // Plate only: 5 days and older -> red AGING CELL only
       const ageS=old?'text-align:center;color:#fff;font-weight:700;background:#b00020':'text-align:center;color:#888';
-      body+=`<tr><td style="text-align:center;color:#888">${i+1}</td><td style="text-align:center">${esc2(mill)}</td><td style="text-align:center">${esc2(x.Grade)}</td><td style="text-align:center">${dimS(x.Thick)}</td><td style="text-align:center">${dimS(x.Width)}</td><td style="text-align:center">${lenS(x.Length)}</td><td style="text-align:center;font-family:monospace;font-size:11px">${esc2(x.CoilNo||x.BatchNum)}${bc}</td><td style="text-align:center;font-weight:600">${x.Quantity.toFixed(3)}</td><td style="${ageS}">${esc2(x.AgeDays)}</td></tr>`; });
+      body+=`<tr><td style="text-align:center;color:#888">${i+1}</td><td style="text-align:center">${esc2(mill)}</td><td style="text-align:center">${esc2(x.Grade)}</td><td style="text-align:center">${dimS(x.Thick)}</td><td style="text-align:center">${dimS(x.Width)}</td><td style="text-align:center">${k==="ENDBIT"?"EB":lenS(x.Length)}</td><td style="text-align:center;font-family:monospace;font-size:11px">${esc2(x.CoilNo||x.BatchNum)}${bc}</td><td style="text-align:center;font-weight:600">${x.Quantity.toFixed(3)}</td><td style="${ageS}">${esc2(x.AgeDays)}</td></tr>`; });
     body+=`<tr><td colspan="8" style="text-align:right;font-weight:700;padding:6px 10px;border-top:2px solid #333">${t} total</td><td style="text-align:right;font-weight:700;border-top:2px solid #333">${tq.toFixed(3)}</td><td style="border-top:2px solid #333"></td></tr>`;
   }
   const asof=new Date().toLocaleString("en-IN",{timeZone:"Asia/Kolkata",day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"});
@@ -1214,7 +1214,7 @@ async function buildWheelsXlsx(rows){
     aoa.push(hdr);
     rs.forEach((x,i)=>{ const mill=(x.ItemName||"").split(" ")[0];
       const T=parseFloat(x.Thick), W=parseFloat(x.Width), L=parseFloat(x.Length);
-      aoa.push([i+1, mill, x.Grade, isNaN(T)?"":T, isNaN(W)?"":W, (L>0?L:""), (x.CoilNo||x.BatchNum), (x.Mothercoil||"-"), Number(x.Quantity.toFixed(3)), x.AgeDays?parseInt(x.AgeDays):""]); });
+      aoa.push([i+1, mill, x.Grade, isNaN(T)?"":T, isNaN(W)?"":W, (k==="ENDBIT"?"EB":(L>0?L:"")), (x.CoilNo||x.BatchNum), (x.Mothercoil||"-"), Number(x.Quantity.toFixed(3)), x.AgeDays?parseInt(x.AgeDays):""]); });
     aoa.push(["","","","","","","","",Number(tq.toFixed(3)),""]);
     aoa.push([]);
   }
@@ -1316,7 +1316,7 @@ async function buildWheelsPdf(){
       if(old && ageCol){ doc.rect(ageCol.x,y,ageCol.w,rowH).fill("#b00020"); } // red shade only on the Aging cell
       doc.fontSize(7.5);
       const mill=(x.ItemName||"").split(" ")[0];
-      const vals={ n:String(i+1), mill, grade:x.Grade||"", thk:dimS(x.Thick), wid:dimS(x.Width), len:lenS(x.Length), coil:(x.CoilNo||x.BatchNum||""), qty:x.Quantity.toFixed(3), age:(x.AgeDays||"") };
+      const vals={ n:String(i+1), mill, grade:x.Grade||"", thk:dimS(x.Thick), wid:dimS(x.Width), len:(form==="ENDBIT"?"EB":lenS(x.Length)), coil:(x.CoilNo||x.BatchNum||""), qty:x.Quantity.toFixed(3), age:(x.AgeDays||"") };
       cols.forEach(c=>{ const redC=old&&c.k==="age"; doc.fillColor(redC?"#fff":"#222").font(redC?"Helvetica-Bold":"Helvetica").text(String(vals[c.k]), c.x+2, y+3.3, {width:c.w-4, align:c.a, lineBreak:false, ellipsis:true}); });
       y+=rowH;
     });
@@ -1393,7 +1393,7 @@ function wheelsStockSvg(rows, asof){
       const ageCol=cols.find(c=>c.k==="age");
       if(old && ageCol) rect(ageCol.x,y,ageCol.w,rH,"#b00020");   // red shade only on the Aging cell
       const mill=(xr.ItemName||"").split(" ")[0];
-      const v={n:String(i+1),mill,grade:xr.Grade||"",thk:dimS(xr.Thick),wid:dimS(xr.Width),len:lenS(xr.Length),coil:(xr.CoilNo||xr.BatchNum||""),qty:xr.Quantity.toFixed(3),age:(xr.AgeDays||"")};
+      const v={n:String(i+1),mill,grade:xr.Grade||"",thk:dimS(xr.Thick),wid:dimS(xr.Width),len:(form==="ENDBIT"?"EB":lenS(xr.Length)),coil:(xr.CoilNo||xr.BatchNum||""),qty:xr.Quantity.toFixed(3),age:(xr.AgeDays||"")};
       cols.forEach(c=>{ const redC=old&&c.k==="age"; put(c,y+13,String(v[c.k]),{size:10,fill:redC?"#fff":"#222",bold:redC}); }); y+=rH; rowYs.push(y); });
     rect(L,y,R-L,21,"#e7eef4"); txt(qtyCol.x-6,y+14,title+" total",{size:10.5,bold:true,fill:"#1a2233",anchor:"end"}); put(qtyCol,y+14,tq.toFixed(3),{size:10.5,bold:true,fill:"#1a2233"}); y+=21; rowYs.push(y);
     grid(rowYs);
