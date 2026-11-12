@@ -900,7 +900,7 @@ async function handlerWheels(req, res){
         const img = base + "/wheels.png?d=" + imgStamp();
         await renderAndCachePng("stock").catch(()=>{}); // pre-build so Meta's image fetch is instant (prevents silent drops)
         for (const num of nums) {
-          try { const r = await sendRetry(num, tmpl, [{ name: "report", value: img }]); sent.push({ num, ...(r || { ok: true }) }); }   // image header "report" + static URL buttons
+          try { const r = await sendRetry(num, tmpl, [{ name: "report", value: img }, { name: "1", value: waToday() }]); sent.push({ num, ...(r || { ok: true }) }); }   // image header "report" + body {{1}} = today's date
           catch (e) { sent.push({ num, error: String(e.message || e) }); }
         }
         await logSend({ report:'wheels_stock', channel:'whatsapp', ...waSummary(sent, nameByMobile(recips)) });
@@ -921,7 +921,7 @@ async function handlerWheels(req, res){
         const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
         const img = base + "/wheels.png?d=" + imgStamp();
         const sent = [];
-        try { const r = await send(num, tmpl, [{ name: "report", value: img }]); sent.push({ num, ...(r || { ok: true }) }); }   // image header "report" + static URL buttons
+        try { const r = await send(num, tmpl, [{ name: "report", value: img }, { name: "1", value: waToday() }]); sent.push({ num, ...(r || { ok: true }) }); }   // image header "report" + body {{1}} = today's date
         catch (e) { sent.push({ num, error: String(e.message || e) }); }
         return json(res, 200, { ok: true, image: img, pdf: base + "/wheels.pdf", xlsx: base + "/wheels.xlsx", template: tmpl, sent });
       }
@@ -1434,6 +1434,8 @@ async function prodHolidays(){
 function istYMD(){ const o={}; new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Kolkata",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(new Date()).forEach(x=>o[x.type]=x.value); return {y:+o.year,m:+o.month,d:+o.day}; }
 // daily cache-buster for WhatsApp image URLs (YYYYMMDD, IST) so Meta/WATI re-fetches a fresh image each day
 function imgStamp(){ const {y,m,d}=istYMD(); return ""+y+String(m).padStart(2,"0")+String(d).padStart(2,"0")+"-"+Date.now(); } // per-send unique: WhatsApp/Meta must never serve a cached old image
+// today's date, IST, for the WhatsApp body {{1}} on the Job Work Stock template ("Wheels India Daily Report <date>") -> e.g. "12 Nov 2026"
+function waToday(){ return new Date().toLocaleDateString("en-IN",{timeZone:"Asia/Kolkata",day:"2-digit",month:"short",year:"numeric"}); }
 function isoUTC(dt){ return dt.getUTCFullYear()+"-"+String(dt.getUTCMonth()+1).padStart(2,"0")+"-"+String(dt.getUTCDate()).padStart(2,"0"); }
 function ddmmUTC(dt){ return String(dt.getUTCDate()).padStart(2,"0")+"-"+String(dt.getUTCMonth()+1).padStart(2,"0")+"-"+dt.getUTCFullYear(); }
 // last working day strictly before `today`, skipping Sundays and holidays (array of 'YYYY-MM-DD').
