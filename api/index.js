@@ -1,5 +1,6 @@
 // NMDC backend for MIS portal — sync (Excel->Neon) + dispatch (read). Transporter/WATI/arrive disabled (routes removed; WATI env vars unset).
 // original single-file build (dispatch, sync, tform, arrive) — build 2026-09-21g (consignment lines, Ref key, SO master)
+// build 2026-11-12a — wheels WhatsApp body {{1}}=today date (waToday) + detailed WATI error (marker: BUILD-1112A)
 
 // lib/db.js
 import { neon } from "@neondatabase/serverless";
@@ -180,7 +181,11 @@ async function send(mobile, template, parameters) {
     body: JSON.stringify({ template_name: template, broadcast_name: template, parameters })
   });
   const j = await r.json().catch(() => ({}));
-  if (!r.ok || j.result === false) throw new Error("WATI: " + (j.info || j.message || r.status));
+  if (!r.ok || j.result === false) {
+    const detail = j.info || j.message || (j.errors && (j.errors.error || JSON.stringify(j.errors)))
+      || (Object.keys(j).length ? JSON.stringify(j).slice(0, 300) : ("HTTP " + r.status));
+    throw new Error("WATI: " + detail);
+  }
   // WATI accepts the request (result:true) even for numbers not on WhatsApp; it flags those with
   // validWhatsAppNumber:false. Treat that as a real failure so the Send Log doesn't show a false "ok".
   if (j.validWhatsAppNumber === false) { const e = new Error("not a valid WhatsApp number"); e.noRetry = true; throw e; }
