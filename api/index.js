@@ -1,6 +1,9 @@
 // NMDC backend for MIS portal — sync (Excel->Neon) + dispatch (read). Transporter/WATI/arrive disabled (routes removed; WATI env vars unset).
 // original single-file build (dispatch, sync, tform, arrive) — build 2026-09-21g (consignment lines, Ref key, SO master)
 // build 2026-11-12a — wheels WhatsApp body {{1}}=today date (waToday) + detailed WATI error (marker: BUILD-1112A)
+// build 2026-11-13a — daily-stock WhatsApp body {{1}}=today date too (marker: BUILD-1113A)
+// build 2026-11-14a — Updated Production Plan: planupdate endpoint + sig store + updated email/WA senders (marker: BUILD-1114A)
+// build 2026-11-14b — Updated plan WhatsApp {{1}} now carries date + revision time IST (marker: BUILD-1114B)
 
 // lib/db.js
 import { neon } from "@neondatabase/serverless";
@@ -625,6 +628,8 @@ async function ensureWheelsTable(){
   // Short-lived cache of the rendered report PNGs, so WhatsApp/Meta fetches an already-built image
   // instead of waiting on a slow live render (which caused silently-dropped sends that still logged "ok").
   await sql`create table if not exists wheels_img_cache ( name text primary key, png_b64 text, ts timestamptz default now() )`;
+  // signature of the production plan last sent today — drives the "Updated Production Plan" re-send
+  await sql`create table if not exists wheels_plan_sig ( run_date date primary key, sig text, ts timestamptz default now() )`;
 }
 // All recipients as plain objects (for the settings UI, the scripts, and the WhatsApp routes).
 async function wheelsRecipients(){
@@ -738,13 +743,59 @@ async function planSendWhatsapp(req, once){
   await logSend({ report:'plan', channel:'whatsapp', ...waSummary(sent, nameByMobile(recips)) });
   return { ok:true, url, template:tmpl, sent };
 }
+// ===== "Updated Production Plan" — fires when today's cutting program changes after the morning send =====
+// Stable signature of today's plan rows (the cutting programs for today). Any add/edit/remove changes it.
+function planSignature(M){
+  return (M.plan||[])
+    .map(r=>[r.coilNo||"", r.coilItem||"", r.out||"", String(r.oqty||""), String(r.thk||""), String(r.w||""), String(r.len||""), String(r.pcs||"")].join("|"))
+    .sort()
+    .join("\n");
+}
+async function getPlanSig(){
+  try{ const r=await sql`select sig from wheels_plan_sig where run_date=(now() at time zone 'Asia/Kolkata')::date`; return r[0]?r[0].sig:null; }catch(e){ return null; }
+}
+async function setPlanSig(sig){
+  try{ await sql`insert into wheels_plan_sig (run_date, sig, ts) values ((now() at time zone 'Asia/Kolkata')::date, ${sig}, now())
+                 on conflict (run_date) do update set sig=excluded.sig, ts=now()`; }catch(e){}
+}
+async function planSendUpdatedEmail(req, M){
+  const recips = await wheelsRecipients();
+  const to = recipientEmails(recips, "pp_email");
+  if(!to.length){ await logSend({report:'plan_update',channel:'email',status:'skipped',detail:'no recipients ticked for Production Plan email'}); return { skipped:'no email recipients' }; }
+  const html = await buildWheelsPlanHtml(M, true);
+  try{
+    await sendWheelsMail(to, [], html, "Updated Wheels India Production Plan — "+new Date().toLocaleDateString("en-IN"), null);
+    await logSend({report:'plan_update',channel:'email',status:'ok',total:to.length,ok:to.length,fail:0,detail:to.length+' recipient(s): '+to.join(', ')});
+    return { ok:true, sent_to:to };
+  }catch(e){
+    await logSend({report:'plan_update',channel:'email',status:'fail',total:to.length,ok:0,fail:to.length,detail:String(e.message||e)});
+    return { error:String(e.message||e) };
+  }
+}
+async function planSendUpdatedWhatsapp(req, M){
+  const tmpl = process.env.WHEELS_WA_UPDATED_PLAN_TEMPLATE;
+  if(!tmpl){ await logSend({report:'plan_update',channel:'whatsapp',status:'skipped',detail:'WHEELS_WA_UPDATED_PLAN_TEMPLATE not set'}); return { skipped:'WHEELS_WA_UPDATED_PLAN_TEMPLATE not set' }; }
+  const recips = await wheelsRecipients();
+  const nums = recipientMobiles(recips, "pp_wa");
+  if(!nums.length){ await logSend({report:'plan_update',channel:'whatsapp',status:'skipped',detail:'no recipients ticked for Production Plan WhatsApp'}); return { skipped:'no whatsapp recipients' }; }
+  const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
+  const url = base + "/wheels-plan.png?d=" + imgStamp();
+  await renderAndCachePng("plan").catch(()=>{});
+  // {{1}} = today's date + the revision time (IST), so multiple same-day updates are distinguishable
+  const whenIST = new Date().toLocaleString("en-IN",{ timeZone:"Asia/Kolkata", day:"2-digit", month:"short", year:"numeric", hour:"2-digit", minute:"2-digit", hour12:true });
+  const params = [{ name:"report", value:url }, { name:"1", value:whenIST }];
+  const sent = [];
+  for(const num of nums){ try{ const r = await sendRetry(num, tmpl, params); sent.push({ num, ...(r||{ok:true}) }); }catch(e){ sent.push({ num, error:String(e.message||e) }); } }
+  await logSend({ report:'plan_update', channel:'whatsapp', ...waSummary(sent, nameByMobile(recips)) });
+  return { ok:true, url, template:tmpl, sent };
+}
 async function handlerWheels(req, res){
   if (cors(req, res)) return;
   try{
     await ensureWheelsTable();
     // GET /api/wheels?fmt=pdf  ->  the statement as a PDF (same data/structure as the email).
     // Public, no-auth: this is the URL WATI fetches for the WhatsApp document template.
-    const fmt = (req.query && req.query.fmt) || ((/[?&]fmt=(pdf|xlsx|stockpng|prodpdf|prodpng|dailypng|planpng|planpdf|plancron|wadiag|sendlog)\b/.exec(req.url || "")) || [])[1] || "";
+    const fmt = (req.query && req.query.fmt) || ((/[?&]fmt=(pdf|xlsx|stockpng|prodpdf|prodpng|dailypng|planpng|planpdf|plancron|planupdate|wadiag|sendlog)\b/.exec(req.url || "")) || [])[1] || "";
     if (req.method === "GET" && fmt === "pdf"){
       const pdf = await buildWheelsPdf();
       res.setHeader("Content-Type", "application/pdf");
@@ -817,7 +868,32 @@ async function handlerWheels(req, res){
       if (ist.getHours()*60 + ist.getMinutes() < 9*60+30) return json(res, 200, { ok: true, waiting: "before 9:30 IST", ist_time: ist.getHours()+":"+String(ist.getMinutes()).padStart(2,"0") });
       const email = await planSendEmail(req, true);
       const whatsapp = await planSendWhatsapp(req, true);
+      try { await setPlanSig(planSignature(await planModel())); } catch(e){} // baseline so later changes trigger an Updated send
       return json(res, 200, { ok: true, date: todayIso, email, whatsapp });
+    }
+    // Updated Production Plan — re-send when today's cutting program changes after the morning send.
+    // Called by the SAP-side plan_watch trigger the moment a new program is raised. Guarded by CRON_SECRET.
+    // Compares today's plan to the last-sent signature; sends only on a real change (no spam on repeat calls).
+    if (req.method === "GET" && fmt === "planupdate"){
+      const auth = req.headers.authorization || "";
+      if (!process.env.CRON_SECRET) return json(res, 503, { error: "CRON_SECRET not set" });
+      if (auth !== "Bearer " + process.env.CRON_SECRET) return json(res, 401, { error: "unauthorized" });
+      const ist = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+      const todayIso = ist.getFullYear() + "-" + String(ist.getMonth()+1).padStart(2,"0") + "-" + String(ist.getDate()).padStart(2,"0");
+      if (ist.getDay() === 0) return json(res, 200, { ok: true, skipped: "Sunday" });
+      let hol = []; try { const s = await sql`select holidays from wheels_settings where id=1`; hol = (s[0]?.holidays) || []; } catch(e){}
+      if (hol.includes(todayIso)) return json(res, 200, { ok: true, skipped: "holiday " + todayIso });
+      const M = await planModel();
+      if (!(M.plan && M.plan.length)) return json(res, 200, { ok: true, skipped: "no plan rows for today" });
+      const sig = planSignature(M);
+      const prev = await getPlanSig();
+      // Before 9:30 IST, or if no baseline yet today, just seed the baseline — the 9:30 cron sends the first plan.
+      if (prev === null || ist.getHours()*60 + ist.getMinutes() < 9*60+30) { await setPlanSig(sig); return json(res, 200, { ok: true, seeded: true }); }
+      if (prev === sig) return json(res, 200, { ok: true, unchanged: true });
+      const email = await planSendUpdatedEmail(req, M);
+      const whatsapp = await planSendUpdatedWhatsapp(req, M);
+      await setPlanSig(sig);
+      return json(res, 200, { ok: true, updated: true, date: todayIso, email, whatsapp });
     }
     // Delivery log: recent WhatsApp/email send results for the daily reminders (read by wheels/log.html).
     if (req.method === "GET" && fmt === "sendlog"){
@@ -836,6 +912,8 @@ async function handlerWheels(req, res){
         WHEELS_WA_TEMPLATE: process.env.WHEELS_WA_TEMPLATE || null,
         WHEELS_WA_PROD_TEMPLATE: process.env.WHEELS_WA_PROD_TEMPLATE || null,
         WHEELS_WA_DAILY_TEMPLATE: process.env.WHEELS_WA_DAILY_TEMPLATE || null,
+        WHEELS_WA_PLAN_TEMPLATE: process.env.WHEELS_WA_PLAN_TEMPLATE || null,
+        WHEELS_WA_UPDATED_PLAN_TEMPLATE: process.env.WHEELS_WA_UPDATED_PLAN_TEMPLATE || null,
         WATI_API_URL: !!watiBase(),
         WATI_key_present: !!watiKey(),
         CRON_SECRET_present: !!process.env.CRON_SECRET,
@@ -1047,7 +1125,7 @@ async function handlerWheels(req, res){
         const url = base + "/daily-stock.png?d=" + imgStamp();
         await renderAndCachePng("daily").catch(()=>{}); // pre-build so Meta's image fetch is instant (prevents silent drops)
         const sent = [];
-        for (const num of nums) { try { const r = await sendRetry(num, tmpl, [{ name: "report", value: url }]); sent.push({ num, ...(r || { ok: true }) }); } catch (e) { sent.push({ num, error: String(e.message || e) }); } }
+        for (const num of nums) { try { const r = await sendRetry(num, tmpl, [{ name: "report", value: url }, { name: "1", value: waToday() }]); sent.push({ num, ...(r || { ok: true }) }); } catch (e) { sent.push({ num, error: String(e.message || e) }); } }
         await logSend({ report:'daily_stock', channel:'whatsapp', ...waSummary(sent, nameByMobile(recips)) });
         return json(res, 200, { ok: true, url, template: tmpl, sent });
       }
@@ -1064,7 +1142,7 @@ async function handlerWheels(req, res){
         const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
         const url = base + "/daily-stock.png?d=" + imgStamp();
         const sent = [];
-        try { const r = await send(num, tmpl, [{ name: "report", value: url }]); sent.push({ num, ...(r || { ok: true }) }); } catch (e) { sent.push({ num, error: String(e.message || e) }); }
+        try { const r = await send(num, tmpl, [{ name: "report", value: url }, { name: "1", value: waToday() }]); sent.push({ num, ...(r || { ok: true }) }); } catch (e) { sent.push({ num, error: String(e.message || e) }); }
         return json(res, 200, { ok: true, url, template: tmpl, sent });
       }
       // Daily Stock email — test send from the settings page
@@ -1794,12 +1872,14 @@ function planTableHtml(list){
     <tr style="background:#0e2a47;color:#fff;font-weight:bold"><td colspan="4" style="padding:6px 8px">TOTAL - ${list.length} item(s)</td><td align="right" style="padding:6px 8px">${tot.toFixed(2)}</td><td colspan="2" style="padding:6px 8px"></td></tr>
     </tbody></table>`;
 }
-async function buildWheelsPlanHtml(M){
+async function buildWheelsPlanHtml(M, updated){
   M = M || await planModel();
+  const nowIST = new Date().toLocaleString("en-IN",{timeZone:"Asia/Kolkata",hour:"2-digit",minute:"2-digit"});
   return `<div style="font-family:Arial,sans-serif;color:#1a2634">
-    <div style="background:#0e2a47;color:#fff;padding:14px 16px;border-radius:8px">
-      <div style="font-size:20px;font-weight:bold">Wheels India Production Plan</div>
+    <div style="background:${updated?"#8a1c1c":"#0e2a47"};color:#fff;padding:14px 16px;border-radius:8px">
+      <div style="font-size:20px;font-weight:bold">${updated?"Updated Wheels India Production Plan":"Wheels India Production Plan"}</div>
       <div style="font-size:12px;opacity:.85">Bharat Steel (Chennai) Pvt. Ltd. &middot; Qty approx. in MT</div></div>
+    ${updated?`<p style="background:#fdecea;color:#8a1c1c;font-weight:bold;padding:8px 12px;border:1px solid #f3b6b0;border-radius:6px;margin:10px 0 4px">This is an UPDATED plan for ${M.planDate}, revised at ${nowIST} IST — it replaces the earlier plan sent today.</p>`:""}
     <p style="font-size:12px;color:#667">Date of report: ${M.asof}. Approx. quantities rounded to 2 decimals (MT).</p>
     <h3 style="color:#0e2a47;margin:14px 0 6px">Processing Plan (${M.planDate})</h3>
     ${M.plan.length ? planTableHtml(M.plan) : `<p style="background:#fff7ec;color:#8a5b00;font-weight:bold;padding:10px 12px;border:1px solid #f0dc9a;border-radius:6px;margin:0">No Production planned on ${M.planDate}</p>`}

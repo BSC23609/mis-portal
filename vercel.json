@@ -42,6 +42,10 @@
       "destination": "/api/index?route=wheels&fmt=plancron"
     },
     {
+      "source": "/api/plan-update",
+      "destination": "/api/index?route=wheels&fmt=planupdate"
+    },
+    {
       "source": "/wheels-plan.pdf",
       "destination": "/api/index?route=wheels&fmt=planpdf"
     },
