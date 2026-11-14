@@ -35,7 +35,7 @@
       <table class="rc">
         <thead><tr>
           <th>Name</th><th>Email</th><th>Group</th><th>Number</th>
-          <th class="ck">Job Work<br>Stock</th><th class="ck">Daily<br>Stock</th><th class="ck">Daily<br>Production</th><th class="ck">Production<br>Plan</th><th></th>
+          <th class="ck">Job Work<br>Stock<br><button type="button" onclick="sendNow('jw',this)" style="margin-top:5px;font-size:10px;padding:3px 7px;background:#128c7e;color:#fff;border:none;border-radius:4px;cursor:pointer;white-space:nowrap">Send now</button></th><th class="ck">Daily<br>Stock<br><button type="button" onclick="sendNow('ds',this)" style="margin-top:5px;font-size:10px;padding:3px 7px;background:#128c7e;color:#fff;border:none;border-radius:4px;cursor:pointer;white-space:nowrap">Send now</button></th><th class="ck">Daily<br>Production<br><button type="button" onclick="sendNow('dp',this)" style="margin-top:5px;font-size:10px;padding:3px 7px;background:#128c7e;color:#fff;border:none;border-radius:4px;cursor:pointer;white-space:nowrap">Send now</button></th><th class="ck">Production<br>Plan<br><button type="button" onclick="sendNow('pp',this)" style="margin-top:5px;font-size:10px;padding:3px 7px;background:#128c7e;color:#fff;border:none;border-radius:4px;cursor:pointer;white-space:nowrap">Send now</button></th><th></th>
         </tr></thead>
         <tbody id="rcRows"></tbody>
         <tfoot><tr id="rcAdd">
@@ -308,6 +308,19 @@ async function sendPlanWaTest(){
     if(r.skipped){ msg.style.color='var(--gray)'; msg.textContent='• '+r.skipped; } else{ const s=(r.sent||[])[0]||{}; if(s.error){ msg.style.color='var(--red)'; msg.textContent='✗ '+s.error; } else{ msg.style.color='var(--good)'; msg.textContent='✓ Sent to '+(s.num||to); } }
   }catch(e){ msg.style.color='var(--red)'; msg.textContent='✗ '+e.message; }
   finally{ b.disabled=false; b.textContent='Send test WhatsApp'; }
+}
+async function sendNow(rep, btn){
+  const names={jw:'Job Work Stock',ds:'Daily Stock',dp:'Daily Production',pp:'Production Plan'};
+  if(!confirm('Send the '+names[rep]+' report NOW on email + WhatsApp (updated with current date & time) to everyone configured for it?')) return;
+  const old=btn.textContent; btn.disabled=true; btn.textContent='Sending…';
+  try{
+    const r=await post({send_now:true, report:rep});
+    const lines=[names[rep]+' — sent:'];
+    const e=r.email||{}; if(e.skipped) lines.push('Email: '+e.skipped); else if(e.error) lines.push('Email ✗ '+e.error); else lines.push('Email ✓ '+((e.sent_to||[]).length)+' recipient(s)');
+    const w=r.whatsapp||{}; if(w.skipped) lines.push('WhatsApp: '+w.skipped); else if(w.error) lines.push('WhatsApp ✗ '+w.error); else { const s=w.sent||[]; const ok=s.filter(x=>!x.error).length, fail=s.length-ok; lines.push('WhatsApp ✓ '+ok+' ok'+(fail?(', '+fail+' failed: '+s.filter(x=>x.error).map(x=>x.num+' '+x.error).join('; ')):'')); }
+    alert(lines.join('\n'));
+  }catch(e){ alert('Send failed: '+e.message); }
+  finally{ btn.disabled=false; btn.textContent=old; }
 }
 async function sendPlanUpdateTest(){
   const email=$('planTestTo').value.trim(); const num=$('planWaTestTo').value.trim();

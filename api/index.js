@@ -5,6 +5,8 @@
 // build 2026-11-14a — Updated Production Plan: planupdate endpoint + sig store + updated email/WA senders (marker: BUILD-1114A)
 // build 2026-11-14b — Updated plan WhatsApp {{1}} now carries date + revision time IST (marker: BUILD-1114B)
 // build 2026-11-14c — manual "Send Updated Plan now" test (plan_update_test) + settings button (marker: BUILD-1114C)
+// build 2026-11-14d — "Send now" per report (send_now) -> WhatsApp to all ticked recipients, + recipients-table buttons (marker: BUILD-1114D)
+// build 2026-11-14e — Send now sends BOTH email + WhatsApp, stamped current date&time (marker: BUILD-1114E)
 
 // lib/db.js
 import { neon } from "@neondatabase/serverless";
@@ -1008,6 +1010,73 @@ async function handlerWheels(req, res){
         try { const r = await send(num, tmpl, [{ name: "report", value: img }, { name: "1", value: waToday() }]); sent.push({ num, ...(r || { ok: true }) }); }   // image header "report" + body {{1}} = today's date
         catch (e) { sent.push({ num, error: String(e.message || e) }); }
         return json(res, 200, { ok: true, image: img, pdf: base + "/wheels.pdf", xlsx: base + "/wheels.xlsx", template: tmpl, sent });
+      }
+      // "Send now" from the Recipients table — push a report NOW on BOTH email + WhatsApp, to everyone
+      // configured for it, stamped with the current date & time ("Updated"). Settings-page authenticated.
+      if (body.send_now) {
+        const rep = String(body.report || "");
+        if (!["jw","ds","dp","pp"].includes(rep)) return json(res, 400, { error: "unknown report" });
+        const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
+        const nowIST = new Date().toLocaleString("en-IN",{ timeZone:"Asia/Kolkata", day:"2-digit", month:"short", year:"numeric", hour:"2-digit", minute:"2-digit", hour12:true });
+        const stamp = new Date().toISOString().slice(0,10).replace(/-/g,"");
+        // WhatsApp to all ticked recipients for this report; {{1}} (when present) = current date+time.
+        async function waBlast(env, flag, img, cache, logrep, dateMode){
+          const tmpl = process.env[env]; if(!tmpl) return { skipped: env+" not set on server" };
+          if(!watiBase() || !watiKey()) return { skipped:"WATI not configured on server" };
+          const recips = await wheelsRecipients(); const nums = recipientMobiles(recips, flag);
+          if(!nums.length) return { skipped:"no recipients ticked for WhatsApp" };
+          const url = base + img + "?d=" + imgStamp(); await renderAndCachePng(cache).catch(()=>{});
+          const params = [{ name:"report", value:url }];
+          if(dateMode==='now') params.push({ name:"1", value:nowIST });
+          else if(dateMode==='plan') params.push({ name:"1", value:(await planModel()).planDate });
+          const sent=[]; for(const num of nums){ try{ const r=await sendRetry(num,tmpl,params); sent.push({ num, ...(r||{ok:true}) }); }catch(e){ sent.push({ num, error:String(e.message||e) }); } }
+          await logSend({ report:logrep, channel:'whatsapp', ...waSummary(sent, nameByMobile(recips)) });
+          return { count:nums.length, sent };
+        }
+        const out = { report: rep };
+        try {
+          if (rep==='jw'){
+            // email
+            try {
+              const r=await sql`select mail_to, mail_cc, mail_body from wheels_settings where id=1`; const s2=r[0]||{}; const to=(s2.mail_to||[]);
+              if(!to.length) out.email={ skipped:"no email recipients saved" };
+              else { const { html, rows:wrows } = await renderWheelsHtml(base, new Set(), s2.mail_body||"");
+                let attach=null; try{ attach={ name:"WheelsIndia_Stock_"+stamp+".xlsx", b64: await buildWheelsXlsx(wrows) }; }catch(e){}
+                await sendWheelsMail(to, (s2.mail_cc||[]), html, "Updated — Wheels India Job Work Stock Statement — "+nowIST, attach);
+                await logSend({report:'wheels_stock',channel:'email',status:'ok',total:to.length,ok:to.length,fail:0,detail:'Send now: '+to.length+' recipient(s): '+to.join(', ')});
+                out.email={ sent_to:to }; }
+            } catch(e){ out.email={ error:String(e.message||e) }; }
+            out.whatsapp=await waBlast("WHEELS_WA_TEMPLATE","jw_wa","/wheels.png","stock","wheels_stock","now").catch(e=>({error:String(e.message||e)}));
+          } else if (rep==='ds'){
+            try {
+              const r=await sql`select mgmt_mail_to from wheels_settings where id=1`; const to=(r[0]?.mgmt_mail_to)||[];
+              if(!to.length) out.email={ skipped:"no email recipients saved" };
+              else { const png=(await buildDailyStockPng()).toString("base64");
+                const html=`<p>Dear Team,</p><p>Updated Company-wide Daily Stock report as on <b>${nowIST}</b>:</p><img src="cid:dailyimg" style="max-width:100%;border:1px solid #d0d7dd"/><p>Bharat Steel (Chennai) Pvt. Ltd.</p>`;
+                await sendWheelsMail(to, [], html, "Updated — BSC Daily Stock Report — "+nowIST, { name:"BSC_DailyStock_"+stamp+".png", b64:png, contentType:"image/png", cid:"dailyimg" });
+                await logSend({report:'daily_stock',channel:'email',status:'ok',total:to.length,ok:to.length,fail:0,detail:'Send now: '+to.length+' recipient(s): '+to.join(', ')});
+                out.email={ sent_to:to }; }
+            } catch(e){ out.email={ error:String(e.message||e) }; }
+            out.whatsapp=await waBlast("WHEELS_WA_DAILY_TEMPLATE","ds_wa","/daily-stock.png","daily","daily_stock","now").catch(e=>({error:String(e.message||e)}));
+          } else if (rep==='dp'){
+            try {
+              const r=await sql`select prod_mail_to, prod_format from wheels_settings where id=1`; const s7=r[0]||{}; const to=(s7.prod_mail_to||[]);
+              if(!to.length) out.email={ skipped:"no email recipients saved" };
+              else { let attach, html;
+                if(s7.prod_format==="pdf"){ attach={ name:"WheelsIndia_Production_"+stamp+".pdf", b64:(await buildWheelsProdPdf()).toString("base64"), contentType:"application/pdf" }; html=`<p>Dear Team,</p><p>Updated Wheels India Production Report as on <b>${nowIST}</b> (PDF attached).</p><p>Bharat Steel (Chennai) Pvt. Ltd.</p>`; }
+                else { attach={ name:"WheelsIndia_Production_"+stamp+".png", b64:(await buildWheelsProdPng()).toString("base64"), contentType:"image/png", cid:"prodimg" }; html=`<p>Dear Team,</p><p>Updated Wheels India Production Report as on <b>${nowIST}</b>:</p><img src="cid:prodimg" style="max-width:100%;border:1px solid #d0d7dd"/><p>Bharat Steel (Chennai) Pvt. Ltd.</p>`; }
+                await sendWheelsMail(to, [], html, "Updated — Wheels India Production Report — "+nowIST, attach);
+                await logSend({report:'production',channel:'email',status:'ok',total:to.length,ok:to.length,fail:0,detail:'Send now: '+to.length+' recipient(s): '+to.join(', ')});
+                out.email={ sent_to:to }; }
+            } catch(e){ out.email={ error:String(e.message||e) }; }
+            out.whatsapp=await waBlast("WHEELS_WA_PROD_TEMPLATE","dp_wa","/wheels-production.png","production","production","none").catch(e=>({error:String(e.message||e)}));
+          } else if (rep==='pp'){
+            const M=await planModel();
+            out.email=await planSendUpdatedEmail(req, M).catch(e=>({error:String(e.message||e)}));
+            out.whatsapp=await planSendUpdatedWhatsapp(req, M).catch(e=>({error:String(e.message||e)}));
+          }
+        } catch(e){ return json(res, 500, { error:String(e.message||e) }); }
+        return json(res, 200, { ok:true, ...out });
       }
       // Production WhatsApp — daily trigger (CRON_SECRET). Template WHEELS_WA_PROD_TEMPLATE, numbers from prod_wa_to,
       // media = /wheels-production.(png|pdf) per prod_format. Header variable must be named "report".
