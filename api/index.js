@@ -4,6 +4,7 @@
 // build 2026-11-13a — daily-stock WhatsApp body {{1}}=today date too (marker: BUILD-1113A)
 // build 2026-11-14a — Updated Production Plan: planupdate endpoint + sig store + updated email/WA senders (marker: BUILD-1114A)
 // build 2026-11-14b — Updated plan WhatsApp {{1}} now carries date + revision time IST (marker: BUILD-1114B)
+// build 2026-11-14c — manual "Send Updated Plan now" test (plan_update_test) + settings button (marker: BUILD-1114C)
 
 // lib/db.js
 import { neon } from "@neondatabase/serverless";
@@ -1108,6 +1109,43 @@ async function handlerWheels(req, res){
         const html = await buildWheelsPlanHtml();
         await sendWheelsMail(to, [], html, (body.test_to?"[TEST] ":"")+"Wheels India — Production Plan — "+new Date().toLocaleDateString("en-IN"), null);
         return json(res, 200, { ok:true, sent_to:to });
+      }
+      // Updated Production Plan — manual "Send now" test from the settings page (no CRON_SECRET).
+      // Sends the UPDATED-plan WhatsApp + email to a test number/email, bypassing the change check,
+      // so you can preview it without raising a real cutting program. Does not touch the daily baseline.
+      if (body.plan_update_test) {
+        const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
+        const recips = await wheelsRecipients();
+        const M = await planModel();
+        const out = {};
+        // WhatsApp (updated-plan template)
+        const tmpl = process.env.WHEELS_WA_UPDATED_PLAN_TEMPLATE;
+        let num = String(body.plan_update_test_to || "").trim();
+        if (!num) num = recipientMobiles(recips, "pp_wa")[0] || "";
+        if (!tmpl) out.whatsapp = { skipped: "WHEELS_WA_UPDATED_PLAN_TEMPLATE not set on server" };
+        else if (!watiBase() || !watiKey()) out.whatsapp = { skipped: "WATI not configured on server" };
+        else if (!num) out.whatsapp = { skipped: "no test number (enter one or tick someone for Production Plan WhatsApp)" };
+        else {
+          const url = base + "/wheels-plan.png?d=" + imgStamp();
+          await renderAndCachePng("plan").catch(()=>{});
+          const whenIST = new Date().toLocaleString("en-IN",{ timeZone:"Asia/Kolkata", day:"2-digit", month:"short", year:"numeric", hour:"2-digit", minute:"2-digit", hour12:true });
+          const params = [{ name:"report", value:url }, { name:"1", value:whenIST }];
+          const sent = [];
+          try { const r = await send(num, tmpl, params); sent.push({ num, ...(r || { ok:true }) }); } catch(e){ sent.push({ num, error:String(e.message||e) }); }
+          out.whatsapp = { template: tmpl, sent };
+        }
+        // Email (updated-plan HTML with the red UPDATED banner)
+        const toInput = String(body.plan_update_test_email || "").trim();
+        const toList = toInput ? [toInput] : recipientEmails(recips, "pp_email");
+        if (!toList.length) out.email = { skipped: "no test email (enter one or tick someone for Production Plan email)" };
+        else {
+          try {
+            const html = await buildWheelsPlanHtml(M, true);
+            await sendWheelsMail(toList, [], html, "[TEST] Updated Wheels India Production Plan — "+new Date().toLocaleDateString("en-IN"), null);
+            out.email = { sent_to: toList };
+          } catch(e){ out.email = { error: String(e.message||e) }; }
+        }
+        return json(res, 200, { ok:true, test:true, ...out });
       }
       // Daily Stock (company-wide) WhatsApp — daily trigger (CRON_SECRET). Goes to Management only.
       // Template WHEELS_WA_DAILY_TEMPLATE (image header, variable "report" = /daily-stock.png).

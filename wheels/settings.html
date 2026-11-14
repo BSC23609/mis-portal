@@ -66,10 +66,10 @@
       <div class="hint">Plain text. Line breaks are preserved. The branded stock table is added automatically below this message.</div>
     </div>
     <div style="display:flex;gap:24px;flex-wrap:wrap">
-      <div class="fld"><label>Send time (IST)</label><input type="time" id="sendTime" value="10:00"/></div>
+      <div class="fld"><label>Send time (IST)</label><input type="time" id="sendTime" value="09:30"/></div>
       <div class="fld"><label>Daily reports</label>
         <div class="toggle"><input type="checkbox" id="enabled"/> <span>enabled</span></div>
-        <div class="hint">Master switch — turn off to pause the 10 AM sends without removing recipients.</div>
+        <div class="hint">Master switch — turn off to pause the 9:30 AM sends without removing recipients.</div>
       </div>
       <div class="fld"><label>Production report format</label>
         <select id="prodFormat" style="max-width:220px"><option value="image">Image (PNG)</option><option value="pdf">PDF</option></select>
@@ -137,6 +137,9 @@
         <div class="fld"><label>Test WhatsApp to</label><input type="text" id="planWaTestTo" placeholder="919500680093"/>
           <button class="pbtn" style="margin-top:8px;background:#128c7e;border-color:#128c7e" id="planWaBtn" onclick="sendPlanWaTest()">Send test WhatsApp</button>
           <span class="saved" id="savedLW"></span></div>
+        <div class="fld"><button class="pbtn" style="margin-top:4px;background:#8a1c1c;border-color:#8a1c1c" id="planUpdBtn" onclick="sendPlanUpdateTest()">Send Updated Plan now (test)</button>
+          <span class="saved" id="savedPU"></span>
+          <div style="font-size:11px;color:var(--gray);margin-top:4px">Uses the test email / WhatsApp number above. Sends the "Updated Production Plan" on both, right now, without raising a real cutting program.</div></div>
       </div>
     </div>
   </div>
@@ -305,6 +308,19 @@ async function sendPlanWaTest(){
     if(r.skipped){ msg.style.color='var(--gray)'; msg.textContent='• '+r.skipped; } else{ const s=(r.sent||[])[0]||{}; if(s.error){ msg.style.color='var(--red)'; msg.textContent='✗ '+s.error; } else{ msg.style.color='var(--good)'; msg.textContent='✓ Sent to '+(s.num||to); } }
   }catch(e){ msg.style.color='var(--red)'; msg.textContent='✗ '+e.message; }
   finally{ b.disabled=false; b.textContent='Send test WhatsApp'; }
+}
+async function sendPlanUpdateTest(){
+  const email=$('planTestTo').value.trim(); const num=$('planWaTestTo').value.trim();
+  if(!email && !num){ alert('Enter a test email and/or a test WhatsApp number in the Production Plan fields above'); return; }
+  const b=$('planUpdBtn'); b.disabled=true; b.textContent='Sending…';
+  const msg=$('savedPU'); msg.style.display='inline'; msg.style.color='var(--gray)'; msg.textContent='sending…';
+  try{ const r=await post({plan_update_test:true, plan_update_test_email:email, plan_update_test_to:num});
+    const parts=[];
+    const w=r.whatsapp||{}; if(w.skipped) parts.push('WA: '+w.skipped); else { const s=(w.sent||[])[0]||{}; parts.push(s.error?('WA ✗ '+s.error):('WA ✓ '+(s.num||num))); }
+    const e=r.email||{}; if(e.skipped) parts.push('Email: '+e.skipped); else if(e.error) parts.push('Email ✗ '+e.error); else parts.push('Email ✓ '+((e.sent_to||[]).join(', ')));
+    msg.style.color='var(--good)'; msg.textContent=parts.join('   |   ');
+  }catch(e){ msg.style.color='var(--red)'; msg.textContent='✗ '+e.message; }
+  finally{ b.disabled=false; b.textContent='Send Updated Plan now (test)'; }
 }
 load();
 </script>
