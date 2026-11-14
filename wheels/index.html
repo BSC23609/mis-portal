@@ -100,7 +100,7 @@
 </div>
 <script src="../_portal.js"></script>
 <script>
-const SEC=[['COIL','Coil Stock','#1367a6'],['PLATE','Plate Stock (WIP / FG)','#0e7a4b'],['STRIP','Strip / Blank Stock','#b5651d'],['SCRAP','Scrap','#8a1c1c']];
+const SEC=[['COIL','Coil Stock','#1367a6'],['PLATE','Plate Stock (WIP / FG)','#0e7a4b'],['ENDBITP','Plate-End Bit','#5b6670'],['STRIP','Strip / Blank Stock','#b5651d'],['ENDBITS','Strip-End Bit','#7a4e24'],['SCRAP','Scrap','#8a1c1c']];
 const SMALL_PLATE=0.1, SMALL_STRIP=0.011;   // plate below 0.1 MT & strip below 0.011 MT hidden when the filter is on
 let ROWS=[], META={}, WORKED=[], PRODDAILY=[], HOLIDAYS=[];
 function showTab(t){
@@ -113,7 +113,7 @@ function showTab(t){
 // rows to display: optionally drop plate/strip under 0.1 MT
 function viewRows(){
   if(!$('hideSmall').checked) return ROWS;
-  return ROWS.filter(r=>!((r.form==='PLATE'&&r.Quantity<SMALL_PLATE)||(r.form==='STRIP'&&r.Quantity<SMALL_STRIP)));
+  return ROWS.filter(r=>!(((r.form==='PLATE'||r.form==='ENDBITP')&&r.Quantity<SMALL_PLATE)||((r.form==='STRIP'||r.form==='ENDBITS')&&r.Quantity<SMALL_STRIP)));
 }
 function onHideSmall(){
   try{ localStorage.setItem('wheelsHideSmall', $('hideSmall').checked?'1':'0'); }catch(e){}
@@ -125,6 +125,8 @@ function formOf(name){const n=(name||'').toUpperCase();
   if(n.includes('PLATE'))return 'PLATE';
   if(n.includes('COIL'))return 'COIL';
   return 'OTHER';}
+// end-bit = a Plate/Strip row with no usable Length ("—"); shown in its own section but still counted under its base form in brand totals
+function baseForm(f){return f==='ENDBITP'?'PLATE':f==='ENDBITS'?'STRIP':f;}
 const gnum=v=>{const n=parseFloat(v);return isNaN(n)?null:n;};
 const KNOWN_BRANDS=new Set(['JSW','WUHAN','AMNS','JSOL','HYUNDAI','TATA','SAIL','NMDC','POSCO','JINDAL']);
 function brandNorm(name){const w=(name||'').trim().split(/\s+/)[0].toUpperCase();return KNOWN_BRANDS.has(w)?w:'Others';}
@@ -145,7 +147,7 @@ async function load(){
     ]);
     WORKED=parseCSV(wk).map(r=>({Brand:brandNorm(r.Brand),Yr:+r.Yr,Mth:+r.Mth,Qty:gnum(r.Qty)||0}));
     PRODDAILY=parseCSV(pday); HOLIDAYS=(setJson&&setJson.holidays)||[];
-    ROWS=parseCSV(csv).map(r=>({...r,Quantity:gnum(r.Quantity)||0,form:formOf(r.ItemName)}));
+    ROWS=parseCSV(csv).map(r=>{const q=gnum(r.Quantity)||0;let form=formOf(r.ItemName);const noLen=!(gnum(r.Length)>0);if(form==='PLATE'&&noLen)form='ENDBITP';else if(form==='STRIP'&&noLen)form='ENDBITS';return {...r,Quantity:q,form};});
     const metaRaw=await fetch(DATA_BASE+'/wheels_meta.json'+b).then(r=>r.ok?r.json():{}).catch(()=>({}));
     META=metaRaw; setStamp(META.generated);
     draw();
@@ -165,10 +167,11 @@ function sectionTable(rows){
       <tr><th style="width:24px">#</th><th class="l">Mill</th><th class="l">Grade</th><th>Thk</th><th>Width</th><th>Length</th><th class="l">Coil / Batch No</th><th class="l">Mother Coil</th><th>Qty (MT)</th><th>Age (d)</th></tr>`;
     rs.forEach((x,i)=>{
       const mill=(x.ItemName||'').split(' ')[0];
-      const old=key==="PLATE" && (parseInt(x.AgeDays)||0)>=5;   // Plate only: 5 days and older -> red AGING CELL only
+      const thr=key==="PLATE"?5:(key==="ENDBITP"||key==="ENDBITS")?10:null;   // Plate >=5; Plate-End Bit & Strip-End Bit >=10 -> red AGING CELL only
+      const old=thr!==null && (parseInt(x.AgeDays)||0)>=thr;
       const ageS=old?'color:#c0392b;font-weight:700;background:#fdecea':'color:#888';
       html+=`<tr><td class="r" style="color:#888">${i+1}</td><td>${esc(mill)}</td><td>${esc(x.Grade)}</td>
-        <td class="r">${fdim(x.Thick)}</td><td class="r">${fdim(x.Width)}</td><td class="r">${flen(x.Length)}</td>
+        <td class="r">${fdim(x.Thick)}</td><td class="r">${fdim(x.Width)}</td><td class="r">${(key==='ENDBITP'||key==='ENDBITS')?'<b>EB</b>':flen(x.Length)}</td>
         <td class="mono">${esc(x.CoilNo||x.BatchNum)}${(+x.BatchCount>1)?` <span style=\"color:#999\">(${x.BatchCount} batches)</span>`:''}</td><td class="mono" style="color:#999">${esc(x.Mothercoil||'—')}</td>
         <td class="r" style="font-weight:600">${x.Quantity.toFixed(3)}</td><td class="r" style="${ageS}">${esc(x.AgeDays)}</td></tr>`;
     });
@@ -183,7 +186,7 @@ function renderByBrand(){
   const visible=viewRows();
   const forms=['COIL','PLATE','STRIP','SCRAP'];
   const b={};
-  visible.forEach(r=>{const br=brandNorm(r.ItemName);(b[br]??={COIL:0,PLATE:0,STRIP:0,SCRAP:0,tot:0});b[br][r.form]+=r.Quantity;b[br].tot+=r.Quantity;});
+  visible.forEach(r=>{const br=brandNorm(r.ItemName);const f=baseForm(r.form);(b[br]??={COIL:0,PLATE:0,STRIP:0,SCRAP:0,tot:0});b[br][f]+=r.Quantity;b[br].tot+=r.Quantity;});
   const brands=Object.keys(b).sort((x,y)=>b[y].tot-b[x].tot);
   const gt=brands.reduce((a,k)=>a+b[k].tot,0);
   $('byBrandSub').textContent=`${brands.length} brands · ${gt.toFixed(3)} MT`;
