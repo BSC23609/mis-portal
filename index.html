@@ -1,295 +1,995 @@
-<!DOCTYPE html><html lang="en"><head>
-<meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Wheels India — Stock Statement — Bharat Steel MIS</title><link rel="icon" type="image/png" href="BSC.png"/>
-<script>window.PORTAL={module:'wheels',screen:(location.hash==='#prod'?'prod':'report')}</script>
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Vehicle Movement Tracking</title>
+<link rel="icon" type="image/png" href="BSC.png"/>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,800&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
-  .sheet{background:#fff;border:1px solid #d0d7dd;border-radius:10px;overflow:hidden;margin:14px 0}
-  .shdr{background:#0e2a47;color:#fff;padding:14px 22px;display:flex;align-items:center;gap:16px}
-  .shdr img{height:42px;background:#fff;padding:5px 8px;border-radius:4px}
-  .shdr h1{margin:0;font-size:18px;font-weight:700}
-  .shdr .sub{font-size:12px;opacity:.85;margin-top:3px}
-  .smeta{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;padding:11px 22px;background:#f7f9fb;border-bottom:1px solid #e3e8ec;font-size:13px}
-  .smeta b{color:#0e2a47}
-  .swrap{padding:14px 22px 4px}
-  table.x{width:100%;border-collapse:collapse;font-size:12px}
-  table.x th{padding:5px 8px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#556;background:#eef3f7}
-  table.x th.l{text-align:left}
-  table.x td{padding:5px 8px;border-bottom:1px solid #eef1f3}
-  table.x td.r{text-align:right} table.x td.mono{font-family:var(--mono);font-size:11px}
-  table.x td.sec{color:#fff;font-weight:700;padding:7px 10px;font-size:13px}
-  table.x td.st{text-align:right;font-weight:700;padding:6px 10px;border-top:2px solid #333}
-  .sgt{margin:14px 22px;padding:12px 16px;background:#0e2a47;color:#fff;border-radius:5px;display:flex;justify-content:space-between;font-size:15px;font-weight:700}
-  .snote{margin:0 22px 14px;padding:9px 13px;background:#fff8e1;border:1px solid #f0dc9a;color:#6b5200;font-size:11px;border-radius:5px}
-  .sfoot{padding:16px 22px;font-size:11px;color:#667;border-top:1px solid #e3e8ec;line-height:1.6}
-  .toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:14px 0}
-  .toolbar .sp{margin-left:auto;display:flex;gap:8px}
-  .tabbar{display:flex;gap:6px;margin:14px 0 0}
-  .tabbtn{background:#fff;border:1px solid #cdd6df;color:#0e2a47;border-radius:7px;padding:7px 16px;font-weight:600;cursor:pointer}
-  .tabbtn.active{background:#0e2a47;border-color:#0e2a47;color:#fff}
+  :root {
+    --bg: #f4f6f9;
+    --panel: #ffffff;
+    --panel-2: #e9ecef;
+    --ink: #1a1d20;
+    --muted: #6c757d;
+    --line: #dee2e6;
+    --accent: #002b5f;
+    --accent-2: #C9A94E;
+    --accent-3: #0071ad;
+    --accent-4: #2a9d8f;
+    --danger: #dc3545;
+    --warning: #f0ad4e;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--bg); color: var(--ink); font-family: 'JetBrains Mono', monospace; font-size: 13px; min-height: 100vh; }
+  body {
+    background-image:
+      radial-gradient(ellipse at 10% 0%, rgba(0, 43, 95, .04), transparent 40%),
+      radial-gradient(ellipse at 90% 100%, rgba(201, 169, 78, .04), transparent 40%);
+  }
+  .wrap { max-width: 1500px; margin: 0 auto; padding: 28px 32px 60px; }
+  header { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 1px solid var(--line); padding-bottom: 22px; margin-bottom: 26px; flex-wrap: wrap; gap: 20px; }
+  .brand { display: flex; align-items: center; gap: 14px; }
+  .logo-img { height: 54px; width: auto; object-fit: contain; }
+  h1 { font-family: 'Fraunces', serif; font-weight: 800; font-size: 30px; letter-spacing: -.5px; line-height: 1; color: var(--ink); }
+  h1 span { color: var(--accent); }
+  .sub { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 2px; margin-top: 6px; }
+  .meta { text-align: right; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 1.5px; }
+  .meta b { color: var(--ink); font-weight: 600; }
+  .stale-banner { display:none; background:#fef3f2; border:1px solid #f5c6c2; color:#b42318; border-radius:6px; padding:12px 16px; margin-bottom:20px; font-size:13px; font-weight:500; letter-spacing:.2px; }
+  .stale-banner b { font-weight:700; }
+
+  .filters { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 20px; margin-bottom: 22px; display: grid; grid-template-columns: 1fr 1fr 1fr 1fr auto; gap: 18px; align-items: start; box-shadow: 0 2px 4px rgba(0,0,0,0.02); }
+
+  /* Date range bar */
+  .daterange { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 16px 20px; margin-bottom: 14px; display: flex; flex-wrap: wrap; gap: 14px 24px; align-items: end; box-shadow: 0 2px 4px rgba(0,0,0,0.02); }
+  .dr-shortcuts { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .dr-chip { background: var(--panel-2); border: 1px solid transparent; color: var(--ink); padding: 7px 14px; border-radius: 2px; font-size: 11px; cursor: pointer; font-family: inherit; text-transform: uppercase; letter-spacing: 1px; font-weight: 500; transition: all .15s; }
+  .dr-chip:hover { border-color: var(--accent); }
+  .dr-chip.active { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 600; }
+  .dr-pickers { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; margin-left: auto; }
+  .dr-field { display: flex; flex-direction: column; gap: 4px; }
+  .dr-field label { font-size: 9px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--muted); font-weight: 600; }
+  .dr-field select, .dr-field input[type="date"] { background: var(--panel-2); border: 1px solid transparent; color: var(--ink); padding: 7px 10px; font-family: inherit; font-size: 12px; border-radius: 2px; outline: none; min-width: 110px; }
+  .dr-field select:focus, .dr-field input[type="date"]:focus { border-color: var(--accent); background: var(--panel); }
+  .dr-apply { background: var(--accent-3); border: 1px solid var(--accent-3); color: #fff; padding: 7px 14px; font-family: inherit; font-size: 11px; text-transform: uppercase; letter-spacing: 1.2px; cursor: pointer; border-radius: 2px; font-weight: 600; transition: all .15s; height: 32px; }
+  .dr-apply:hover { background: #005a8c; border-color: #005a8c; }
+  .filter-group label { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: 2px; color: var(--muted); margin-bottom: 10px; font-weight: 600;}
+  .chip-row { display: flex; flex-wrap: wrap; gap: 6px; max-height: 96px; overflow-y: auto; padding-right: 4px; }
+  .chip-row::-webkit-scrollbar { width: 6px; }
+  .chip-row::-webkit-scrollbar-track { background: var(--panel-2); }
+  .chip-row::-webkit-scrollbar-thumb { background: var(--muted); border-radius: 3px; }
+  .chip { background: var(--panel-2); border: 1px solid transparent; color: var(--ink); padding: 6px 12px; border-radius: 2px; font-size: 11px; cursor: pointer; transition: all .15s; font-family: inherit; white-space: nowrap; }
+  .chip:hover { border-color: var(--accent); }
+  .chip.active { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 500; }
+  .search-input { width: 100%; background: var(--panel-2); border: 1px solid transparent; color: var(--ink); padding: 8px 12px; font-family: inherit; font-size: 12px; border-radius: 2px; margin-bottom: 8px; outline: none; }
+  .search-input:focus { border-color: var(--accent); background: var(--panel); }
+  .btn-col { display: flex; flex-direction: column; gap: 8px; align-self: end; }
+  .reset-btn, .refresh-btn { padding: 10px 18px; font-family: inherit; font-size: 11px; text-transform: uppercase; letter-spacing: 1.5px; cursor: pointer; border-radius: 2px; transition: all .15s; font-weight: 600; white-space: nowrap; }
+  .reset-btn { background: transparent; border: 1px solid var(--line); color: var(--ink); }
+  .reset-btn:hover { background: var(--danger); border-color: var(--danger); color: #fff; }
+  .refresh-btn { background: var(--accent); border: 1px solid var(--accent); color: #fff; }
+  .refresh-btn:hover { background: #001a3a; border-color: #001a3a; }
+  .refresh-btn:disabled { opacity: .5; cursor: wait; }
+
+  .kpis { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; margin-bottom: 22px; }
+  .kpi { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 20px; position: relative; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.02); }
+  .kpi::before { content: ''; position: absolute; top: 0; left: 0; width: 4px; height: 100%; background: var(--accent); }
+  .kpi:nth-child(2)::before { background: var(--accent-2); }
+  .kpi:nth-child(3)::before { background: var(--accent-3); }
+  .kpi:nth-child(4)::before { background: var(--accent-4); }
+  .kpi:nth-child(5)::before { background: var(--muted); }
+  .kpi-label { font-size: 10px; text-transform: uppercase; letter-spacing: 2px; color: var(--muted); margin-bottom: 12px; font-weight: 600; }
+  .kpi-value { font-family: 'Fraunces', serif; font-weight: 800; font-size: 36px; line-height: 1; letter-spacing: -1px; color: var(--accent); }
+  .kpi-unit { font-size: 14px; color: var(--muted); margin-left: 4px; font-weight: 400; font-family: 'JetBrains Mono', monospace; }
+  .kpi-sub { font-size: 10px; color: var(--muted); margin-top: 10px; letter-spacing: .5px; }
+
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 22px; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 22px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 22px; box-shadow: 0 2px 4px rgba(0,0,0,0.02); }
+  .panel-title { font-family: 'Fraunces', serif; font-weight: 600; font-size: 18px; margin-bottom: 4px; color: var(--accent); }
+  .panel-sub { font-size: 10px; text-transform: uppercase; letter-spacing: 2px; color: var(--muted); margin-bottom: 18px; }
+  .chart-wrap { position: relative; height: 280px; }
+
+  .table-wrap { max-height: 480px; overflow: auto; border: 1px solid var(--line); border-radius: 2px; }
+  .table-wrap::-webkit-scrollbar { width: 8px; height: 8px; }
+  .table-wrap::-webkit-scrollbar-track { background: var(--panel-2); }
+  .table-wrap::-webkit-scrollbar-thumb { background: var(--muted); border-radius: 3px; }
+  table { width: 100%; border-collapse: collapse; font-size: 11px; }
+  th { position: sticky; top: 0; background: var(--panel-2); text-align: left; padding: 9px 10px; font-weight: 600; color: var(--accent); text-transform: uppercase; letter-spacing: 1.2px; font-size: 9.5px; border-bottom: 1px solid var(--line); z-index: 1; white-space: nowrap; }
+  td { padding: 9px 10px; border-bottom: 1px solid var(--line); color: var(--ink); white-space: nowrap; }
+  tr:hover td { background: var(--panel-2); }
+  .num { font-variant-numeric: tabular-nums; text-align: right; }
+  .badge { display: inline-block; background: var(--bg); border: 1px solid var(--line); padding: 3px 8px; border-radius: 2px; font-size: 10px; color: var(--ink); font-weight: 500; }
+  .status-completed { color: #2a9d8f; font-weight: 600; }
+  .status-pending { color: var(--warning); font-weight: 600; }
+  .row-pending { background: rgba(240, 173, 78, .06); }
+
+  @media(max-width:1100px) {
+    .filters { grid-template-columns: 1fr 1fr; }
+    .kpis { grid-template-columns: repeat(3, 1fr); }
+    .dr-pickers { margin-left: 0; width: 100%; }
+  }
+  @media(max-width:760px) {
+    .grid, .grid-3 { grid-template-columns: 1fr; }
+    .filters { grid-template-columns: 1fr; }
+    .kpis { grid-template-columns: repeat(2, 1fr); }
+    .daterange { flex-direction: column; align-items: stretch; }
+  }
 </style>
-</head><body>
-<div class="pw">
-  <div id="errbox"></div>
-
-  <div class="tabbar">
-    <button class="tabbtn active" id="tabbtn-stock" onclick="showTab('stock')">Stock Statement</button>
-    <button class="tabbtn" id="tabbtn-prod" onclick="showTab('prod')">Production Report</button>
-  </div>
-
-  <div id="tabStock">
-  <div class="toolbar">
-    <label style="font-size:12px;color:var(--gray);display:flex;align-items:center;gap:6px">
-      <input type="checkbox" id="hideSmall" onchange="onHideSmall()"/> hide plate &lt;0.1 &amp; strip &lt;0.011 MT
-    </label>
-    <div class="sp">
-      <button class="pbtn" style="background:var(--blue);border-color:var(--blue)" onclick="window.print()">Print / Save PDF</button>
-      <a class="pbtn" style="background:var(--blue);border-color:var(--blue);text-decoration:none" href="settings.html">Settings</a>
-    </div>
-  </div>
-
-  <!-- A: current stock by brand -->
-  <div class="card">
-    <h3>Material held by brand <span class="r" id="byBrandSub"></span></h3>
-    <div class="tblwrap" id="byBrand"></div>
-  </div>
-
-  <!-- B: worked (dispatched back) by brand -->
-  <div class="card">
-    <h3>Material worked for Wheels India <span class="r">dispatched back · MT</span></h3>
-    <div class="filters" style="margin:0 0 10px">
-      <label>Period
-        <select id="workedPeriod" onchange="renderWorked()">
-          <option value="fy">This FY</option>
-          <option value="all">All time</option>
-        </select>
-      </label>
-      <label>View
-        <select id="workedView" onchange="renderWorked()">
-          <option value="total">Total by brand</option>
-          <option value="month">Month-wise by brand</option>
-        </select>
-      </label>
-      <span class="fcount" id="workedSub"></span>
-    </div>
-    <div class="tblwrap" id="workedTbl"></div>
-  </div>
-
-  <div class="sheet" id="sheet"></div>
-  </div><!-- /tabStock -->
-
-  <div id="tabProd" style="display:none">
-    <div class="toolbar"><div class="sp">
-      <button class="pbtn" style="background:var(--blue);border-color:var(--blue)" onclick="window.print()">Print / Save PDF</button>
-      <a class="pbtn" style="background:var(--blue);border-color:var(--blue);text-decoration:none" href="settings.html">Settings</a>
-    </div></div>
-    <div class="card">
-      <h3>Total Production Report <span class="r" id="prodRepSub"></span></h3>
-      <div class="tblwrap" id="prodTotal"></div>
-    </div>
-    <div class="card">
-      <h3>Wheels India Production Report <span class="r">WIR grades · MT</span></h3>
-      <div class="tblwrap" id="prodWheels"></div>
-    </div>
-    <div class="card">
-      <h3>Wheels India Monthly Production Report <span class="r">current year · MT</span></h3>
-      <div class="tblwrap" id="prodMonthly"></div>
-    </div>
-  </div>
-
-  <footer id="foot"></footer>
-</div>
+</head>
+<body>
+<script>window.PORTAL={module:"dispatch"}</script>
 <script src="../_portal.js"></script>
+<div class="wrap">
+
+  <header>
+    <div class="brand">
+      <img src="BSC.png" alt="Bharat Steel Logo" class="logo-img" onerror="this.style.display='none'"/>
+      <div>
+        <h1>Vehicle Movement <span>Tracking</span></h1>
+        <div class="sub" id="statusText">Loading data...</div>
+      </div>
+    </div>
+    <div class="meta">
+      Report Window · <b id="dateRange">—</b><br/>
+      Total Trips · <b id="totalTrips">—</b><br/>
+      Last Updated · <b id="lastUpdated">—</b>
+    </div>
+  </header>
+
+  <div class="stale-banner" id="staleBanner"></div>
+
+  <!-- Date range bar -->
+  <div class="daterange">
+    <div class="dr-shortcuts">
+      <button class="dr-chip" data-shortcut="yesterday">Yesterday</button>
+      <button class="dr-chip" data-shortcut="today">Today</button>
+      <button class="dr-chip" data-shortcut="week">This Week</button>
+      <button class="dr-chip active" data-shortcut="month">This Month</button>
+      <button class="dr-chip" data-shortcut="last30">Last 30 Days</button>
+      <button class="dr-chip" data-shortcut="custom">Custom</button>
+    </div>
+    <div class="dr-pickers">
+      <div class="dr-field">
+        <label>Month</label>
+        <select id="monthPicker">
+          <option value="">—</option>
+          <option value="0">January</option><option value="1">February</option>
+          <option value="2">March</option><option value="3">April</option>
+          <option value="4">May</option><option value="5">June</option>
+          <option value="6">July</option><option value="7">August</option>
+          <option value="8">September</option><option value="9">October</option>
+          <option value="10">November</option><option value="11">December</option>
+        </select>
+      </div>
+      <div class="dr-field">
+        <label>Year</label>
+        <select id="yearPicker"><option value="">—</option></select>
+      </div>
+      <div class="dr-field">
+        <label>From</label>
+        <input type="date" id="fromDate"/>
+      </div>
+      <div class="dr-field">
+        <label>To</label>
+        <input type="date" id="toDate"/>
+      </div>
+      <button class="dr-apply" id="applyRange">Apply</button>
+    </div>
+  </div>
+
+  <div class="filters">
+    <div class="filter-group">
+      <label>🏢 Customer</label>
+      <input type="text" class="search-input" id="custSearch" placeholder="Search..."/>
+      <div class="chip-row" id="custChips"></div>
+    </div>
+    <div class="filter-group">
+      <label>👤 Sales Employee</label>
+      <input type="text" class="search-input" id="empSearch" placeholder="Search..."/>
+      <div class="chip-row" id="empChips"></div>
+    </div>
+    <div class="filter-group">
+      <label>📦 Ship To</label>
+      <input type="text" class="search-input" id="shipSearch" placeholder="Search..."/>
+      <div class="chip-row" id="shipChips"></div>
+    </div>
+    <div class="filter-group">
+      <label>📍 Branch</label>
+      <div class="chip-row" id="branchChips"></div>
+    </div>
+    <div class="btn-col">
+      <button class="reset-btn" id="resetBtn">Reset All</button>
+    </div>
+  </div>
+
+  <div class="kpis">
+    <div class="kpi">
+      <div class="kpi-label">Avg Weighbridge Time</div>
+      <div class="kpi-value"><span id="kpiWTime">0</span><span class="kpi-unit">min</span></div>
+      <div class="kpi-sub">In → Out</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">Avg Billing Time</div>
+      <div class="kpi-value"><span id="kpiBTime">0</span><span class="kpi-unit">min</span></div>
+      <div class="kpi-sub">Out → Invoice</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">Total Cycle Time</div>
+      <div class="kpi-value"><span id="kpiTotal">0</span><span class="kpi-unit">min</span></div>
+      <div class="kpi-sub">In → Invoice</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">Total Tonnage</div>
+      <div class="kpi-value"><span id="kpiTonnage">0</span><span class="kpi-unit">MT</span></div>
+      <div class="kpi-sub">Sum of Net Weight</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">Trips</div>
+      <div class="kpi-value"><span id="kpiCount">0</span></div>
+      <div class="kpi-sub">Completed · <span id="kpiPending">0</span> pending</div>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="panel">
+      <div class="panel-title">Daily Averages</div>
+      <div class="panel-sub">Avg minutes per day · completed only</div>
+      <div class="chart-wrap"><canvas id="dailyChart"></canvas></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">Top Customers by Avg Cycle Time</div>
+      <div class="panel-sub">Top 10 · sorted by In → Invoice</div>
+      <div class="chart-wrap"><canvas id="custChart"></canvas></div>
+    </div>
+  </div>
+
+  <div class="grid-3">
+    <div class="panel">
+      <div class="panel-title">Daily Tonnage</div>
+      <div class="panel-sub">Total Net Weight (MT) per day</div>
+      <div class="chart-wrap"><canvas id="tonDailyChart"></canvas></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">Top Customers by Tonnage</div>
+      <div class="panel-sub">Top 10 · sum of Net Weight (MT)</div>
+      <div class="chart-wrap"><canvas id="tonCustChart"></canvas></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-title">Trip Records</div>
+    <div class="panel-sub">Filtered data · <span id="tblCount">0</span> rows</div>
+    <div class="table-wrap">
+      <table id="dataTable">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Status</th>
+            <th>Vehicle</th>
+            <th>Customer</th>
+            <th>Ship To</th>
+            <th>Sales Emp</th>
+            <th>Branch</th>
+            <th>In</th>
+            <th>Out</th>
+            <th>Invoice</th>
+            <th>Invoice #</th>
+            <th class="num">Net Wt</th>
+            <th class="num">W-Time</th>
+            <th class="num">B-Time</th>
+          </tr>
+        </thead>
+        <tbody id="tblBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
 <script>
-const SEC=[['COIL','Coil Stock','#1367a6'],['PLATE','Plate Stock (WIP / FG)','#0e7a4b'],['STRIP','Strip / Blank Stock','#b5651d'],['SCRAP','Scrap','#8a1c1c']];
-const SMALL_PLATE=0.1, SMALL_STRIP=0.011;   // plate below 0.1 MT & strip below 0.011 MT hidden when the filter is on
-let ROWS=[], META={}, WORKED=[], PRODDAILY=[], HOLIDAYS=[];
-function showTab(t){
-  $('tabStock').style.display = t==='prod'?'none':'';
-  $('tabProd').style.display  = t==='prod'?'':'none';
-  $('tabbtn-stock').classList.toggle('active', t!=='prod');
-  $('tabbtn-prod').classList.toggle('active', t==='prod');
-  try{ localStorage.setItem('wheelsTab', t); }catch(e){}
-  syncTopNav(t);
-}
-// keep the portal top sub-nav ("Stock Statement" / "Daily Production Report") in step with the in-page view
-function syncTopNav(t){
-  try{
-    document.querySelectorAll('.psub a').forEach(a=>{
-      const h=a.getAttribute('href')||'';
-      const isProd=/#prod$/.test(h), isStock=/index\.html$/.test(h);
-      a.classList.toggle('on', t==='prod' ? isProd : (isStock && !isProd));
-    });
-    const want = t==='prod'?'#prod':'';
-    if(location.hash!==want){ history.replaceState(null,'',location.pathname+location.search+want); }
-  }catch(e){}
-}
-window.addEventListener('hashchange',()=>{ showTab(location.hash==='#prod'?'prod':'stock'); });
-// rows to display: optionally drop plate/strip under 0.1 MT
-function viewRows(){
-  if(!$('hideSmall').checked) return ROWS;
-  return ROWS.filter(r=>!((r.form==='PLATE'&&r.Quantity<SMALL_PLATE)||(r.form==='STRIP'&&r.Quantity<SMALL_STRIP)));
-}
-function onHideSmall(){
-  try{ localStorage.setItem('wheelsHideSmall', $('hideSmall').checked?'1':'0'); }catch(e){}
-  draw();
-}
-function formOf(name){const n=(name||'').toUpperCase();
-  if(n.includes('SCRAP'))return 'SCRAP';
-  if(n.includes('BLANK')||n.includes('FLAT')||n.includes('STRIP'))return 'STRIP';
-  if(n.includes('PLATE'))return 'PLATE';
-  if(n.includes('COIL'))return 'COIL';
-  return 'OTHER';}
-const gnum=v=>{const n=parseFloat(v);return isNaN(n)?null:n;};
-const KNOWN_BRANDS=new Set(['JSW','WUHAN','AMNS','JSOL','HYUNDAI','TATA','SAIL','NMDC','POSCO','JINDAL']);
-function brandNorm(name){const w=(name||'').trim().split(/\s+/)[0].toUpperCase();return KNOWN_BRANDS.has(w)?w:'Others';}
-const fdim=v=>{const n=gnum(v);return n!==null?(''+ +n.toFixed(2)).replace(/\.00$/,''):'';};
-const flen=v=>{const n=gnum(v);return (n&&n>0)?(''+ +n.toFixed(0)):'—';};
+// ============ CONFIG ============
+const DATA_URL = 'data.csv';
+const SHEET_NAME_PREFERRED = null;  // not applicable for CSV; kept for compatibility
+const MAX_VALID_MINUTES = 720;       // 12 hours - drop rows above this from KPIs/charts (data entry errors)
 
-async function load(){
-  // default ON (hide sub-0.1 MT plate/strip); remember the user's choice per browser
-  try{ $('hideSmall').checked = (localStorage.getItem('wheelsHideSmall') ?? '1') !== '0'; }
-  catch(e){ $('hideSmall').checked = true; }
-  try{
-    const b='?t='+Date.now();
-    const [csv,wk,pday,setJson] = await Promise.all([
-      fetch(DATA_BASE+'/wheels_stock.csv'+b).then(r=>{if(!r.ok)throw 0;return r.text();}),
-      fetch(DATA_BASE+'/wheels_worked.csv'+b).then(r=>r.ok?r.text():'').catch(()=>''),
-      fetch(DATA_BASE+'/wheels_proddaily.csv'+b).then(r=>r.ok?r.text():'').catch(()=>''),
-      fetch(BASE+'/api/wheels?route=settings'+b).then(r=>r.ok?r.json():{}).catch(()=>({}))
-    ]);
-    WORKED=parseCSV(wk).map(r=>({Brand:brandNorm(r.Brand),Yr:+r.Yr,Mth:+r.Mth,Qty:gnum(r.Qty)||0}));
-    PRODDAILY=parseCSV(pday); HOLIDAYS=(setJson&&setJson.holidays)||[];
-    ROWS=parseCSV(csv).map(r=>({...r,Quantity:gnum(r.Quantity)||0,form:formOf(r.ItemName)}));
-    const metaRaw=await fetch(DATA_BASE+'/wheels_meta.json'+b).then(r=>r.ok?r.json():{}).catch(()=>({}));
-    META=metaRaw; setStamp(META.generated);
-    draw();
-    $('foot').textContent=`${ROWS.length} WH45 batches for Wheels India`;
-  }catch(e){ $('errbox').innerHTML='<div class="err">Couldn\'t load Wheels India stock — the refresh job may not have pushed yet.</div>'; }
-}
+let DATA = [];
+let ALL_DATES = [];
+let ALL_CUSTS = [];
+let ALL_EMPS  = [];
+let ALL_BRANCHES = [];
+let ALL_SHIPS = [];
 
-function sectionTable(rows){
-  let html='<div class="swrap"><table class="x">', gb=0, gq=0;
-  for(const [key,title,col] of SEC){
-    const _n=v=>{const n=parseFloat(v);return isNaN(n)?0:n;};
-    const _cmp=(a,b)=>(_n(b.AgeDays)-_n(a.AgeDays))||(_n(b.Thick)-_n(a.Thick))||(b.Quantity-a.Quantity); // every section: oldest (Aging) first
-    const rs=rows.filter(r=>r.form===key).sort(_cmp);
-    if(!rs.length) continue;
-    const tq=rs.reduce((a,r)=>a+r.Quantity,0); gb+=rs.length; gq+=tq;
-    html+=`<tr><td class="sec" colspan="10" style="background:${col}">${title}<span style="float:right">${rs.length} items · ${tq.toFixed(3)} MT</span></td></tr>
-      <tr><th style="width:24px">#</th><th class="l">Mill</th><th class="l">Grade</th><th>Thk</th><th>Width</th><th>Length</th><th class="l">Coil / Batch No</th><th class="l">Mother Coil</th><th>Qty (MT)</th><th>Age (d)</th></tr>`;
-    rs.forEach((x,i)=>{
-      const mill=(x.ItemName||'').split(' ')[0];
-      const old=key==="PLATE" && (parseInt(x.AgeDays)||0)>=5;   // Plate only: 5 days and older -> red AGING CELL only
-      const ageS=old?'color:#c0392b;font-weight:700;background:#fdecea':'color:#888';
-      html+=`<tr><td class="r" style="color:#888">${i+1}</td><td>${esc(mill)}</td><td>${esc(x.Grade)}</td>
-        <td class="r">${fdim(x.Thick)}</td><td class="r">${fdim(x.Width)}</td><td class="r">${flen(x.Length)}</td>
-        <td class="mono">${esc(x.CoilNo||x.BatchNum)}${(+x.BatchCount>1)?` <span style=\"color:#999\">(${x.BatchCount} batches)</span>`:''}</td><td class="mono" style="color:#999">${esc(x.Mothercoil||'—')}</td>
-        <td class="r" style="font-weight:600">${x.Quantity.toFixed(3)}</td><td class="r" style="${ageS}">${esc(x.AgeDays)}</td></tr>`;
-    });
-    html+=`<tr><td class="st" colspan="8">${title} total</td><td class="st r">${tq.toFixed(3)}</td><td class="st"></td></tr>`;
+// ============ FETCH & PARSE ============
+async function loadData() {
+  const statusEl = document.getElementById('statusText');
+  const btn = document.getElementById('refreshBtn'); // removed; may be null
+  if(btn){ /* refresh btn removed */ }
+  statusEl.innerText = 'Loading latest data...';
+  statusEl.style.color = 'var(--muted)';
+
+  try {
+    const url = `${DATA_URL}?t=${Date.now()}`;
+    const res = await fetch(url, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`HTTP ${res.status} — ${res.statusText}`);
+
+    const isCsv = /\.csv($|\?)/i.test(DATA_URL);
+    let rows;
+
+    if (isCsv) {
+      // CSV path: read as text, parse with SheetJS
+      let text = await res.text();
+      // Strip UTF-8 BOM if present so the first header key doesn't get corrupted
+      if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+      const wb = XLSX.read(text, { type: 'string', cellDates: false, raw: true });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      rows = XLSX.utils.sheet_to_json(ws, { raw: true, defval: null });
+    } else {
+      // XLSX path
+      const buf = await res.arrayBuffer();
+      const wb = XLSX.read(buf, { type: 'array', cellDates: false });
+      const sheetName = SHEET_NAME_PREFERRED && wb.Sheets[SHEET_NAME_PREFERRED]
+        ? SHEET_NAME_PREFERRED
+        : wb.SheetNames[0];
+      const ws = wb.Sheets[sheetName];
+      rows = XLSX.utils.sheet_to_json(ws, { raw: true, defval: null });
+    }
+
+    parseRows(rows);
+
+    const now = new Date();
+    // --- real data freshness (the newest weighment on record, not the browser clock) ---
+    (function(){
+      const lu = document.getElementById('lastUpdated');
+      const banner = document.getElementById('staleBanner');
+      const days = DATA.map(d => d.dateJS && d.dateJS.getTime()).filter(Boolean);
+      if (!days.length) { lu.textContent = '—'; banner.style.display = 'none'; return; }
+      const MN = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      const fmt = d => `${String(d.getDate()).padStart(2,'0')}-${MN[d.getMonth()]}-${String(d.getFullYear()).slice(-2)}`;
+      const latest = new Date(Math.max.apply(null, days));
+      const today  = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      lu.textContent = fmt(latest);
+      // count full working days (Mon-Sat) completely skipped between the last pass and today
+      let skipped = 0;
+      for (let d = new Date(latest.getTime() + 86400000); d < today; d.setDate(d.getDate() + 1)) {
+        if (d.getDay() !== 0) skipped++;            // Sunday = 0 is a non-working day
+      }
+      // or: it's a working day, well into it, and today has no passes yet
+      const todaysMissing = now.getDay() !== 0 && now.getHours() >= 11 && latest < today;
+      if (skipped >= 1 || todaysMissing) {
+        const gap = Math.round((today - latest) / 86400000);
+        banner.innerHTML = '⚠ Weighment feed looks stale — the last pass on record is <b>' + fmt(latest) +
+          '</b> (' + gap + ' day' + (gap === 1 ? '' : 's') + ' ago) and nothing newer has come in. ' +
+          'The upload job on the server has most likely stopped — it needs restarting.';
+        banner.style.display = 'block';
+        lu.style.color = '#b42318';
+      } else {
+        banner.style.display = 'none';
+        lu.style.color = '';
+      }
+    })();
+
+    statusEl.innerText = `Data loaded · ${rows.length} rows`;
+    statusEl.style.color = 'green';
+  } catch (err) {
+    console.error(err);
+    statusEl.innerText = 'ERROR: ' + err.message;
+    statusEl.style.color = 'red';
+  } finally {
+    if(btn){ /* refresh btn removed */ }
   }
-  html+='</table></div>';
-  return {html,gb,gq};
 }
 
-function fyOf(y,m){return m>=4?y:y-1;}
-function renderByBrand(){
-  const visible=viewRows();
-  const forms=['COIL','PLATE','STRIP','SCRAP'];
-  const b={};
-  visible.forEach(r=>{const br=brandNorm(r.ItemName);(b[br]??={COIL:0,PLATE:0,STRIP:0,SCRAP:0,tot:0});b[br][r.form]+=r.Quantity;b[br].tot+=r.Quantity;});
-  const brands=Object.keys(b).sort((x,y)=>b[y].tot-b[x].tot);
-  const gt=brands.reduce((a,k)=>a+b[k].tot,0);
-  $('byBrandSub').textContent=`${brands.length} brands · ${gt.toFixed(3)} MT`;
-  $('byBrand').innerHTML=brands.length?`<table class="x" style="width:100%;border-collapse:collapse"><thead><tr><th style="text-align:left;padding:6px 10px">Brand</th><th style="text-align:right;padding:6px 10px">Coil</th><th style="text-align:right;padding:6px 10px">Plate</th><th style="text-align:right;padding:6px 10px">Strip</th><th style="text-align:right;padding:6px 10px">Scrap</th><th style="text-align:right;padding:6px 10px">Total (MT)</th></tr></thead><tbody>
-    ${brands.map(k=>`<tr><td style="padding:5px 10px;border-top:1px solid #eef1f3"><b>${esc(k)}</b></td>${forms.map(f=>`<td style="padding:5px 10px;text-align:right;border-top:1px solid #eef1f3">${b[k][f]?b[k][f].toFixed(3):''}</td>`).join('')}<td style="padding:5px 10px;text-align:right;font-weight:700;border-top:1px solid #eef1f3">${b[k].tot.toFixed(3)}</td></tr>`).join('')}
-    <tr><td style="padding:6px 10px;border-top:2px solid #333;font-weight:700">Total</td>${forms.map(f=>`<td style="padding:6px 10px;text-align:right;border-top:2px solid #333;font-weight:700">${brands.reduce((a,k)=>a+b[k][f],0).toFixed(3)}</td>`).join('')}<td style="padding:6px 10px;text-align:right;border-top:2px solid #333;font-weight:700">${gt.toFixed(3)}</td></tr>
-    </tbody></table>`:'<div class="empty">No stock.</div>';
+// ============ HELPERS ============
+
+// Trim & lowercase column lookup so "Vehile No" typo or stray spaces still work
+function getCol(row, ...candidates) {
+  const keys = Object.keys(row);
+  for (const cand of candidates) {
+    const candNorm = cand.toLowerCase().replace(/\s+/g, ' ').trim();
+    for (const k of keys) {
+      const kNorm = String(k).toLowerCase().replace(/\s+/g, ' ').trim();
+      if (kNorm === candNorm) return row[k];
+    }
+  }
+  return null;
 }
-const MONTHS=['Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec','Jan','Feb','Mar'];
-function renderWorked(){
-  const period=$('workedPeriod').value, view=$('workedView').value;
-  const now=new Date(), curFy=fyOf(now.getFullYear(),now.getMonth()+1);
-  let rows=WORKED;
-  if(period==='fy') rows=rows.filter(r=>fyOf(r.Yr,r.Mth)===curFy);
-  const brands=[...new Set(rows.map(r=>r.Brand))];
-  const brandTot={}; rows.forEach(r=>brandTot[r.Brand]=(brandTot[r.Brand]||0)+r.Qty);
-  const ordered=Object.keys(brandTot).sort((a,b)=>brandTot[b]-brandTot[a]);
-  const gt=ordered.reduce((a,k)=>a+brandTot[k],0);
-  $('workedSub').textContent=`${gt.toFixed(3)} MT dispatched`;
-  if(!ordered.length){$('workedTbl').innerHTML='<div class="empty">No dispatch history.</div>';return;}
-  if(view==='total'){
-    $('workedTbl').innerHTML=`<table class="x" style="width:100%;border-collapse:collapse"><thead><tr><th style="text-align:left;padding:6px 10px">Brand</th><th style="text-align:right;padding:6px 10px">Dispatched (MT)</th><th style="text-align:right;padding:6px 10px">Share</th></tr></thead><tbody>
-      ${ordered.map(k=>`<tr><td style="padding:5px 10px;border-top:1px solid #eef1f3"><b>${esc(k)}</b></td><td style="padding:5px 10px;text-align:right;border-top:1px solid #eef1f3">${brandTot[k].toFixed(3)}</td><td style="padding:5px 10px;text-align:right;border-top:1px solid #eef1f3">${gt?(brandTot[k]/gt*100).toFixed(1):0}%</td></tr>`).join('')}
-      <tr><td style="padding:6px 10px;border-top:2px solid #333;font-weight:700">Total</td><td style="padding:6px 10px;text-align:right;border-top:2px solid #333;font-weight:700">${gt.toFixed(3)}</td><td style="border-top:2px solid #333"></td></tr></tbody></table>`;
+
+// Date can arrive as "02-05-2026" text or as an Excel serial number
+function formatDate(raw) {
+  if (raw == null || raw === '') return 'Unknown';
+
+  // ISO YYYY-MM-DD (what PowerShell CSV produces)
+  if (typeof raw === 'string') {
+    let m = raw.trim().match(/^(\d{4})-(\d{2})-(\d{2})(?:[T ].*)?$/);
+    if (m) {
+      const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      const day = m[3];
+      const mon = months[parseInt(m[2], 10) - 1] || '???';
+      const yr  = m[1].slice(-2);
+      return `${day}-${mon}-${yr}`;
+    }
+    // DD-MM-YYYY or DD/MM/YYYY text
+    m = raw.trim().match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{2,4})$/);
+    if (m) {
+      const day = m[1].padStart(2, '0');
+      const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      const mon = months[parseInt(m[2], 10) - 1] || '???';
+      const yr = m[3].length === 2 ? m[3] : m[3].slice(-2);
+      return `${day}-${mon}-${yr}`;
+    }
+    return raw;
+  }
+
+  // Excel serial
+  if (typeof raw === 'number') {
+    const d = new Date(Math.round((raw - 25569) * 86400 * 1000));
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const day = String(d.getUTCDate()).padStart(2, '0');
+    const mon = months[d.getUTCMonth()];
+    const yr = String(d.getUTCFullYear()).slice(-2);
+    return `${day}-${mon}-${yr}`;
+  }
+
+  return String(raw);
+}
+
+// Returns a JS Date at local midnight, for range filtering.
+function parseToJSDate(raw) {
+  if (raw == null || raw === '') return null;
+  if (typeof raw === 'number') {
+    const d = new Date(Math.round((raw - 25569) * 86400 * 1000));
+    return new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+  }
+  if (typeof raw === 'string') {
+    // ISO YYYY-MM-DD (PowerShell CSV)
+    let m = raw.trim().match(/^(\d{4})-(\d{2})-(\d{2})(?:[T ].*)?$/);
+    if (m) {
+      return new Date(parseInt(m[1],10), parseInt(m[2],10)-1, parseInt(m[3],10));
+    }
+    // DD-MM-YYYY / DD/MM/YYYY
+    m = raw.trim().match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{2,4})$/);
+    if (m) {
+      const day = parseInt(m[1], 10);
+      const mon = parseInt(m[2], 10) - 1;
+      const yrRaw = parseInt(m[3], 10);
+      const yr = m[3].length === 2 ? 2000 + yrRaw : yrRaw;
+      return new Date(yr, mon, day);
+    }
+  }
+  return null;
+}
+
+// Sort key for "DD-MMM-YY"
+function dateSortKey(s) {
+  const parts = String(s).split('-');
+  if (parts.length < 3) return 0;
+  const day = parseInt(parts[0], 10);
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const mon = months.indexOf(parts[1]);
+  const yr = 2000 + parseInt(parts[2], 10);
+  return new Date(yr, mon, day).getTime();
+}
+
+// Time can be:
+//   - HHMM packed integer (SAP style): 915 = 09:15, 1715 = 17:15, 0 = midnight
+//   - "HH:MM" / "H:MM" text string
+//   - Excel time fraction (0..1)
+// Returns "HH:MM" display string, or '' if blank.
+function formatTime(raw) {
+  const mins = toMin(raw);
+  if (mins == null) return '';
+  const h = Math.floor(mins / 60) % 24;
+  const m = mins % 60;
+  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+}
+
+// Convert anything to minutes-since-midnight, or null if blank/invalid.
+function toMin(raw) {
+  if (raw == null || raw === '') return null;
+
+  if (typeof raw === 'number') {
+    // Excel time fraction (e.g. 0.381944 = 09:10)
+    if (raw > 0 && raw < 1) {
+      return Math.round(raw * 24 * 60);
+    }
+    // HHMM packed integer: 915 -> 9:15, 1715 -> 17:15, 0 -> 00:00
+    const n = Math.round(raw);
+    const h = Math.floor(n / 100);
+    const m = n % 100;
+    if (h >= 0 && h <= 23 && m >= 0 && m <= 59) return h * 60 + m;
+    return null;
+  }
+
+  // String "HH:MM" or "H:MM"
+  const s = String(raw).trim();
+  if (!s) return null;
+  if (s.includes(':')) {
+    const parts = s.split(':');
+    const h = parseInt(parts[0], 10);
+    const m = parseInt(parts[1], 10);
+    if (isNaN(h) || isNaN(m)) return null;
+    return h * 60 + m;
+  }
+  // Numeric string without colon -> treat as HHMM
+  const num = parseInt(s, 10);
+  if (!isNaN(num)) {
+    const h = Math.floor(num / 100);
+    const m = num % 100;
+    if (h >= 0 && h <= 23 && m >= 0 && m <= 59) return h * 60 + m;
+  }
+  return null;
+}
+
+// Diff with overnight wrap: if 'to' is before 'from', assume next day (cap by validity check downstream)
+function diffMin(fromMin, toMin) {
+  if (fromMin == null || toMin == null) return null;
+  let d = toMin - fromMin;
+  if (d < 0) d += 24 * 60;   // wrap past midnight
+  return d;
+}
+
+// ============ PARSE ROWS ============
+function parseRows(rows) {
+  DATA = rows
+    .filter(r => r && Object.keys(r).length > 0)
+    .map(r => {
+      const dateRaw   = getCol(r, 'CreateDate', 'Create Date', 'Date');
+      const customer  = (getCol(r, 'U_VSPCN', 'Customer Name', 'Customer') || 'Unknown').toString().trim();
+      const inRaw     = getCol(r, 'In Time', 'In  Time');
+      const outRaw    = getCol(r, 'Out Time', 'Out  Time');
+      const invTime   = getCol(r, 'Invoice Time');
+      const invNo     = getCol(r, 'Invoice No');
+      const veh       = (getCol(r, 'U_VSPV', 'Vehile No', 'Vehicle No', 'Vehicle') || '-').toString().trim();
+      const emp       = (getCol(r, 'Sales Employee Name', 'Sales Employee') || '-').toString().trim();
+      const branch    = (getCol(r, 'Branch') || '-').toString().trim();
+      const shipTo    = (getCol(r, 'Ship To Name', 'ShipToName', 'Ship To') || '').toString().trim();
+      const wbStatus  = (getCol(r, 'U_VSPLWBST', 'Weigh Bridge Status', 'Status') || '').toString().trim();
+      const netWt     = parseFloat(getCol(r, 'Net Weight')) || 0;
+
+      const inMin  = toMin(inRaw);
+      const outMin = toMin(outRaw);
+      const invMin = toMin(invTime);
+
+      const wTimeRaw = diffMin(inMin, outMin);
+      const bTimeRaw = diffMin(outMin, invMin);
+      const tTimeRaw = diffMin(inMin, invMin);
+
+      // Completed once the vehicle is weighed OUT or an INVOICE exists (either proves the cycle finished).
+      // Pending only when it has neither — those are the genuine gaps (no out-weighment and no invoice).
+      const isPending = (outMin == null && invMin == null);
+
+      // Validity for KPIs: not pending AND all three values exist AND within sane bound
+      const valid = !isPending
+                 && wTimeRaw != null && wTimeRaw <= MAX_VALID_MINUTES
+                 && bTimeRaw != null && bTimeRaw <= MAX_VALID_MINUTES
+                 && tTimeRaw != null && tTimeRaw <= MAX_VALID_MINUTES;
+
+      return {
+        date: formatDate(dateRaw),
+        dateKey: dateSortKey(formatDate(dateRaw)),
+        dateJS: parseToJSDate(dateRaw),
+        veh,
+        customer,
+        emp,
+        branch,
+        shipTo,
+        wbStatus: isPending ? 'Pending' : 'Completed',
+        inTime:  formatTime(inRaw),
+        outTime: formatTime(outRaw),
+        invTime: formatTime(invTime),
+        invNo: invNo || '-',
+        netWt,
+        wTime: wTimeRaw,
+        bTime: bTimeRaw,
+        tTime: tTimeRaw,
+        valid
+      };
+    });
+
+  // Distinct sorted dimension lists
+  ALL_DATES    = [...new Set(DATA.map(d => d.date))].sort((a,b) => dateSortKey(a) - dateSortKey(b));
+  ALL_CUSTS    = [...new Set(DATA.map(d => d.customer))].filter(Boolean).sort();
+  ALL_EMPS     = [...new Set(DATA.map(d => d.emp))].filter(e => e && e !== '-').sort();
+  ALL_BRANCHES = [...new Set(DATA.map(d => d.branch))].filter(b => b && b !== '-').sort();
+  ALL_SHIPS    = [...new Set(DATA.map(d => d.shipTo))].filter(s => s && s.length > 0).sort();
+
+  if (!dailyChart) buildCharts();
+  update();
+}
+
+// ============ STATE ============
+const STATE = {
+  // Date range filter (inclusive). null = unbounded.
+  fromDate: null,           // JS Date at local midnight
+  toDate:   null,           // JS Date at local midnight
+  activeShortcut: 'month',  // 'today' | 'week' | 'month' | 'last30' | 'custom'
+
+  selectedCusts: new Set(),
+  selectedEmps: new Set(),
+  selectedBranches: new Set(),
+  selectedShips: new Set(),
+  custFilter: '',
+  empFilter: '',
+  shipFilter: ''
+};
+
+// ---------- Date helpers ----------
+function startOfDay(d)   { return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
+function startOfWeek(d)  { const x = startOfDay(d); const dow = x.getDay(); x.setDate(x.getDate() - dow); return x; } // Sunday-start
+function startOfMonth(d) { return new Date(d.getFullYear(), d.getMonth(), 1); }
+function endOfMonth(d)   { return new Date(d.getFullYear(), d.getMonth() + 1, 0); }
+function addDays(d, n)   { const x = new Date(d); x.setDate(x.getDate() + n); return x; }
+
+function ymd(d) {
+  // Format Date -> YYYY-MM-DD for <input type="date">
+  if (!d) return '';
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+function parseYMD(s) {
+  if (!s) return null;
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  return new Date(parseInt(m[1], 10), parseInt(m[2], 10) - 1, parseInt(m[3], 10));
+}
+
+function applyShortcut(name) {
+  const now = new Date();
+  STATE.activeShortcut = name;
+  if (name === 'yesterday') {
+    STATE.fromDate = addDays(startOfDay(now), -1);
+    STATE.toDate   = addDays(startOfDay(now), -1);
+  } else if (name === 'today') {
+    STATE.fromDate = startOfDay(now);
+    STATE.toDate   = startOfDay(now);
+  } else if (name === 'week') {
+    STATE.fromDate = startOfWeek(now);
+    STATE.toDate   = startOfDay(now);
+  } else if (name === 'month') {
+    STATE.fromDate = startOfMonth(now);
+    STATE.toDate   = endOfMonth(now);
+  } else if (name === 'last30') {
+    STATE.fromDate = addDays(startOfDay(now), -29);
+    STATE.toDate   = startOfDay(now);
+  } else if (name === 'custom') {
+    // leave whatever the user has typed
+  }
+  syncDateUI();
+}
+
+function syncDateUI() {
+  // Reflect STATE into the date inputs and Month/Year dropdowns
+  document.getElementById('fromDate').value = ymd(STATE.fromDate);
+  document.getElementById('toDate').value   = ymd(STATE.toDate);
+
+  // If the range is exactly one whole month, set Month + Year; otherwise clear them
+  const f = STATE.fromDate, t = STATE.toDate;
+  let monthVal = '', yearVal = '';
+  if (f && t
+      && f.getDate() === 1
+      && t.getDate() === endOfMonth(t).getDate()
+      && f.getMonth() === t.getMonth()
+      && f.getFullYear() === t.getFullYear()) {
+    monthVal = String(f.getMonth());
+    yearVal  = String(f.getFullYear());
+  }
+  document.getElementById('monthPicker').value = monthVal;
+  document.getElementById('yearPicker').value  = yearVal;
+
+  // Highlight the active shortcut
+  document.querySelectorAll('.dr-chip').forEach(b => {
+    b.classList.toggle('active', b.dataset.shortcut === STATE.activeShortcut);
+  });
+}
+
+// ============ CHIPS ============
+function renderChips(container, values, selectedSet, filterText) {
+  container.innerHTML = '';
+  const allBtn = document.createElement('button');
+  allBtn.className = 'chip' + (selectedSet.size === 0 ? ' active' : '');
+  allBtn.textContent = 'ALL';
+  allBtn.onclick = () => { selectedSet.clear(); update(); };
+  container.appendChild(allBtn);
+  const filter = (filterText || '').toLowerCase();
+  values.filter(v => !filter || String(v).toLowerCase().includes(filter)).forEach(v => {
+    const b = document.createElement('button');
+    b.className = 'chip' + (selectedSet.has(v) ? ' active' : '');
+    b.textContent = v;
+    b.title = v;
+    b.onclick = () => {
+      if (selectedSet.has(v)) selectedSet.delete(v);
+      else selectedSet.add(v);
+      update();
+    };
+    container.appendChild(b);
+  });
+}
+
+// ============ FILTER ============
+function filtered() {
+  return DATA.filter(d => {
+    if (d.dateJS) {
+      if (STATE.fromDate && d.dateJS < STATE.fromDate) return false;
+      if (STATE.toDate   && d.dateJS > STATE.toDate)   return false;
+    }
+    if (STATE.selectedCusts.size && !STATE.selectedCusts.has(d.customer)) return false;
+    if (STATE.selectedEmps.size && !STATE.selectedEmps.has(d.emp)) return false;
+    if (STATE.selectedBranches.size && !STATE.selectedBranches.has(d.branch)) return false;
+    if (STATE.selectedShips.size && !STATE.selectedShips.has(d.shipTo)) return false;
+    return true;
+  });
+}
+
+// ============ CHARTS ============
+let dailyChart, custChart, tonDailyChart, tonCustChart;
+function rd(n) { return Math.round(n); }
+function rd2(n) { return Math.round(n * 100) / 100; }
+
+function buildCharts() {
+  const common = {
+    plugins: {
+      legend: { display: false },
+      tooltip: { backgroundColor: '#ffffff', titleColor: '#002b5f', bodyColor: '#6c757d', borderColor: '#dee2e6', borderWidth: 1, padding: 12, titleFont: { family: 'JetBrains Mono' }, bodyFont: { family: 'JetBrains Mono' } }
+    },
+    scales: {
+      x: { grid: { display: false }, ticks: { color: '#6c757d', font: { family: 'JetBrains Mono', size: 10 } } },
+      y: { grid: { color: '#e9ecef' }, ticks: { color: '#6c757d', font: { family: 'JetBrains Mono', size: 10 } } }
+    }
+  };
+
+  dailyChart = new Chart(document.getElementById('dailyChart'), {
+    type: 'bar',
+    data: { labels: [], datasets: [
+      { label: 'W-Time', data: [], backgroundColor: '#002b5f', borderRadius: 2 },
+      { label: 'B-Time', data: [], backgroundColor: '#C9A94E', borderRadius: 2 }
+    ]},
+    options: { ...common, responsive: true, maintainAspectRatio: false,
+      plugins: { ...common.plugins, legend: { display: true, position: 'top', labels: { color: '#6c757d', font: { family: 'JetBrains Mono', size: 10 }, boxWidth: 10 } } }
+    }
+  });
+
+  custChart = new Chart(document.getElementById('custChart'), {
+    type: 'bar',
+    data: { labels: [], datasets: [{ label: 'Avg Cycle (min)', data: [], backgroundColor: '#0071ad', borderRadius: 2 }] },
+    options: { ...common, indexAxis: 'y', responsive: true, maintainAspectRatio: false }
+  });
+
+  tonDailyChart = new Chart(document.getElementById('tonDailyChart'), {
+    type: 'bar',
+    data: { labels: [], datasets: [{ label: 'Tonnage (MT)', data: [], backgroundColor: '#2a9d8f', borderRadius: 2 }] },
+    options: { ...common, responsive: true, maintainAspectRatio: false }
+  });
+
+  tonCustChart = new Chart(document.getElementById('tonCustChart'), {
+    type: 'bar',
+    data: { labels: [], datasets: [{ label: 'Tonnage (MT)', data: [], backgroundColor: '#C9A94E', borderRadius: 2 }] },
+    options: { ...common, indexAxis: 'y', responsive: true, maintainAspectRatio: false }
+  });
+}
+
+// ============ UPDATE ============
+function update() {
+  if (DATA.length === 0) return;
+
+  // Re-render chips against full universe (date is handled by the range bar above)
+  renderChips(document.getElementById('custChips'),   ALL_CUSTS,    STATE.selectedCusts, STATE.custFilter);
+  renderChips(document.getElementById('empChips'),    ALL_EMPS,     STATE.selectedEmps,  STATE.empFilter);
+  renderChips(document.getElementById('shipChips'),   ALL_SHIPS,    STATE.selectedShips, STATE.shipFilter);
+  renderChips(document.getElementById('branchChips'), ALL_BRANCHES, STATE.selectedBranches, '');
+
+  const rows = filtered();
+  const validRows = rows.filter(r => r.valid);
+  const pendingCount = rows.filter(r => r.wbStatus === 'Pending').length;
+  const n = validRows.length;
+
+  // KPIs
+  if (n === 0) {
+    document.getElementById('kpiWTime').textContent  = '0';
+    document.getElementById('kpiBTime').textContent  = '0';
+    document.getElementById('kpiTotal').textContent  = '0';
   } else {
-    // month-wise: for the FY, columns Apr..Mar; for all-time, group by Yr-Mon labels present
-    let cols;
-    if(period==='fy'){ cols=MONTHS.map((m,i)=>({key:i,label:m})); }
-    else { const set=new Set(rows.map(r=>r.Yr*100+r.Mth)); cols=[...set].sort().map(v=>({key:v,label:MONTHS[((Math.floor(v%100))+8)%12]+' '+String(Math.floor(v/100)).slice(2)})); }
-    const cell={}; rows.forEach(r=>{const k=period==='fy'?((r.Mth+8)%12):(r.Yr*100+r.Mth);(cell[r.Brand]??={})[k]=(cell[r.Brand][k]||0)+r.Qty;});
-    const colTot={};
-    $('workedTbl').innerHTML=`<div style="overflow-x:auto"><table class="x" style="border-collapse:collapse;font-size:12px"><thead><tr><th style="text-align:left;padding:5px 8px">Brand</th>${cols.map(c=>`<th style="text-align:right;padding:5px 8px">${c.label}</th>`).join('')}<th style="text-align:right;padding:5px 8px">Total</th></tr></thead><tbody>
-      ${ordered.map(k=>{const rt=brandTot[k];return `<tr><td style="padding:4px 8px;border-top:1px solid #eef1f3"><b>${esc(k)}</b></td>${cols.map(c=>{const v=(cell[k]||{})[c.key]||0;colTot[c.key]=(colTot[c.key]||0)+v;return `<td style="padding:4px 8px;text-align:right;border-top:1px solid #eef1f3">${v?v.toFixed(1):''}</td>`;}).join('')}<td style="padding:4px 8px;text-align:right;font-weight:700;border-top:1px solid #eef1f3">${rt.toFixed(1)}</td></tr>`;}).join('')}
-      <tr><td style="padding:5px 8px;border-top:2px solid #333;font-weight:700">Total</td>${cols.map(c=>`<td style="padding:5px 8px;text-align:right;border-top:2px solid #333;font-weight:700">${(colTot[c.key]||0).toFixed(1)}</td>`).join('')}<td style="padding:5px 8px;text-align:right;border-top:2px solid #333;font-weight:700">${gt.toFixed(1)}</td></tr>
-      </tbody></table></div>`;
+    document.getElementById('kpiWTime').textContent = rd(validRows.reduce((a,r)=>a+r.wTime,0)/n);
+    document.getElementById('kpiBTime').textContent = rd(validRows.reduce((a,r)=>a+r.bTime,0)/n);
+    document.getElementById('kpiTotal').textContent = rd(validRows.reduce((a,r)=>a+r.tTime,0)/n);
   }
+  document.getElementById('kpiCount').textContent = n;
+  document.getElementById('kpiPending').textContent = pendingCount;
+  document.getElementById('kpiTonnage').textContent = rd2(rows.reduce((a,r)=>a+(r.netWt||0),0));
+
+  document.getElementById('totalTrips').textContent = rows.length;
+  const fmtRng = d => d ? `${String(d.getDate()).padStart(2,'0')}-${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()]}-${String(d.getFullYear()).slice(-2)}` : '—';
+  document.getElementById('dateRange').textContent =
+    (STATE.fromDate || STATE.toDate)
+      ? `${fmtRng(STATE.fromDate)} → ${fmtRng(STATE.toDate)}`
+      : (ALL_DATES.length ? `${ALL_DATES[0]} → ${ALL_DATES[ALL_DATES.length-1]}` : '—');
+
+  // ===== Daily time chart =====
+  const byDate = {};
+  validRows.forEach(r => {
+    if (!byDate[r.date]) byDate[r.date] = { w: 0, b: 0, n: 0 };
+    byDate[r.date].w += r.wTime;
+    byDate[r.date].b += r.bTime;
+    byDate[r.date].n++;
+  });
+  const dLabels = Object.keys(byDate).sort((a,b) => dateSortKey(a) - dateSortKey(b));
+  dailyChart.data.labels = dLabels;
+  dailyChart.data.datasets[0].data = dLabels.map(d => rd(byDate[d].w / byDate[d].n));
+  dailyChart.data.datasets[1].data = dLabels.map(d => rd(byDate[d].b / byDate[d].n));
+  dailyChart.update();
+
+  // ===== Customer cycle chart =====
+  const byCust = {};
+  validRows.forEach(r => {
+    if (!byCust[r.customer]) byCust[r.customer] = { t: 0, n: 0 };
+    byCust[r.customer].t += r.tTime;
+    byCust[r.customer].n++;
+  });
+  const cArr = Object.entries(byCust)
+    .map(([k,v]) => ({ k, avg: v.t / v.n }))
+    .sort((a,b) => b.avg - a.avg)
+    .slice(0, 10);
+  custChart.data.labels = cArr.map(x => x.k.length > 28 ? x.k.slice(0,26) + '…' : x.k);
+  custChart.data.datasets[0].data = cArr.map(x => rd(x.avg));
+  custChart.update();
+
+  // ===== Daily tonnage =====
+  const tonByDate = {};
+  rows.forEach(r => {
+    if (!tonByDate[r.date]) tonByDate[r.date] = 0;
+    tonByDate[r.date] += (r.netWt || 0);
+  });
+  const tdLabels = Object.keys(tonByDate).sort((a,b) => dateSortKey(a) - dateSortKey(b));
+  tonDailyChart.data.labels = tdLabels;
+  tonDailyChart.data.datasets[0].data = tdLabels.map(d => rd2(tonByDate[d]));
+  tonDailyChart.update();
+
+  // ===== Customer tonnage =====
+  const tonByCust = {};
+  rows.forEach(r => {
+    if (!tonByCust[r.customer]) tonByCust[r.customer] = 0;
+    tonByCust[r.customer] += (r.netWt || 0);
+  });
+  const tcArr = Object.entries(tonByCust)
+    .map(([k,v]) => ({ k, total: v }))
+    .sort((a,b) => b.total - a.total)
+    .slice(0, 10);
+  tonCustChart.data.labels = tcArr.map(x => x.k.length > 28 ? x.k.slice(0,26) + '…' : x.k);
+  tonCustChart.data.datasets[0].data = tcArr.map(x => rd2(x.total));
+  tonCustChart.update();
+
+  // ===== Table =====
+  const tbody = document.getElementById('tblBody');
+  tbody.innerHTML = '';
+  // Sort: newest date first, then by In time
+  const sortedRows = [...rows].sort((a,b) => {
+    if (b.dateKey !== a.dateKey) return b.dateKey - a.dateKey;
+    return (toMin(b.inTime) || 0) - (toMin(a.inTime) || 0);
+  });
+  sortedRows.slice(0, 1000).forEach(r => {
+    const tr = document.createElement('tr');
+    if (r.wbStatus === 'Pending') tr.className = 'row-pending';
+    const statusCls = r.wbStatus === 'Pending' ? 'status-pending' : 'status-completed';
+    tr.innerHTML = `
+      <td>${r.date}</td>
+      <td class="${statusCls}">${r.wbStatus}</td>
+      <td><span class="badge">${r.veh}</span></td>
+      <td>${r.customer}</td>
+      <td>${r.shipTo || '—'}</td>
+      <td>${r.emp}</td>
+      <td>${r.branch}</td>
+      <td>${r.inTime || '—'}</td>
+      <td>${r.outTime || '—'}</td>
+      <td>${r.invTime || '—'}</td>
+      <td>${r.invNo}</td>
+      <td class="num">${r.netWt ? rd2(r.netWt) : '—'}</td>
+      <td class="num">${r.valid ? r.wTime : '—'}</td>
+      <td class="num">${r.valid ? r.bTime : '—'}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+  document.getElementById('tblCount').textContent =
+    rows.length + (rows.length > 1000 ? ' (showing first 1000)' : '');
 }
-const PMON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-const PMACHS=[['MACHINE02 (MDS)','CTL 01-06 MM (MDS)'],['MACHINE01 (MDS)','CTL 6-25 MM (MDS)'],['MACHINE15 (MDS)','Shearing 06-25 MM (MDS)']];
-const isoL=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
-const ddmmL=d=>String(d.getDate()).padStart(2,'0')+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+d.getFullYear();
-const pf=n=>String(Math.round(n||0)); // whole numbers (MT), rounded
-// last working day strictly before today, skipping Sundays + holidays
-function lastWD(hol){const h=new Set((hol||[]).map(s=>String(s).slice(0,10)));let b=new Date();b.setHours(12,0,0,0);do{b.setDate(b.getDate()-1);}while(b.getDay()===0||h.has(isoL(b)));return b;}
-function ptable(headers,rows,grand){
-  let h='<div style="overflow-x:auto"><table class="x" style="width:100%;border-collapse:collapse;text-align:center"><thead><tr>';
-  headers.forEach(hd=> h+=`<th style="white-space:normal;text-align:center">${esc(hd)}</th>`);
-  h+='</tr></thead><tbody>';
-  rows.forEach(r=>{ h+=`<tr><td style="border-top:1px solid #eef1f3;padding:5px 10px;text-align:center">${esc(r.label)}</td>`+r.vals.map(v=>`<td style="border-top:1px solid #eef1f3;padding:5px 10px;text-align:center">${v}</td>`).join('')+'</tr>'; });
-  h+=`<tr style="background:#0e2a47;color:#fff;font-weight:700"><td style="color:#fff;padding:6px 10px;text-align:center">${esc(grand.label)}</td>`+grand.vals.map(v=>`<td style="padding:6px 10px;text-align:center">${v}</td>`).join('')+'</tr>';
-  return h+'</tbody></table></div>';
+
+// ============ EVENTS ============
+document.getElementById('custSearch').addEventListener('input', e => {
+  STATE.custFilter = e.target.value;
+  renderChips(document.getElementById('custChips'), ALL_CUSTS, STATE.selectedCusts, STATE.custFilter);
+});
+document.getElementById('empSearch').addEventListener('input', e => {
+  STATE.empFilter = e.target.value;
+  renderChips(document.getElementById('empChips'), ALL_EMPS, STATE.selectedEmps, STATE.empFilter);
+});
+document.getElementById('shipSearch').addEventListener('input', e => {
+  STATE.shipFilter = e.target.value;
+  renderChips(document.getElementById('shipChips'), ALL_SHIPS, STATE.selectedShips, STATE.shipFilter);
+});
+document.getElementById('resetBtn').addEventListener('click', () => {
+  STATE.selectedCusts.clear();
+  STATE.selectedEmps.clear();
+  STATE.selectedBranches.clear();
+  STATE.selectedShips.clear();
+  STATE.custFilter = '';
+  STATE.empFilter  = '';
+  STATE.shipFilter = '';
+  document.getElementById('custSearch').value = '';
+  document.getElementById('empSearch').value  = '';
+  document.getElementById('shipSearch').value = '';
+  applyShortcut('month');     // back to current month
+  update();
+});
+
+// Shortcut buttons
+document.querySelectorAll('.dr-chip').forEach(btn => {
+  btn.addEventListener('click', () => {
+    applyShortcut(btn.dataset.shortcut);
+    update();
+  });
+});
+
+// Month/Year dropdowns — picking a month auto-applies that whole month
+function applyMonthYear() {
+  const mSel = document.getElementById('monthPicker').value;
+  const ySel = document.getElementById('yearPicker').value;
+  if (mSel === '' || ySel === '') return;
+  const month = parseInt(mSel, 10);
+  const year  = parseInt(ySel, 10);
+  STATE.fromDate = new Date(year, month, 1);
+  STATE.toDate   = new Date(year, month + 1, 0);
+  STATE.activeShortcut = 'custom';
+  syncDateUI();
+  update();
 }
-function renderProdReport(){
-  if(!PRODDAILY.length){ $('prodTotal').innerHTML='<div class="empty">No production data yet — the refresh job may not have pushed it.</div>'; $('prodWheels').innerHTML=''; $('prodMonthly').innerHTML=''; $('prodRepSub').textContent=''; return; }
-  const R=PRODDAILY.map(r=>({ds:String(r['Date']||'').slice(0,10),mc:String(r['Machine']||'').trim(),tot:gnum(r['Total Qty'])||0,wh:gnum(r['Wheels Qty'])||0})).filter(r=>/^\d{4}-\d{2}-\d{2}$/.test(r.ds));
-  const base=lastWD(HOLIDAYS), bISO=isoL(base), bY=base.getFullYear(), bM=base.getMonth(), bD=base.getDate();
-  const monStart=isoL(new Date(bY,bM,1)), yrStart=isoL(new Date(bY,0,1));
-  let ly=bY,lmo=bM-1; if(lmo<0){lmo=11;ly--;}
-  const dim=new Date(ly,lmo+1,0).getDate(), lmDay=Math.min(bD,dim);
-  const lmStart=isoL(new Date(ly,lmo,1)), lmEndDt=new Date(ly,lmo,lmDay), lmEnd=isoL(lmEndDt);
-  const sum=(fld,mc,from,to)=>R.reduce((a,r)=>{ if(mc&&r.mc!==mc)return a; if(from&&r.ds<from)return a; if(to&&r.ds>to)return a; return a+r[fld]; },0);
-  const onL='Production on '+ddmmL(base), monL=PMON[bM]+' '+bY+' upto '+ddmmL(base), lmL='Last month upto '+ddmmL(lmEndDt), yrL='This Year upto '+ddmmL(base);
-  // Section A — total (all grades)
-  let tg=[0,0,0];
-  const trows=PMACHS.map(([c,nm])=>{const on=sum('tot',c,bISO,bISO),mo=sum('tot',c,monStart,bISO),lm=sum('tot',c,lmStart,lmEnd);tg[0]+=on;tg[1]+=mo;tg[2]+=lm;return{label:nm,vals:[pf(on),pf(mo),pf(lm)]};});
-  $('prodTotal').innerHTML=ptable(['Machine',onL,monL,lmL],trows,{label:'GRAND TOTAL',vals:tg.map(pf)});
-  // Section B — Wheels India (WIR grades)
-  let wg=[0,0,0,0];
-  const wrows=PMACHS.map(([c,nm])=>{const on=sum('wh',c,bISO,bISO),mo=sum('wh',c,monStart,bISO),lm=sum('wh',c,lmStart,lmEnd),yr=sum('wh',c,yrStart,bISO);wg[0]+=on;wg[1]+=mo;wg[2]+=lm;wg[3]+=yr;return{label:nm,vals:[pf(on),pf(mo),pf(lm),pf(yr)]};});
-  $('prodWheels').innerHTML=ptable(['Machine',onL,monL,lmL,yrL],wrows,{label:'GRAND TOTAL',vals:wg.map(pf)});
-  // Section C — Wheels India monthly (WIR)
-  const mset=R.filter(r=>r.wh!==0&&r.ds>=yrStart).map(r=>+r.ds.slice(5,7));
-  let firstM=mset.length?Math.min(...mset):(bM+1);
-  let mg=[0,0,0], mgt=0; const mrows=[];
-  for(let mm=firstM;mm<=bM+1;mm++){ const from=isoL(new Date(bY,mm-1,1)), to=isoL(new Date(bY,mm,0)); const c=PMACHS.map(([cc])=>sum('wh',cc,from,to)); const t=c.reduce((a,b)=>a+b,0); c.forEach((v,i)=>mg[i]+=v); mgt+=t; mrows.push({label:PMON[mm-1]+' '+bY,vals:[...c.map(pf),pf(t)]}); }
-  $('prodMonthly').innerHTML=ptable(['Month',PMACHS[0][1],PMACHS[1][1],PMACHS[2][1],'Total'],mrows,{label:'TOTAL',vals:[...mg.map(pf),pf(mgt)]});
-  $('prodRepSub').textContent='Machine-wise · Qty in MT · as on '+ddmmL(base);
+document.getElementById('monthPicker').addEventListener('change', applyMonthYear);
+document.getElementById('yearPicker').addEventListener('change', applyMonthYear);
+
+// Apply button for From/To dates
+document.getElementById('applyRange').addEventListener('click', () => {
+  const f = parseYMD(document.getElementById('fromDate').value);
+  const t = parseYMD(document.getElementById('toDate').value);
+  if (!f && !t) return;
+  STATE.fromDate = f;
+  STATE.toDate   = t || f;
+  STATE.activeShortcut = 'custom';
+  syncDateUI();
+  update();
+});
+
+// Populate Year dropdown from data + default to current month on first load
+function populateYearOptions() {
+  const yrs = new Set();
+  const now = new Date();
+  yrs.add(now.getFullYear());
+  DATA.forEach(d => { if (d.dateJS) yrs.add(d.dateJS.getFullYear()); });
+  const sorted = [...yrs].sort((a,b) => b - a);
+  const sel = document.getElementById('yearPicker');
+  sel.innerHTML = '<option value="">—</option>' +
+    sorted.map(y => `<option value="${y}">${y}</option>`).join('');
 }
-function draw(){
-  const {html,gb,gq}=sectionTable(viewRows());
-  const asof=$('pStamp').textContent.replace('as of ','') || new Date().toLocaleString('en-IN');
-  $('sheet').innerHTML=`
-    <div class="shdr"><img src="BSC.png" alt="BSC" onerror="this.style.display='none'"/>
-      <div><h1>Job Work Stock Statement — Wheels India Limited</h1>
-      <div class="sub">Bharat Steel (Chennai) Pvt. Ltd. · Material held at BSC on customer's account</div></div></div>
-    <div class="smeta"><div>Customer: <b>Wheels India Limited</b></div><div>As on: <b>${esc(asof)}</b></div><div>Warehouse: <b>Job Work (WH 45)</b></div></div>
-    ${html}
-    <div class="sgt"><span>TOTAL MATERIAL HELD</span><span>${gb} items · ${gq.toFixed(3)} MT</span></div>
-    <div class="sfoot"><b>Bharat Steel (Chennai) Pvt. Ltd.</b> · No.147, Survey No.133, Thirunilai Village, Ponneri Taluk, Chennai 600103 · 044 6791 7800 · info@bharatsteels.in<br>
-      System-generated statement of your material held at BSC as on the date/time shown. Figures drawn live from our ERP. For queries contact your account manager.</div>`;
-  renderByBrand(); renderWorked(); renderProdReport();
-}
-load().then(()=>{ try{ showTab(location.hash==='#prod'?'prod':'stock'); }catch(e){ showTab('stock'); } });
+
+// Hook the post-load initialization into parseRows by overriding update on first call:
+const _origUpdate = update;
+let _firstUpdateDone = false;
+update = function() {
+  if (!_firstUpdateDone && DATA.length > 0) {
+    _firstUpdateDone = true;
+    populateYearOptions();
+    applyShortcut('month');
+  }
+  _origUpdate();
+};
+
+// Initial load
+loadData();
 </script>
-</body></html>
+</body>
+</html>
