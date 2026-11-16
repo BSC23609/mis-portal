@@ -329,6 +329,7 @@ async function sendPlanUpdateTest(){
   const msg=$('savedPU'); msg.style.display='inline'; msg.style.color='var(--gray)'; msg.textContent='sending…';
   try{ const r=await post({plan_update_test:true, plan_update_test_email:email, plan_update_test_to:num});
     const parts=[];
+    if(r.plan_count!=null) parts.push('Plan: '+r.plan_count+' item(s)'+(r.image_error?(' [IMG ERROR: '+r.image_error+']'):''));
     const w=r.whatsapp||{}; if(w.skipped) parts.push('WA: '+w.skipped); else { const s=(w.sent||[])[0]||{}; parts.push(s.error?('WA ✗ '+s.error):('WA ✓ '+(s.num||num))); }
     const e=r.email||{}; if(e.skipped) parts.push('Email: '+e.skipped); else if(e.error) parts.push('Email ✗ '+e.error); else parts.push('Email ✓ '+((e.sent_to||[]).join(', ')));
     msg.style.color='var(--good)'; msg.textContent=parts.join('   |   ');

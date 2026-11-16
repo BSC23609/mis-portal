@@ -1199,7 +1199,7 @@ async function handlerWheels(req, res){
         else if (!num) out.whatsapp = { skipped: "no test number (enter one or tick someone for Production Plan WhatsApp)" };
         else {
           const url = base + "/wheels-plan.png?d=" + imgStamp();
-          await renderAndCachePng("plan").catch(()=>{});
+          try { await renderAndCachePng("plan"); } catch(e){ out.image_error = String(e.message||e); }
           const whenIST = new Date().toLocaleString("en-IN",{ timeZone:"Asia/Kolkata", day:"2-digit", month:"short", year:"numeric", hour:"2-digit", minute:"2-digit", hour12:true });
           const params = [{ name:"report", value:url }, { name:"1", value:whenIST }];
           const sent = [];
@@ -1217,7 +1217,7 @@ async function handlerWheels(req, res){
             out.email = { sent_to: toList };
           } catch(e){ out.email = { error: String(e.message||e) }; }
         }
-        return json(res, 200, { ok:true, test:true, ...out });
+        return json(res, 200, { ok:true, test:true, plan_count: (M.plan||[]).length, plan_date: M.planDate, ...out });
       }
       // Daily Stock (company-wide) WhatsApp — daily trigger (CRON_SECRET). Goes to Management only.
       // Template WHEELS_WA_DAILY_TEMPLATE (image header, variable "report" = /daily-stock.png).
