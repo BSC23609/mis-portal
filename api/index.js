@@ -890,8 +890,11 @@ async function handlerWheels(req, res){
       if (!(M.plan && M.plan.length)) return json(res, 200, { ok: true, skipped: "no plan rows for today" });
       const sig = planSignature(M);
       const prev = await getPlanSig();
-      // Before 9:30 IST, or if no baseline yet today, just seed the baseline — the 9:30 cron sends the first plan.
-      if (prev === null || ist.getHours()*60 + ist.getMinutes() < 9*60+30) { await setPlanSig(sig); return json(res, 200, { ok: true, seeded: true }); }
+      // Before 9:30 IST the normal daily plan has not gone out yet, so only record the baseline
+      // (don't send an "Updated" plan before the base plan). After 9:30 any real change sends —
+      // even if the 9:30 cron never set a baseline today (prev === null), so the FIRST same-day
+      // program raised still triggers a send.
+      if (ist.getHours()*60 + ist.getMinutes() < 9*60+30) { await setPlanSig(sig); return json(res, 200, { ok: true, seeded: "before 9:30" }); }
       if (prev === sig) return json(res, 200, { ok: true, unchanged: true });
       const email = await planSendUpdatedEmail(req, M);
       const whatsapp = await planSendUpdatedWhatsapp(req, M);
