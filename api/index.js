@@ -2160,7 +2160,7 @@ async function sendWheelsMail(to, cc, html, subject, attach){
 }
 
 // ================= Portal authentication (login + admin user management) =================
-const PORTAL_MODULES = ["stock","wheels","dispatch","nmdc"];
+const PORTAL_MODULES = ["stock","wheels","dispatch","nmdc","fleet"];
 const AUTH_COOKIE = "bsc_session";
 const AUTH_DAYS = 7;
 function authSecret(){ return process.env.AUTH_SECRET || process.env.CRON_SECRET || ""; }
