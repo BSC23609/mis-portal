@@ -27,6 +27,7 @@ let _migrated = false;
 async function ensure() {
   if (_migrated) return;
   try { await sql`alter table fleet_monthly add column if not exists income numeric not null default 0`; } catch (e) { /* ignore */ }
+  try { await sql`alter table fleet_monthly add column if not exists diesel numeric not null default 0`; } catch (e) { /* ignore */ }
   _migrated = true;
 }
 
@@ -85,7 +86,7 @@ async function handler(req, res) {
         from fleet_trips where trip_date >= ${month} and trip_date <= ${end}
         group by vehicle_no`;
       const costs = await sql`select * from fleet_costs where month = ${month}`;
-      const tolls = await sql`select vehicle_no, toll, income from fleet_monthly where month = ${month}`;
+      const tolls = await sql`select vehicle_no, toll, income, diesel from fleet_monthly where month = ${month}`;
       const tripBy = Object.fromEntries(trips.map(r => [r.vehicle_no, r]));
       const costBy = Object.fromEntries(costs.map(r => [r.vehicle_no, r]));
       const tollBy = Object.fromEntries(tolls.map(r => [r.vehicle_no, r]));
@@ -100,13 +101,14 @@ async function handler(req, res) {
           interest: num(v.interest_yr) / 12,
         };
         const totFixed = fixed.salary + fixed.insurance + fixed.roadtax + fixed.fc + fixed.dep + fixed.interest;
-        const variable = { diesel: num(c.diesel), bata: num(c.bata), toll: num(tl.toll), maintenance: num(c.maintenance) };
+        const variable = { diesel: (num(tl.diesel) > 0 ? num(tl.diesel) : num(c.diesel)), bata: num(c.bata), toll: num(tl.toll), maintenance: num(c.maintenance) };
         const totVar = variable.diesel + variable.bata + variable.toll + variable.maintenance;
         const income = num(tl.income), totExp = totFixed + totVar;
         return {
           vehicle_no: v.vehicle_no, driver: v.driver || "",
           trips: t.trips || 0, km: num(t.km),
           fixed, totFixed, variable, totVar,
+          dieselManual: num(tl.diesel), dieselSap: num(c.diesel),
           unclassified: num(c.unclassified),
           income, totExp, pl: income - totExp,
           synced: c.synced_at || null,
@@ -189,8 +191,8 @@ async function handler(req, res) {
         const month = firstOfMonth(b.month);
         const veh = String(b.vehicle_no || "").replace(/\s+/g, "").toUpperCase();
         if (!veh) return json(res, 400, { error: "vehicle_no required" });
-        await sql`insert into fleet_monthly (month, vehicle_no, toll, income, updated_at) values (${month}, ${veh}, ${num(b.toll)}, ${num(b.income)}, now())
-          on conflict (month, vehicle_no) do update set toll=excluded.toll, income=excluded.income, updated_at=now()`;
+        await sql`insert into fleet_monthly (month, vehicle_no, toll, income, diesel, updated_at) values (${month}, ${veh}, ${num(b.toll)}, ${num(b.income)}, ${num(b.diesel)}, now())
+          on conflict (month, vehicle_no) do update set toll=excluded.toll, income=excluded.income, diesel=excluded.diesel, updated_at=now()`;
         return json(res, 200, { ok: true });
       }
 
