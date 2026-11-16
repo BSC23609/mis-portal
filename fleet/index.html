@@ -17,17 +17,21 @@
   input,select{font-family:inherit;font-size:13px;padding:7px 9px;border:1px solid var(--line);border-radius:6px;background:#fff;color:var(--ink)}
   button.act{background:var(--navy);color:#fff;border:none;border-radius:6px;padding:8px 15px;font-weight:700;font-size:13px;cursor:pointer}
   button.sm{padding:5px 10px;font-size:12px}
-  .card{background:#fff;border:1px solid var(--line);border-radius:8px;overflow:auto}
+  .card{background:#fff;border:1px solid var(--line);border-radius:10px;overflow:auto;box-shadow:0 1px 3px rgba(0,0,0,.04)}
   table{border-collapse:collapse;width:100%;font-size:13px}
   th,td{border:1px solid var(--line);padding:7px 10px;white-space:nowrap}
-  .matrix td,.matrix th{text-align:right}
-  .matrix .lab{text-align:left;font-weight:700;background:#fff}
-  .matrix .vhead{background:var(--grey);font-weight:700;text-align:center}
-  .matrix .band{background:var(--orange);color:#3a2d20;font-weight:700;text-align:center;writing-mode:vertical-rl;transform:rotate(180deg);width:26px}
-  .matrix .fixv{background:var(--blue)} .matrix .totfix,.matrix .totvar{background:var(--orange);font-weight:700}
+  .matrix{font-variant-numeric:tabular-nums}
+  .matrix td,.matrix th{text-align:right;padding:8px 13px;border-color:#edf1f5}
+  .matrix .lab{text-align:left;font-weight:600;background:#fff;color:#2a3744;padding-left:13px}
+  .matrix tbody tr:hover td:not(.band){filter:brightness(.975)}
+  .matrix .vhead{background:#eef1f6;font-weight:700;text-align:center;color:var(--navy);letter-spacing:.3px;font-size:12px}
+  .matrix .band{background:var(--orange);color:#6a4a30;font-weight:700;text-align:center;writing-mode:vertical-rl;transform:rotate(180deg);width:30px;letter-spacing:.6px;font-size:12px}
+  .matrix .fixv{background:var(--blue)} .matrix .totfix,.matrix .totvar{background:var(--orange);font-weight:700;color:#5a3a22}
   .matrix .texp{background:var(--pink);font-weight:700} .matrix .inc{background:var(--green);font-weight:700}
   .matrix .pl{background:var(--ply);font-weight:700} .neg{color:#b00020}
-  .title{background:var(--navy);color:#fff;font-weight:700;font-size:15px;padding:10px 12px;text-align:center}
+  .matrix .z{color:#c3ccd5;font-weight:400}
+  .matrix tr.sep td{border-top:2px solid #dbe2ea}
+  .title{background:var(--navy);color:#fff;font-weight:700;font-size:15px;padding:12px;text-align:center;letter-spacing:.6px}
   .muted{color:var(--muted);font-size:12px} .right{text-align:right}
   tr:nth-child(even) td.ev{background:#fafbfc}
   .msg{font-size:12px;font-weight:700;margin-left:8px}
@@ -146,29 +150,29 @@ async function loadDash(){
   const d=await api("?fmt=dashboard&month="+month);
   const rows=d.rows; const mn=new Date(month+"T00:00:00").toLocaleString("en-IN",{month:"short",year:"numeric"}).toUpperCase();
   const cols=rows.map(r=>`<th class="vhead">${r.vehicle_no}</th>`).join("");
-  const cell=(v,cls)=>`<td class="${cls||""}">${R(v)}</td>`;
+  const cell=(v,cls)=>`<td class="${cls||""} ${(Math.round(v)||0)===0?'z':''}">${R(v)}</td>`;
   const line=(key,fn,cls)=>rows.map(r=>cell(fn(r),cls)).join("");
-  const plLine=rows.map(r=>`<td class="pl ${r.pl<0?'neg':''}">${r.pl<0?'-':''}₹ ${Math.abs(Math.round(r.pl)).toLocaleString("en-IN")}</td>`).join("");
-  const numLine=(fn)=>rows.map(r=>`<td>${fn(r)}</td>`).join("");
+  const plLine=rows.map(r=>`<td class="pl ${r.pl<0?'neg':''} ${(Math.round(r.pl)||0)===0?'z':''}">${r.pl<0?'-':''}₹ ${Math.abs(Math.round(r.pl)).toLocaleString("en-IN")}</td>`).join("");
+  const numLine=(fn,raw)=>rows.map(r=>{const val=raw(r);return `<td class="${(Math.round(val)||0)===0?'z':''}">${fn(r)}</td>`;}).join("");
   let h=`<div class="title">VEHICLE MONTHLY MIS &nbsp; ${mn}</div><table class="matrix"><tbody>
     <tr><td class="lab" colspan="2">Vehicle No.</td>${cols}</tr>
-    <tr><td class="lab" colspan="2">No. of Trips</td>${numLine(r=>r.trips)}</tr>
-    <tr><td class="lab" colspan="2">KMs</td>${numLine(r=>Math.round(r.km).toLocaleString("en-IN"))}</tr>
-    <tr><td rowspan="7" class="band">Fixed Expenses</td><td class="lab">Driver Monthly Salary</td>${line("",r=>r.fixed.salary,"fixv")}</tr>
+    <tr><td class="lab" colspan="2">No. of Trips</td>${numLine(r=>r.trips,r=>r.trips)}</tr>
+    <tr class="sep"><td class="lab" colspan="2">KMs</td>${numLine(r=>Math.round(r.km).toLocaleString("en-IN"),r=>r.km)}</tr>
+    <tr class="sep"><td rowspan="7" class="band">Fixed Expenses</td><td class="lab">Driver Monthly Salary</td>${line("",r=>r.fixed.salary,"fixv")}</tr>
     <tr><td class="lab">Insurance</td>${line("",r=>r.fixed.insurance,"fixv")}</tr>
     <tr><td class="lab">Road Tax</td>${line("",r=>r.fixed.roadtax,"fixv")}</tr>
     <tr><td class="lab">FC</td>${line("",r=>r.fixed.fc,"fixv")}</tr>
     <tr><td class="lab">Depreciation</td>${line("",r=>r.fixed.dep,"fixv")}</tr>
     <tr><td class="lab">Interest</td>${line("",r=>r.fixed.interest,"fixv")}</tr>
     <tr><td class="lab">Total Fixed Expenses</td>${line("",r=>r.totFixed,"totfix")}</tr>
-    <tr><td rowspan="5" class="band">Variable Expenses</td><td class="lab">Diesel</td>${line("",r=>r.variable.diesel,"fixv")}</tr>
+    <tr class="sep"><td rowspan="5" class="band">Variable Expenses</td><td class="lab">Diesel</td>${line("",r=>r.variable.diesel,"fixv")}</tr>
     <tr><td class="lab">Driver Bata Load &amp; Unload</td>${line("",r=>r.variable.bata,"fixv")}</tr>
     <tr><td class="lab">Toll</td>${line("",r=>r.variable.toll,"fixv")}</tr>
     <tr><td class="lab">Maintenance &amp; Repairs</td>${line("",r=>r.variable.maintenance,"fixv")}</tr>
     <tr><td class="lab">Total Variable Expenses</td>${line("",r=>r.totVar,"totvar")}</tr>
-    <tr><td class="lab" colspan="2">Total Expense</td>${line("",r=>r.totExp,"texp")}</tr>
-    <tr><td class="lab" colspan="2">Total Income</td>${line("",r=>r.income,"inc")}</tr>
-    <tr><td class="lab" colspan="2">Profit / Loss</td>${plLine}</tr>
+    <tr class="sep"><td class="lab" colspan="2">Total Expense</td>${line("",r=>r.totExp,"texp")}</tr>
+    <tr class="sep"><td class="lab" colspan="2">Total Income</td>${line("",r=>r.income,"inc")}</tr>
+    <tr class="sep"><td class="lab" colspan="2">Profit / Loss</td>${plLine}</tr>
   </tbody></table>`;
   document.getElementById("matrix").innerHTML=h;
   const unc=rows.filter(r=>r.unclassified>0);
