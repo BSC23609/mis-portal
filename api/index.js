@@ -1838,15 +1838,19 @@ async function planModel(){
     sm:r["Schedule Master Date"]||"",
     wio:r["Schedule Master WIO Date"]||r["Schedule Output WIO Date"]||"",
     prog:r["Program Date"]||r["Raised Date"]||""
-  })).filter(r=>r.status==="Open"&&isWIR(r)&&isLeaf(r)&&!isScrap(r));
+  })).filter(r=>isWIR(r)&&isLeaf(r)&&!isScrap(r));   // Wheels India leaf outputs; Open/Close handled per-list below
   rows.forEach(r=>{
     r.planD = parseYMD(r.wipp) || parseYMD(r.sm) || (parseYMD(r.prog)?nextWorkingDay(parseYMD(r.prog)):null);
     r.recvD = parseYMD(r.wio);
   });
   const target=new Date(new Date().toLocaleString("en-US",{timeZone:"Asia/Kolkata"})); const tKey=ymd(target);   // plan for TODAY (IST) - sent same day at 9:30 AM
-  const plan = rows.filter(r=>r.planD&&ymd(r.planD)===tKey).sort((a,b)=>a.out.localeCompare(b.out));
-  const pending = rows.filter(r=>!(r.planD&&ymd(r.planD)===tKey)).sort((a,b)=>(a.planD&&b.planD)?(a.planD-b.planD):0);
-  return { plan, pending, tomorrow:target, planDate:pFmtD(target), asof:pFmtD(new Date()), total: rows.length };
+  const isToday=r=>r.planD&&ymd(r.planD)===tKey;
+  // Today's Wheels India production — show it whether it is still Open or already completed (Closed),
+  // so the plan doesn't go empty the moment the day's programs are produced.
+  const plan = rows.filter(isToday).sort((a,b)=>a.out.localeCompare(b.out));
+  // Upcoming backlog: only still-Open programs that are not for today.
+  const pending = rows.filter(r=>r.status==="Open"&&!isToday(r)).sort((a,b)=>(a.planD&&b.planD)?(a.planD-b.planD):0);
+  return { plan, pending, tomorrow:target, planDate:pFmtD(target), asof:pFmtD(new Date()), total: plan.length+pending.length };
 }
 // --- plan image (tomorrow's plan table) for WhatsApp ---
 function planSvg(M){
