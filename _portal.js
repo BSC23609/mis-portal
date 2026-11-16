@@ -3,11 +3,11 @@
    Each page sets  window.PORTAL = { module:'stock', screen:'daily' }  before including this. */
 (function(){
   const P = window.PORTAL || {};
-  const BASE = location.pathname.includes('/stock/')||location.pathname.includes('/dispatch/')||location.pathname.includes('/nmdc/')||location.pathname.includes('/wheels/') ? '..' : '.';
+  const BASE = location.pathname.includes('/stock/')||location.pathname.includes('/dispatch/')||location.pathname.includes('/nmdc/')||location.pathname.includes('/wheels/')||location.pathname.includes('/fleet/') ? '..' : '.';
 
   // ---- client-side auth gate (opt-in: the server returns gate:true only when AUTH_SECRET is set) ----
   // Fail-open: on any network/parse error the page is shown, so auth can never hard-break the portal.
-  const GATED_MODS=['stock','wheels','dispatch','nmdc'];
+  const GATED_MODS=['stock','wheels','dispatch','nmdc','fleet'];
   (function authGate(){
     const G=id=>document.getElementById(id);
     try{ document.documentElement.style.visibility='hidden'; }catch(e){}
@@ -48,6 +48,7 @@
         {id:'settings', label:'Settings', href:BASE+'/wheels/settings.html'},
         {id:'sendlog',  label:'Send Log', href:BASE+'/wheels/log.html'},
     ]},
+    { id:'fleet', label:'Fleet', href:BASE+'/fleet/index.html', screens:[] },
     { id:'worktracker', label:'Work Tracker', href:'https://tasks.bharatsteels.in', external:true, screens:[] },
   ];
 

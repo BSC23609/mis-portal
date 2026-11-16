@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fleet MIS — Bharat Steel Group</title>
+<style>
+  :root{ --navy:#0A2B66; --ink:#1a2733; --line:#dfe5ec; --muted:#667; --grey:#D9D9D9;
+         --orange:#F8CBAD; --blue:#DDEBF7; --pink:#F8C9CE; --green:#C6E0B4; --ply:#FFE699; }
+  *{box-sizing:border-box} body{margin:0;background:#f4f6f9;color:var(--ink);font-family:Arial,Helvetica,sans-serif}
+  .wrap{max-width:1280px;margin:0 auto;padding:16px}
+  .tabs{display:flex;gap:4px;margin:14px 0 10px;flex-wrap:wrap}
+  .tab{padding:8px 16px;border:1px solid var(--line);background:#fff;border-radius:7px;cursor:pointer;font-weight:700;font-size:13px;color:var(--muted)}
+  .tab.active{background:var(--navy);color:#fff;border-color:var(--navy)}
+  .bar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;background:#fff;border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin-bottom:12px}
+  .bar label{font-size:12px;font-weight:700;color:var(--muted)}
+  input,select{font-family:inherit;font-size:13px;padding:7px 9px;border:1px solid var(--line);border-radius:6px;background:#fff;color:var(--ink)}
+  button.act{background:var(--navy);color:#fff;border:none;border-radius:6px;padding:8px 15px;font-weight:700;font-size:13px;cursor:pointer}
+  button.sm{padding:5px 10px;font-size:12px}
+  .card{background:#fff;border:1px solid var(--line);border-radius:8px;overflow:auto}
+  table{border-collapse:collapse;width:100%;font-size:13px}
+  th,td{border:1px solid var(--line);padding:7px 10px;white-space:nowrap}
+  .matrix td,.matrix th{text-align:right}
+  .matrix .lab{text-align:left;font-weight:700;background:#fff}
+  .matrix .vhead{background:var(--grey);font-weight:700;text-align:center}
+  .matrix .band{background:var(--orange);color:#3a2d20;font-weight:700;text-align:center;writing-mode:vertical-rl;transform:rotate(180deg);width:26px}
+  .matrix .fixv{background:var(--blue)} .matrix .totfix,.matrix .totvar{background:var(--orange);font-weight:700}
+  .matrix .texp{background:var(--pink);font-weight:700} .matrix .inc{background:var(--green);font-weight:700}
+  .matrix .pl{background:var(--ply);font-weight:700} .neg{color:#b00020}
+  .title{background:var(--navy);color:#fff;font-weight:700;font-size:15px;padding:10px 12px;text-align:center}
+  .muted{color:var(--muted);font-size:12px} .right{text-align:right}
+  tr:nth-child(even) td.ev{background:#fafbfc}
+  .msg{font-size:12px;font-weight:700;margin-left:8px}
+  .ok{color:#0a7a3b}.err{color:#b00020}
+  .hide{display:none}
+  .note{font-size:12px;color:var(--muted);margin:6px 2px}
+  @media(max-width:640px){ .wrap{padding:10px} }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="tabs">
+    <div class="tab active" data-t="dash">Dashboard</div>
+    <div class="tab" data-t="trips">Daily Trips</div>
+    <div class="tab" data-t="master">Vehicle Master</div>
+    <div class="tab" data-t="toll">Monthly Toll</div>
+  </div>
+
+  <!-- ===== DASHBOARD ===== -->
+  <section id="dash">
+    <div class="bar">
+      <label>Month</label><input type="month" id="dMonth">
+      <button class="act" id="dLoad">Show</button>
+      <span class="muted" id="dMeta"></span>
+    </div>
+    <div class="card"><div id="matrix"></div></div>
+    <div class="note" id="dUnclass"></div>
+  </section>
+
+  <!-- ===== DAILY TRIPS ===== -->
+  <section id="trips" class="hide">
+    <div class="bar">
+      <input type="date" id="tDate">
+      <select id="tVeh"></select>
+      <select id="tDriver"></select>
+      <select id="tType"><option>Loaded</option><option>Empty/Return</option><option>Inbound</option><option>Other</option></select>
+      <input id="tFrom" placeholder="From" size="10">
+      <input id="tTo" placeholder="To / Customer" size="14">
+      <input id="tLoad" placeholder="Load MT" size="6" type="number" step="0.001">
+      <input id="tKm" placeholder="KM" size="5" type="number">
+      <input id="tInc" placeholder="Income ₹" size="8" type="number">
+      <input id="tRem" placeholder="Remarks" size="12">
+      <button class="act" id="tSave">Add trip</button>
+      <span class="msg" id="tMsg"></span>
+    </div>
+    <div class="bar">
+      <label>Show month</label><input type="month" id="tMonth">
+      <button class="act sm" id="tReload">Load</button>
+    </div>
+    <div class="card"><table id="tTable"></table></div>
+  </section>
+
+  <!-- ===== VEHICLE MASTER ===== -->
+  <section id="master" class="hide">
+    <div class="note">Driver Salary is per <b>month</b>. Insurance / Road Tax / FC / Depreciation / Interest are per <b>year</b> — the dashboard divides them by 12. Click Save on a row after editing.</div>
+    <div class="card"><table id="mTable"></table></div>
+  </section>
+
+  <!-- ===== MONTHLY TOLL ===== -->
+  <section id="toll" class="hide">
+    <div class="bar"><label>Month</label><input type="month" id="llMonth"><button class="act sm" id="llLoad">Load</button><span class="msg" id="llMsg"></span></div>
+    <div class="note">Enter toll per vehicle for the selected month. Diesel, Bata and Maintenance come from SAP automatically.</div>
+    <div class="card"><table id="llTable"></table></div>
+  </section>
+</div>
+
+<script>window.PORTAL={module:"fleet"}</script>
+<script src="../_portal.js"></script>
+<script>
+const API="../api/fleet";
+const R=n=>"₹ "+(Math.round(n)||0).toLocaleString("en-IN");
+const curMonth=()=>{const d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");};
+const mFirst=s=>s+"-01";
+let BOOT={vehicles:[],drivers:[]};
+
+async function api(q,opt){const r=await fetch(API+q,opt);const j=await r.json();if(!r.ok)throw new Error(j.error||("HTTP "+r.status));return j;}
+function tabTo(t){document.querySelectorAll(".tab").forEach(x=>x.classList.toggle("active",x.dataset.t===t));
+  ["dash","trips","master","toll"].forEach(s=>document.getElementById(s).classList.toggle("hide",s!==t));
+  if(t==="trips"&&!document.getElementById("tTable").dataset.loaded)loadTrips();
+  if(t==="master"&&!document.getElementById("mTable").dataset.loaded)loadMaster();
+  if(t==="toll"&&!document.getElementById("llTable").dataset.loaded)loadToll();}
+document.querySelectorAll(".tab").forEach(x=>x.onclick=()=>tabTo(x.dataset.t));
+
+/* ---------- DASHBOARD MATRIX ---------- */
+async function loadDash(){
+  const month=mFirst(document.getElementById("dMonth").value||curMonth());
+  const d=await api("?fmt=dashboard&month="+month);
+  const rows=d.rows; const mn=new Date(month+"T00:00:00").toLocaleString("en-IN",{month:"short",year:"numeric"}).toUpperCase();
+  const cols=rows.map(r=>`<th class="vhead">${r.vehicle_no}</th>`).join("");
+  const cell=(v,cls)=>`<td class="${cls||""}">${R(v)}</td>`;
+  const line=(key,fn,cls)=>rows.map(r=>cell(fn(r),cls)).join("");
+  const plLine=rows.map(r=>`<td class="pl ${r.pl<0?'neg':''}">${r.pl<0?'-':''}₹ ${Math.abs(Math.round(r.pl)).toLocaleString("en-IN")}</td>`).join("");
+  const numLine=(fn)=>rows.map(r=>`<td>${fn(r)}</td>`).join("");
+  let h=`<div class="title">VEHICLE MONTHLY MIS &nbsp; ${mn}</div><table class="matrix"><tbody>
+    <tr><td class="lab" colspan="2">Vehicle No.</td>${cols}</tr>
+    <tr><td class="lab" colspan="2">No. of Trips</td>${numLine(r=>r.trips)}</tr>
+    <tr><td class="lab" colspan="2">KMs</td>${numLine(r=>Math.round(r.km).toLocaleString("en-IN"))}</tr>
+    <tr><td rowspan="7" class="band">Fixed Expenses</td><td class="lab">Driver Monthly Salary</td>${line("",r=>r.fixed.salary,"fixv")}</tr>
+    <tr><td class="lab">Insurance</td>${line("",r=>r.fixed.insurance,"fixv")}</tr>
+    <tr><td class="lab">Road Tax</td>${line("",r=>r.fixed.roadtax,"fixv")}</tr>
+    <tr><td class="lab">FC</td>${line("",r=>r.fixed.fc,"fixv")}</tr>
+    <tr><td class="lab">Depreciation</td>${line("",r=>r.fixed.dep,"fixv")}</tr>
+    <tr><td class="lab">Interest</td>${line("",r=>r.fixed.interest,"fixv")}</tr>
+    <tr><td class="lab">Total Fixed Expenses</td>${line("",r=>r.totFixed,"totfix")}</tr>
+    <tr><td rowspan="5" class="band">Variable Expenses</td><td class="lab">Diesel</td>${line("",r=>r.variable.diesel,"fixv")}</tr>
+    <tr><td class="lab">Driver Bata Load &amp; Unload</td>${line("",r=>r.variable.bata,"fixv")}</tr>
+    <tr><td class="lab">Toll</td>${line("",r=>r.variable.toll,"fixv")}</tr>
+    <tr><td class="lab">Maintenance &amp; Repairs</td>${line("",r=>r.variable.maintenance,"fixv")}</tr>
+    <tr><td class="lab">Total Variable Expenses</td>${line("",r=>r.totVar,"totvar")}</tr>
+    <tr><td class="lab" colspan="2">Total Expense</td>${line("",r=>r.totExp,"texp")}</tr>
+    <tr><td class="lab" colspan="2">Total Income</td>${line("",r=>r.income,"inc")}</tr>
+    <tr><td class="lab" colspan="2">Profit / Loss</td>${plLine}</tr>
+  </tbody></table>`;
+  document.getElementById("matrix").innerHTML=h;
+  const unc=rows.filter(r=>r.unclassified>0);
+  document.getElementById("dUnclass").innerHTML=unc.length
+    ? "Unclassified SAP lines to review: "+unc.map(r=>r.vehicle_no+" "+R(r.unclassified)).join(" · ")
+    : "";
+  const synced=rows.map(r=>r.synced).filter(Boolean).sort().pop();
+  document.getElementById("dMeta").textContent=synced?("SAP costs synced "+new Date(synced).toLocaleString("en-IN")):"No SAP costs synced for this month yet";
+}
+document.getElementById("dLoad").onclick=loadDash;
+
+/* ---------- DROPDOWNS ---------- */
+async function boot(){
+  BOOT=await api("?fmt=bootstrap");
+  const vo=BOOT.vehicles.map(v=>`<option>${v.vehicle_no}</option>`).join("");
+  document.getElementById("tVeh").innerHTML=vo;
+  document.getElementById("tDriver").innerHTML=`<option value="">— driver —</option>`+BOOT.drivers.map(d=>`<option>${d.name}</option>`).join("");
+  document.getElementById("tVeh").onchange=()=>{const v=document.getElementById("tVeh").value;const d=BOOT.drivers.find(x=>x.vehicle===v)||BOOT.vehicles.find(x=>x.vehicle_no===v);if(d&&(d.name||d.driver))document.getElementById("tDriver").value=d.name||d.driver||"";};
+}
+
+/* ---------- TRIPS ---------- */
+async function loadTrips(){
+  const m=document.getElementById("tMonth").value||curMonth();
+  const d=await api("?fmt=trips&month="+mFirst(m));
+  const head=`<tr><th>Date</th><th>Vehicle</th><th>Driver</th><th>Type</th><th>From</th><th>To</th><th class="right">Load</th><th class="right">KM</th><th class="right">Income</th><th>Remarks</th><th></th></tr>`;
+  const body=d.rows.map(r=>`<tr>
+    <td class="ev">${(r.trip_date||"").slice(0,10)}</td><td class="ev">${r.vehicle_no}</td><td class="ev">${r.driver||""}</td>
+    <td class="ev">${r.trip_type||""}</td><td class="ev">${r.from_place||""}</td><td class="ev">${r.to_place||""}</td>
+    <td class="ev right">${r.load_mt??""}</td><td class="ev right">${r.km??""}</td><td class="ev right">${r.income==null?"":R(r.income)}</td>
+    <td class="ev">${r.remarks||""}</td><td class="ev"><button class="act sm" data-del="${r.id}">✕</button></td></tr>`).join("");
+  const tbl=document.getElementById("tTable"); tbl.innerHTML=head+body; tbl.dataset.loaded="1";
+  tbl.querySelectorAll("[data-del]").forEach(b=>b.onclick=async()=>{if(!confirm("Delete this trip?"))return;await api("",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({action:"delete_trip",id:+b.dataset.del})});loadTrips();loadDash();});
+}
+document.getElementById("tReload").onclick=loadTrips;
+document.getElementById("tSave").onclick=async()=>{
+  const t={trip_date:document.getElementById("tDate").value,vehicle_no:document.getElementById("tVeh").value,driver:document.getElementById("tDriver").value,
+    trip_type:document.getElementById("tType").value,from_place:document.getElementById("tFrom").value,to_place:document.getElementById("tTo").value,
+    load_mt:document.getElementById("tLoad").value,km:document.getElementById("tKm").value,income:document.getElementById("tInc").value,remarks:document.getElementById("tRem").value};
+  const m=document.getElementById("tMsg");
+  if(!t.trip_date||!t.vehicle_no){m.textContent="Date & vehicle required";m.className="msg err";return;}
+  try{await api("",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({action:"save_trip",trip:t})});
+    m.textContent="Saved ✓";m.className="msg ok";["tFrom","tTo","tLoad","tKm","tInc","tRem"].forEach(id=>document.getElementById(id).value="");
+    loadTrips();loadDash();}catch(e){m.textContent=e.message;m.className="msg err";}
+};
+
+/* ---------- VEHICLE MASTER ---------- */
+async function loadMaster(){
+  const rows=(await api("?fmt=master")).rows;
+  const head=`<tr><th>Vehicle</th><th>Driver</th><th class="right">Salary /mo</th><th class="right">Insurance /yr</th><th class="right">Road Tax /yr</th><th class="right">FC /yr</th><th class="right">Depreciation /yr</th><th class="right">Interest /yr</th><th></th></tr>`;
+  const body=rows.map(v=>`<tr data-v="${v.vehicle_no}">
+    <td>${v.vehicle_no}</td>
+    <td><input value="${v.driver||""}" data-f="driver" size="12"></td>
+    <td class="right"><input type="number" value="${v.salary_mo||0}" data-f="salary_mo" size="8"></td>
+    <td class="right"><input type="number" value="${v.insurance_yr||0}" data-f="insurance_yr" size="8"></td>
+    <td class="right"><input type="number" value="${v.roadtax_yr||0}" data-f="roadtax_yr" size="7"></td>
+    <td class="right"><input type="number" value="${v.fc_yr||0}" data-f="fc_yr" size="6"></td>
+    <td class="right"><input type="number" value="${v.dep_yr||0}" data-f="dep_yr" size="8"></td>
+    <td class="right"><input type="number" value="${v.interest_yr||0}" data-f="interest_yr" size="8"></td>
+    <td><button class="act sm" data-save>Save</button></td></tr>`).join("");
+  const tbl=document.getElementById("mTable");tbl.innerHTML=head+body;tbl.dataset.loaded="1";
+  tbl.querySelectorAll("[data-save]").forEach(b=>b.onclick=async()=>{
+    const tr=b.closest("tr");const veh={vehicle_no:tr.dataset.v};tr.querySelectorAll("[data-f]").forEach(i=>veh[i.dataset.f]=i.value);
+    b.textContent="…";try{await api("",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({action:"save_vehicle",vehicle:veh})});b.textContent="Saved ✓";setTimeout(()=>b.textContent="Save",1200);boot();}catch(e){b.textContent="Err";alert(e.message);}
+  });
+}
+
+/* ---------- MONTHLY TOLL ---------- */
+async function loadToll(){
+  const m=document.getElementById("llMonth").value||curMonth();
+  const d=await api("?fmt=dashboard&month="+mFirst(m));
+  const head=`<tr><th>Vehicle</th><th class="right">Toll (₹)</th><th></th></tr>`;
+  const body=d.rows.map(r=>`<tr data-v="${r.vehicle_no}"><td>${r.vehicle_no}</td>
+    <td class="right"><input type="number" value="${Math.round(r.variable.toll)||0}" data-toll size="9"></td>
+    <td><button class="act sm" data-save>Save</button></td></tr>`).join("");
+  const tbl=document.getElementById("llTable");tbl.innerHTML=head+body;tbl.dataset.loaded="1";
+  tbl.querySelectorAll("[data-save]").forEach(b=>b.onclick=async()=>{
+    const tr=b.closest("tr");const veh=tr.dataset.v;const toll=tr.querySelector("[data-toll]").value;
+    b.textContent="…";try{await api("",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({action:"save_toll",month:mFirst(m),vehicle_no:veh,toll:toll})});b.textContent="Saved ✓";setTimeout(()=>b.textContent="Save",1200);}catch(e){b.textContent="Err";alert(e.message);}
+  });
+}
+document.getElementById("llLoad").onclick=loadToll;
+
+/* ---------- INIT ---------- */
+(function(){const m=curMonth();["dMonth","tMonth","llMonth"].forEach(id=>document.getElementById(id).value=m);
+  document.getElementById("tDate").value=new Date().toISOString().slice(0,10);
+  boot().then(loadDash).catch(e=>document.getElementById("matrix").innerHTML='<div class="title">Fleet MIS</div><p style="padding:14px;color:#b00020">'+e.message+'</p>');})();
+</script>
+</body>
+</html>

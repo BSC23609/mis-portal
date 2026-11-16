@@ -50,6 +50,10 @@
       "destination": "/api/index?route=wheels&fmt=planpdf"
     },
     {
+      "source": "/api/fleet",
+      "destination": "/api/fleet"
+    },
+    {
       "source": "/api/:route",
       "destination": "/api/index?route=:route"
     }
