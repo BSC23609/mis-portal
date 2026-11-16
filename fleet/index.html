@@ -63,7 +63,7 @@
     <div class="tab active" data-t="dash">Dashboard</div>
     <div class="tab" data-t="trips">Daily Trips</div>
     <div class="tab" data-t="master">Vehicle Master</div>
-    <div class="tab" data-t="toll">Monthly Toll</div>
+    <div class="tab" data-t="toll">Monthly Toll &amp; Income</div>
   </div>
 
   <!-- ===== DASHBOARD ===== -->
@@ -116,12 +116,12 @@
   <!-- ===== MONTHLY TOLL ===== -->
   <section id="toll" class="hide">
     <div class="panel">
-      <h3>Monthly toll</h3>
+      <h3>Monthly toll &amp; income</h3>
       <div class="rowq">
         <div class="fld"><label>Month</label><input type="month" id="llMonth"></div>
         <button class="act" id="llLoad">Load</button><span class="msg" id="llMsg"></span>
       </div>
-      <div class="note">Enter toll per vehicle for the selected month. Diesel, Bata and Maintenance come from SAP automatically.</div>
+      <div class="note">Enter <b>Toll</b> and <b>Total Income</b> per vehicle for the selected month. Diesel, Bata and Maintenance come from SAP automatically.</div>
       <div class="tablewrap"><table id="llTable"></table></div>
     </div>
   </section>
@@ -243,14 +243,15 @@ async function loadMaster(){
 async function loadToll(){
   const m=document.getElementById("llMonth").value||curMonth();
   const d=await api("?fmt=dashboard&month="+mFirst(m));
-  const head=`<tr><th>Vehicle</th><th class="right">Toll (₹)</th><th></th></tr>`;
+  const head=`<tr><th>Vehicle</th><th class="right">Toll (₹)</th><th class="right">Total Income (₹)</th><th></th></tr>`;
   const body=d.rows.map(r=>`<tr data-v="${r.vehicle_no}"><td>${r.vehicle_no}</td>
-    <td class="right"><input type="number" value="${Math.round(r.variable.toll)||0}" data-toll size="9"></td>
+    <td class="right"><input type="number" value="${Math.round(r.variable.toll)||0}" data-toll></td>
+    <td class="right"><input type="number" value="${Math.round(r.income)||0}" data-income></td>
     <td><button class="act sm" data-save>Save</button></td></tr>`).join("");
   const tbl=document.getElementById("llTable");tbl.innerHTML=head+body;tbl.dataset.loaded="1";
   tbl.querySelectorAll("[data-save]").forEach(b=>b.onclick=async()=>{
-    const tr=b.closest("tr");const veh=tr.dataset.v;const toll=tr.querySelector("[data-toll]").value;
-    b.textContent="…";try{await api("",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({action:"save_toll",month:mFirst(m),vehicle_no:veh,toll:toll})});b.textContent="Saved ✓";setTimeout(()=>b.textContent="Save",1200);}catch(e){b.textContent="Err";alert(e.message);}
+    const tr=b.closest("tr");const veh=tr.dataset.v;const toll=tr.querySelector("[data-toll]").value;const income=tr.querySelector("[data-income]").value;
+    b.textContent="…";try{await api("",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({action:"save_monthly",month:mFirst(m),vehicle_no:veh,toll:toll,income:income})});b.textContent="Saved ✓";setTimeout(()=>b.textContent="Save",1200);loadDash();}catch(e){b.textContent="Err";alert(e.message);}
   });
 }
 document.getElementById("llLoad").onclick=loadToll;
