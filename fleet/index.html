@@ -33,8 +33,24 @@
   .msg{font-size:12px;font-weight:700;margin-left:8px}
   .ok{color:#0a7a3b}.err{color:#b00020}
   .hide{display:none}
-  .note{font-size:12px;color:var(--muted);margin:6px 2px}
-  @media(max-width:640px){ .wrap{padding:10px} }
+  .note{font-size:12px;color:var(--muted);margin:2px 2px 12px}
+  /* ---- clean entry forms ---- */
+  .panel{background:#fff;border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin-bottom:14px;box-shadow:0 1px 3px rgba(0,0,0,.03)}
+  .panel h3{margin:0 0 14px;font-size:14px;color:var(--navy);font-weight:700}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px 14px}
+  .fld{display:flex;flex-direction:column;gap:4px;min-width:0}
+  .fld.wide{grid-column:span 2}
+  .fld label{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.3px}
+  .fld input,.fld select{width:100%}
+  .actions{display:flex;gap:12px;align-items:center;margin-top:16px;flex-wrap:wrap}
+  button.act.big{padding:10px 22px;font-size:14px;border-radius:7px}
+  .tablewrap{overflow:auto;border:1px solid var(--line);border-radius:8px}
+  .tablewrap table{border:none}
+  .tablewrap thead th{position:sticky;top:0;background:#f3f6f9;color:var(--muted);font-size:11px;letter-spacing:.3px;text-transform:uppercase;z-index:1}
+  .tablewrap td input{padding:6px 8px}
+  .rowq{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px}
+  .rowq .fld{max-width:200px}
+  @media(max-width:640px){ .wrap{padding:10px} .grid{grid-template-columns:1fr 1fr} .fld.wide{grid-column:span 2} button.act.big{width:100%} }
 </style>
 </head>
 <body>
@@ -48,9 +64,9 @@
 
   <!-- ===== DASHBOARD ===== -->
   <section id="dash">
-    <div class="bar">
-      <label>Month</label><input type="month" id="dMonth">
-      <button class="act" id="dLoad">Show</button>
+    <div class="rowq">
+      <div class="fld"><label>Month</label><input type="month" id="dMonth"></div>
+      <button class="act big" id="dLoad">Show</button>
       <span class="muted" id="dMeta"></span>
     </div>
     <div class="card"><div id="matrix"></div></div>
@@ -59,38 +75,51 @@
 
   <!-- ===== DAILY TRIPS ===== -->
   <section id="trips" class="hide">
-    <div class="bar">
-      <input type="date" id="tDate">
-      <select id="tVeh"></select>
-      <select id="tDriver"></select>
-      <select id="tType"><option>Loaded</option><option>Empty/Return</option><option>Inbound</option><option>Other</option></select>
-      <input id="tFrom" placeholder="From" size="10">
-      <input id="tTo" placeholder="To / Customer" size="14">
-      <input id="tLoad" placeholder="Load MT" size="6" type="number" step="0.001">
-      <input id="tKm" placeholder="KM" size="5" type="number">
-      <input id="tInc" placeholder="Income ₹" size="8" type="number">
-      <input id="tRem" placeholder="Remarks" size="12">
-      <button class="act" id="tSave">Add trip</button>
-      <span class="msg" id="tMsg"></span>
+    <div class="panel">
+      <h3>Add a trip</h3>
+      <div class="grid">
+        <div class="fld"><label>Date</label><input type="date" id="tDate"></div>
+        <div class="fld"><label>Vehicle</label><select id="tVeh"></select></div>
+        <div class="fld"><label>Driver</label><select id="tDriver"></select></div>
+        <div class="fld"><label>Trip type</label><select id="tType"><option>Loaded</option><option>Empty/Return</option><option>Inbound</option><option>Other</option></select></div>
+        <div class="fld"><label>From</label><input id="tFrom"></div>
+        <div class="fld"><label>To / Customer</label><input id="tTo"></div>
+        <div class="fld"><label>Load (MT)</label><input id="tLoad" type="number" step="0.001"></div>
+        <div class="fld"><label>KM</label><input id="tKm" type="number"></div>
+        <div class="fld"><label>Trip income (₹)</label><input id="tInc" type="number"></div>
+        <div class="fld wide"><label>Remarks</label><input id="tRem"></div>
+      </div>
+      <div class="actions"><button class="act big" id="tSave">+ Add trip</button><span class="msg" id="tMsg"></span></div>
     </div>
-    <div class="bar">
-      <label>Show month</label><input type="month" id="tMonth">
-      <button class="act sm" id="tReload">Load</button>
+    <div class="panel">
+      <div class="rowq">
+        <div class="fld"><label>Show month</label><input type="month" id="tMonth"></div>
+        <button class="act" id="tReload">Load</button>
+      </div>
+      <div class="tablewrap"><table id="tTable"></table></div>
     </div>
-    <div class="card"><table id="tTable"></table></div>
   </section>
 
   <!-- ===== VEHICLE MASTER ===== -->
   <section id="master" class="hide">
-    <div class="note">Driver Salary is per <b>month</b>. Insurance / Road Tax / FC / Depreciation / Interest are per <b>year</b> — the dashboard divides them by 12. Click Save on a row after editing.</div>
-    <div class="card"><table id="mTable"></table></div>
+    <div class="panel">
+      <h3>Vehicle master</h3>
+      <div class="note">Driver Salary is per <b>month</b>. Insurance / Road Tax / FC / Depreciation / Interest are per <b>year</b> — the dashboard divides them by 12 automatically. Edit a row, then click <b>Save</b>.</div>
+      <div class="tablewrap"><table id="mTable"></table></div>
+    </div>
   </section>
 
   <!-- ===== MONTHLY TOLL ===== -->
   <section id="toll" class="hide">
-    <div class="bar"><label>Month</label><input type="month" id="llMonth"><button class="act sm" id="llLoad">Load</button><span class="msg" id="llMsg"></span></div>
-    <div class="note">Enter toll per vehicle for the selected month. Diesel, Bata and Maintenance come from SAP automatically.</div>
-    <div class="card"><table id="llTable"></table></div>
+    <div class="panel">
+      <h3>Monthly toll</h3>
+      <div class="rowq">
+        <div class="fld"><label>Month</label><input type="month" id="llMonth"></div>
+        <button class="act" id="llLoad">Load</button><span class="msg" id="llMsg"></span>
+      </div>
+      <div class="note">Enter toll per vehicle for the selected month. Diesel, Bata and Maintenance come from SAP automatically.</div>
+      <div class="tablewrap"><table id="llTable"></table></div>
+    </div>
   </section>
 </div>
 
