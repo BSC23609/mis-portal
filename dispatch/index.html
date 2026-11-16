@@ -41,6 +41,8 @@
   .sub { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 2px; margin-top: 6px; }
   .meta { text-align: right; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 1.5px; }
   .meta b { color: var(--ink); font-weight: 600; }
+  .stale-banner { display:none; background:#fef3f2; border:1px solid #f5c6c2; color:#b42318; border-radius:6px; padding:12px 16px; margin-bottom:20px; font-size:13px; font-weight:500; letter-spacing:.2px; }
+  .stale-banner b { font-weight:700; }
 
   .filters { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 20px; margin-bottom: 22px; display: grid; grid-template-columns: 1fr 1fr 1fr 1fr auto; gap: 18px; align-items: start; box-shadow: 0 2px 4px rgba(0,0,0,0.02); }
 
@@ -140,6 +142,8 @@
       Last Updated · <b id="lastUpdated">—</b>
     </div>
   </header>
+
+  <div class="stale-banner" id="staleBanner"></div>
 
   <!-- Date range bar -->
   <div class="daterange">
@@ -340,8 +344,36 @@ async function loadData() {
     parseRows(rows);
 
     const now = new Date();
-    document.getElementById('lastUpdated').textContent =
-      now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    // --- real data freshness (the newest weighment on record, not the browser clock) ---
+    (function(){
+      const lu = document.getElementById('lastUpdated');
+      const banner = document.getElementById('staleBanner');
+      const days = DATA.map(d => d.dateJS && d.dateJS.getTime()).filter(Boolean);
+      if (!days.length) { lu.textContent = '—'; banner.style.display = 'none'; return; }
+      const MN = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      const fmt = d => `${String(d.getDate()).padStart(2,'0')}-${MN[d.getMonth()]}-${String(d.getFullYear()).slice(-2)}`;
+      const latest = new Date(Math.max.apply(null, days));
+      const today  = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      lu.textContent = fmt(latest);
+      // count full working days (Mon-Sat) completely skipped between the last pass and today
+      let skipped = 0;
+      for (let d = new Date(latest.getTime() + 86400000); d < today; d.setDate(d.getDate() + 1)) {
+        if (d.getDay() !== 0) skipped++;            // Sunday = 0 is a non-working day
+      }
+      // or: it's a working day, well into it, and today has no passes yet
+      const todaysMissing = now.getDay() !== 0 && now.getHours() >= 11 && latest < today;
+      if (skipped >= 1 || todaysMissing) {
+        const gap = Math.round((today - latest) / 86400000);
+        banner.innerHTML = '⚠ Weighment feed looks stale — the last pass on record is <b>' + fmt(latest) +
+          '</b> (' + gap + ' day' + (gap === 1 ? '' : 's') + ' ago) and nothing newer has come in. ' +
+          'The upload job on the server has most likely stopped — it needs restarting.';
+        banner.style.display = 'block';
+        lu.style.color = '#b42318';
+      } else {
+        banner.style.display = 'none';
+        lu.style.color = '';
+      }
+    })();
 
     statusEl.innerText = `Data loaded · ${rows.length} rows`;
     statusEl.style.color = 'green';
