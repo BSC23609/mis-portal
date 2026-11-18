@@ -67,7 +67,7 @@ INNER JOIN OITM I ON T0.ItemCode = I.ItemCode
 LEFT JOIN OBTN BT ON BT.ItemCode = T0.ItemCode AND BT.DistNumber = T0.BatchNum
 LEFT JOIN OBBQ Q  ON Q.ItemCode = BT.ItemCode AND Q.SnBMDAbs = BT.AbsEntry AND Q.WhsCode = T0.WhsCode
 LEFT JOIN OBIN B  ON B.AbsEntry = Q.BinAbs
-WHERE T0.Quantity > 0 AND T0.WhsCode = '38'
+WHERE T0.Quantity > 0 AND T0.WhsCode IN ('38','28')
 ORDER BY T0.ItemCode, T0.BatchNum, B.BinCode
 "@
 
