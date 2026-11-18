@@ -17,11 +17,21 @@
 </div>
 <script src="../_portal.js"></script>
 <script src="_stockdata.js"></script>
+<style>
+.fr th{padding:3px 5px;background:#f4f7fa}
+.fr input{width:100%;box-sizing:border-box;font:inherit;font-size:12px;padding:2px 5px;border:1px solid #cfd8e0;border-radius:4px;background:#fff}
+</style>
 <script>
 let S={};
+let colF={item:'',grade:'',wh:'',batch:'',coil:'',bin:'',grpo:''};
+let _focus=null;
+const _av=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+function colInput(el){ colF[el.dataset.col]=el.value; _focus={col:el.dataset.col,pos:el.selectionStart}; draw(); }
 function rows(){
-  const q=($('q').value||'').toLowerCase(),am=num($('age').value),wh=$('wh').value;
-  return S.COILS.filter(r=>(!wh||r.WhsCode===wh)&&(!q||[r.ItemName,r.BatchNum,r.CoilNo,r.Bin].some(v=>(v||'').toLowerCase().includes(q)))&&(!am||(r.age!==null&&r.age>=am)));
+  const q=($('q').value||'').toLowerCase(),am=num($('age').value),wh=$('wh').value,cf=colF;
+  const m=(v,f)=>!f||String(v==null?'':v).toLowerCase().includes(f.toLowerCase());
+  return S.COILS.filter(r=>(!wh||r.WhsCode===wh)&&(!q||[r.ItemName,r.BatchNum,r.CoilNo,r.Bin].some(v=>(v||'').toLowerCase().includes(q)))&&(!am||(r.age!==null&&r.age>=am))
+    &&m(r.ItemName,cf.item)&&m(r.Grade,cf.grade)&&m(r.WhsCode,cf.wh)&&m(r.BatchNum,cf.batch)&&m(r.CoilNo,cf.coil)&&m(r.Bin,cf.bin)&&m(r.GRPONo,cf.grpo));
 }
 function draw(){
   let rs=rows(); const tot=rs.reduce((a,r)=>a+r.Quantity,0);
@@ -34,9 +44,12 @@ function draw(){
     return;
   }
   rs=rs.sort((a,b)=>(b.age||0)-(a.age||0));
-  $('tbl').innerHTML=rs.length?`<table><thead><tr><th>Item</th><th>Grade</th><th class="num">WH</th><th class="num">T</th><th class="num">W</th><th>Batch</th><th>Coil no</th><th>Bin</th><th class="num">GRPO</th><th class="num">Age (d)</th><th class="num">MT</th></tr></thead><tbody>
-    ${rs.map(r=>`<tr><td><b>${esc(r.ItemName)}</b></td><td class="muted">${esc(r.Grade)}</td><td class="num">${esc(r.WhsCode)}</td><td class="num">${nz(r.T)}</td><td class="num">${nz(r.W)}</td><td class="mono">${esc(r.BatchNum)}</td><td class="mono">${esc(r.CoilNo)}</td><td class="muted">${esc(r.Bin)}</td><td class="num">${esc(r.GRPONo)}</td><td class="num" style="${r.age>=90?'color:var(--red);font-weight:700':''}">${r.age??''}</td><td class="num"><b>${f3(r.Quantity)}</b></td></tr>`).join('')}
-    <tr class="tot"><td colspan="10">Total</td><td class="num">${f3(tot)}</td></tr></tbody></table>`:'<div class="empty">No coils match.</div>';
+  const _head=`<tr><th>Item</th><th>Grade</th><th class="num">WH</th><th class="num">T</th><th class="num">W</th><th>Batch</th><th>Coil no</th><th>Bin</th><th class="num">GRPO</th><th class="num">Age (d)</th><th class="num">MT</th></tr>`;
+  const _cells=[{col:'item'},{col:'grade'},{col:'wh',n:1},{n:1},{n:1},{col:'batch'},{col:'coil'},{col:'bin'},{col:'grpo',n:1},{n:1},{n:1}];
+  const _fr=`<tr class="fr">${_cells.map(c=>`<th${c.n?' class="num"':''}>${c.col?`<input data-col="${c.col}" oninput="colInput(this)" value="${_av(colF[c.col])}" placeholder="filter"/>`:''}</th>`).join('')}</tr>`;
+  const _body=rs.length?`${rs.map(r=>`<tr><td><b>${esc(r.ItemName)}</b></td><td class="muted">${esc(r.Grade)}</td><td class="num">${esc(r.WhsCode)}</td><td class="num">${nz(r.T)}</td><td class="num">${nz(r.W)}</td><td class="mono">${esc(r.BatchNum)}</td><td class="mono">${esc(r.CoilNo)}</td><td class="muted">${esc(r.Bin)}</td><td class="num">${esc(r.GRPONo)}</td><td class="num" style="${r.age>=90?'color:var(--red);font-weight:700':''}">${r.age??''}</td><td class="num"><b>${f3(r.Quantity)}</b></td></tr>`).join('')}<tr class="tot"><td colspan="10">Total</td><td class="num">${f3(tot)}</td></tr>`:`<tr><td colspan="11" style="text-align:center;padding:14px;color:var(--muted)">No coils match.</td></tr>`;
+  $('tbl').innerHTML=`<table><thead>${_head}${_fr}</thead><tbody>${_body}</tbody></table>`;
+  if(_focus){ const el=document.querySelector('.fr input[data-col="'+_focus.col+'"]'); if(el){ el.focus(); try{ el.setSelectionRange(_focus.pos,_focus.pos); }catch(e){} } _focus=null; }
 }
 function dl(){
   const rs=rows(),head=['ItemCode','ItemName','Grade','WhsCode','Thickness','Width','BatchNum','CoilNo','Bin','GRPONo','GRPODate','AgeDays','Quantity'];
