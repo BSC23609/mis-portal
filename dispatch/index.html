@@ -355,14 +355,11 @@ async function loadData() {
       const latest = new Date(Math.max.apply(null, days));
       const today  = new Date(now.getFullYear(), now.getMonth(), now.getDate());
       lu.textContent = fmt(latest);
-      // count full working days (Mon-Sat) completely skipped between the last pass and today
-      let skipped = 0;
-      for (let d = new Date(latest.getTime() + 86400000); d < today; d.setDate(d.getDate() + 1)) {
-        if (d.getDay() !== 0) skipped++;            // Sunday = 0 is a non-working day
-      }
-      // or: it's a working day, well into it, and today has no passes yet
-      const todaysMissing = now.getDay() !== 0 && now.getHours() >= 11 && latest < today;
-      if (skipped >= 1 || todaysMissing) {
+      // Stale only when a whole PRIOR working day (Mon-Sat) has passed with no data. Today's own
+      // passes arriving later in the day is normal, so we never flag just because today isn't in yet.
+      let lwd = new Date(today);
+      do { lwd.setDate(lwd.getDate() - 1); } while (lwd.getDay() === 0); // last working day before today (skip Sunday)
+      if (latest < lwd) {
         const gap = Math.round((today - latest) / 86400000);
         banner.innerHTML = '⚠ Weighment feed looks stale — the last pass on record is <b>' + fmt(latest) +
           '</b> (' + gap + ' day' + (gap === 1 ? '' : 's') + ' ago) and nothing newer has come in. ' +
