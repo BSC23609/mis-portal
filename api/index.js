@@ -1854,8 +1854,8 @@ async function planModel(){
 }
 // --- plan image (tomorrow's plan table) for WhatsApp ---
 function planSvg(M){
-  const L=14, W=908; const els=[]; let y=0;
-  const C={recv:90,plan:88,coil:172,size:128,qty:72,pcs:58,rem:0}; C.rem=W-2*L-(C.recv+C.plan+C.coil+C.size+C.qty+C.pcs);
+  const L=16, W=534; const els=[]; let y=0;
+  const C={recv:66,plan:66,coil:150,size:106,qty:56,pcs:58};
   const rect=(x,yy,w,h,fill)=>els.push(`<rect x="${x}" y="${yy}" width="${w}" height="${h}" fill="${fill}"/>`);
   const txt=(x,yy,s,o)=>{ o=o||{}; els.push(`<text x="${x}" y="${yy}" font-family="DejaVu Sans" font-size="${o.size||11}"${o.bold?' font-weight="bold"':''} fill="${o.fill||'#222'}" text-anchor="${o.anchor||'start'}">${esc2(s)}</text>`); };
   const wrap=(s,maxC)=>{ const w=String(s).split(/\s+/); const lines=[]; let cur=""; for(const t of w){ if((cur+" "+t).trim().length>maxC){ if(cur)lines.push(cur); cur=t; } else cur=(cur+" "+t).trim(); } if(cur)lines.push(cur); return lines.length?lines:[""]; };
@@ -1863,7 +1863,7 @@ function planSvg(M){
   txt(L,28,"Wheels India Production Plan",{size:19,bold:true,fill:"#fff"});
   txt(W-L,28,M.planDate,{size:14,bold:true,fill:"#cfe0ef",anchor:"end"});
   y=44;
-  const cols=[["recv","Date of order receipt"],["plan","Processing date"],["coil","Input coil"],["size","Size"],["qty","Qty (MT)"],["pcs","No. of pcs"],["rem","Remarks"]];
+  const cols=[["recv","Date of order receipt"],["plan","Processing date"],["coil","Input coil"],["size","Size"],["qty","Qty (MT)"],["pcs","No. of pcs"]];
   const xs={}; let cx=L; for(const c of cols){ xs[c[0]]=cx; cx+=C[c[0]]; } const tw=cx-L;
   const startCol=k=>(k==="coil"||k==="size"||k==="rem");
   const hH=32; rect(L,y,tw,hH,"#eef3f7");
@@ -1872,9 +1872,8 @@ function planSvg(M){
   const list=M.plan; let ri=0, tot=0;
   if(!list.length){ rect(L,y,tw,30,"#fff7ec"); txt(L+tw/2,y+19,"No Production planned on "+M.planDate,{size:12,bold:true,fill:"#8a5b00",anchor:"middle"}); y+=30; }
   for(const r of list){
-    const rl=wrap(r.remarks||"",Math.max(8,Math.floor(C.rem/6.0)));
     const ci=(r.coilItem||"").trim(); const cl=ci?wrap(ci,Math.max(8,Math.floor(C.coil/5.6))):[];
-    const rH=Math.max(24, 8+rl.length*13, 8+(1+cl.length)*12);
+    const rH=Math.max(24, 8+(1+cl.length)*12);
     rect(L,y,tw,rH, ri%2?"#f7fafc":"#ffffff");
     txt(xs.recv+C.recv/2,y+rH/2+4,pFmtD(r.recvD),{size:10,anchor:"middle"});
     txt(xs.plan+C.plan/2,y+rH/2+4,pFmtD(r.planD),{size:10,anchor:"middle"});
@@ -1883,7 +1882,6 @@ function planSvg(M){
     txt(xs.size+5,y+rH/2+4,pSize(r),pHasSize(r)?{size:10}:{size:9,fill:"#b36b00"});
     txt(xs.qty+C.qty-6,y+rH/2+4,pQty(r.oqty),{size:11,bold:true,anchor:"end"});
     txt(xs.pcs+C.pcs/2,y+rH/2+4,String(r.pcs||""),{size:10,anchor:"middle"});
-    rl.forEach((ln,i)=>txt(xs.rem+5,y+16+i*13,ln,{size:10}));
     y+=rH; tot+=parseFloat(r.oqty)||0; ri++;
   }
   rect(L,y,tw,24,"#0e2a47"); txt(L+8,y+16,"TOTAL - "+list.length+" item(s)",{size:11,bold:true,fill:"#fff"}); txt(xs.qty+C.qty-6,y+16,tot.toFixed(2),{size:11,bold:true,fill:"#fff",anchor:"end"}); y+=24;
@@ -1973,7 +1971,7 @@ function planRowHtml(r){
   const td='style="padding:6px 8px;border:1px solid #d8dee6"';
   const size = pHasSize(r) ? `<td ${td}>${esc2(pSize(r))}</td>` : `<td ${td} style="padding:6px 8px;border:1px solid #d8dee6;color:#b36b00;font-style:italic">Size not received</td>`;
   const coil = `<td ${td}><b>${esc2(r.coilNo||"-")}</b>${r.coilItem?`<div style="font-size:10px;color:#667">${esc2(r.coilItem)}</div>`:""}</td>`;
-  return `<tr><td ${td} align="center">${pFmtD(r.recvD)}</td><td ${td} align="center">${pFmtD(r.planD)}</td>${coil}${size}<td ${td} align="right"><b>${pQty(r.oqty)}</b></td><td ${td} align="right">${esc2(r.pcs||"")}</td><td ${td}>${esc2(r.remarks||"")}</td></tr>`;
+  return `<tr><td ${td} align="center">${pFmtD(r.recvD)}</td><td ${td} align="center">${pFmtD(r.planD)}</td>${coil}${size}<td ${td} align="right"><b>${pQty(r.oqty)}</b></td><td ${td} align="right">${esc2(r.pcs||"")}</td></tr>`;
 }
 function planTableHtml(list){
   if(!list.length) return `<p style="color:#667">None.</p>`;
@@ -1981,9 +1979,9 @@ function planTableHtml(list){
   const th='style="background:#eef3f7;color:#0e2a47;font-size:11px;text-transform:uppercase;padding:6px 8px;border:1px solid #d8dee6"';
   return `<table cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;font-family:Arial,sans-serif;font-size:12px">
     <thead><tr><th ${th}>Date of order receipt</th><th ${th}>Processing date</th><th ${th} align="left">Input coil</th><th ${th} align="left">Size</th>
-    <th ${th}>Qty (MT)</th><th ${th}>No. of pcs</th><th ${th} align="left">Remarks</th></tr></thead>
+    <th ${th}>Qty (MT)</th><th ${th}>No. of pcs</th></tr></thead>
     <tbody style="color:#1a2634">${list.map(planRowHtml).join("")}
-    <tr style="background:#0e2a47;color:#fff;font-weight:bold"><td colspan="4" style="padding:6px 8px">TOTAL - ${list.length} item(s)</td><td align="right" style="padding:6px 8px">${tot.toFixed(2)}</td><td colspan="2" style="padding:6px 8px"></td></tr>
+    <tr style="background:#0e2a47;color:#fff;font-weight:bold"><td colspan="4" style="padding:6px 8px">TOTAL - ${list.length} item(s)</td><td align="right" style="padding:6px 8px">${tot.toFixed(2)}</td><td style="padding:6px 8px"></td></tr>
     </tbody></table>`;
 }
 async function buildWheelsPlanHtml(M, updated){
