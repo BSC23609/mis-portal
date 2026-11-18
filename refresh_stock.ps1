@@ -21,6 +21,15 @@ $StockDir = $RepoDir
 $Cfg      = "C:\scripts\config.ini"
 $LogFile  = "C:\scripts\refresh_stock.log"
 
+# ---- dispatch (weighbridge) feed -> mis-portal repo -------------------------
+# This merges the old, flaky standalone weighbridge job into this single 15-min
+# job: one SAP connection, both feeds, one schedule. The dispatch CSV lives in a
+# DIFFERENT repo (mis-portal, which serves mis.bharatsteels.in), so it needs its
+# own clone. Point $DispatchRepo at your existing mis-portal clone; if the folder
+# is empty/absent the script clones it once from $DispatchRepoUrl.
+$DispatchRepo    = "C:\github\mis-portal"
+$DispatchRepoUrl = "https://github.com/BSC23609/mis-portal.git"
+
 function Log($m){ "$([DateTime]::Now.ToString('yyyy-MM-dd HH:mm:ss'))  $m" | Tee-Object -FilePath $LogFile -Append }
 
 # ---- read config.ini ----
@@ -377,6 +386,59 @@ function ConvertTo-CsvText([System.Data.DataTable]$dt){
   return $sb.ToString()
 }
 
+# ---- Weighbridge / dispatch feed (reconstructed from @VSPLWB) ----
+# Reproduces the old dispatch/data.csv exactly: same 19 columns, same order.
+#   Net Weight = U_VSPWNT/1000 (12 dp)  |  SO Qty = SUM(RDR1.Quantity) for the SO
+#   Ship To Name = ORDR.ShipToCode      |  Invoice No/Time/Branch via the SO's A/R invoice
+#   Invoice Time is zero-padded to HH:MM and OutTime->Invoice gap parsed off the real H:M
+#   (so single-digit minutes like "16:5" -> "16:05" / "41 Min", matching the live feed).
+# Rolling 1-year window, newest first.
+$wbSql = @"
+SELECT
+  W.CreateDate                         AS [CreateDate],
+  W.U_VSPCN                            AS [U_VSPCN],
+  O2.ShipToCode                        AS [Ship To Name],
+  NULLIF(W.U_VSPWBITM,0)               AS [Report Time],
+  W.CreateTime                         AS [In Time],
+  NULLIF(W.U_VSPWBOTM,0)               AS [Out Time],
+  NULLIF(W.U_VSPLDITM,0)               AS [Time Taken],
+  CAST(ISNULL(W.U_VSPWNT,0)/1000.0 AS DECIMAL(19,12)) AS [Net Weight],
+  CAST(SOQ.SOQty AS DECIMAL(19,6))     AS [SO Qty],
+  W.U_VSPV                             AS [U_VSPV],
+  W.U_VSPLSLEM                         AS [Sales Employee Name],
+  INV.DocNum                           AS [Invoice No],
+  CASE WHEN INV.U_Inv_time IS NOT NULL AND CHARINDEX(':', INV.U_Inv_time) > 0
+       THEN LEFT(INV.U_Inv_time, CHARINDEX(':', INV.U_Inv_time)-1)
+            + ':' + RIGHT('0' + LTRIM(RTRIM(SUBSTRING(INV.U_Inv_time, CHARINDEX(':', INV.U_Inv_time)+1, 10))), 2)
+       ELSE INV.U_Inv_time END         AS [Invoice Time],
+  CASE WHEN INV.U_Inv_time IS NOT NULL
+        AND CHARINDEX(':', INV.U_Inv_time) > 0
+        AND ISNULL(W.U_VSPWBOTM,0) > 0
+        AND TRY_CONVERT(INT, LTRIM(RTRIM(LEFT(INV.U_Inv_time, CHARINDEX(':',INV.U_Inv_time)-1)))) IS NOT NULL
+        AND TRY_CONVERT(INT, LTRIM(RTRIM(SUBSTRING(INV.U_Inv_time, CHARINDEX(':',INV.U_Inv_time)+1, 10)))) IS NOT NULL
+       THEN CAST(
+              ( TRY_CONVERT(INT, LTRIM(RTRIM(LEFT(INV.U_Inv_time, CHARINDEX(':',INV.U_Inv_time)-1))))*60
+                + TRY_CONVERT(INT, LTRIM(RTRIM(SUBSTRING(INV.U_Inv_time, CHARINDEX(':',INV.U_Inv_time)+1, 10)))) )
+              - ((W.U_VSPWBOTM/100)*60 + (W.U_VSPWBOTM%100))
+            AS NVARCHAR(10)) + ' Min'
+       ELSE '' END                     AS [OutTime_To_InvoiceTime],
+  W.U_VSPLSDE                          AS [SO DocEntry No],
+  W.U_VSPLORNO                         AS [SO No],
+  CASE WHEN ISNULL(NULLIF(LTRIM(RTRIM(INV.U_Branch)),''),'CHN')='CHN' THEN 'CHENNAI' ELSE INV.U_Branch END AS [Branch],
+  W.U_VSPSTATUS                        AS [U_VSPSTATUS],
+  W.U_VSPLWBST                         AS [U_VSPLWBST]
+FROM [@VSPLWB] W
+LEFT JOIN ORDR O2 ON O2.DocEntry = W.U_VSPLSDE
+OUTER APPLY (SELECT SUM(L.Quantity) AS SOQty FROM RDR1 L WHERE L.DocEntry = W.U_VSPLSDE) SOQ
+OUTER APPLY (SELECT TOP 1 H.DocNum, H.U_Inv_time, H.U_Branch
+             FROM OINV H INNER JOIN INV1 L ON L.DocEntry = H.DocEntry
+             WHERE L.BaseType = 17 AND L.BaseEntry = W.U_VSPLSDE
+             ORDER BY H.DocEntry DESC) INV
+WHERE ISNULL(W.Canceled,'N') = 'N'
+  AND W.CreateDate >= DATEADD(YEAR, -1, CAST(GETDATE() AS DATE))
+ORDER BY W.CreateDate DESC, W.DocEntry DESC
+"@
+
 # ======================= RUN =======================
 # ---- lock: refuse to overlap with a still-running instance (stale after 10 min) ----
 $LockPath="$env:TEMP\refresh_stock.lock"
@@ -534,6 +596,43 @@ ORDER BY CASE T1.U_Machcode
     if($LASTEXITCODE -ne 0){ throw "git push failed: $push" }
   } finally { $ErrorActionPreference=$prevEap; Pop-Location }
   Log "Pushed. Done."
+
+  # ======================= DISPATCH (weighbridge) =======================
+  # Separate repo, fully NON-FATAL: a dispatch failure logs a warning and leaves
+  # the stock refresh above (already pushed) completely intact. data.csv simply
+  # keeps its previous contents until the next 15-min run succeeds.
+  try{
+    if(-not (Test-Path (Join-Path $DispatchRepo '.git'))){
+      Log "Dispatch repo missing at $DispatchRepo - cloning $DispatchRepoUrl ..."
+      $prevEap=$ErrorActionPreference; $ErrorActionPreference='Continue'
+      git clone $DispatchRepoUrl $DispatchRepo 2>&1 | Out-Null
+      $cloneRc=$LASTEXITCODE; $ErrorActionPreference=$prevEap
+      if($cloneRc -ne 0){ throw "clone failed (rc=$cloneRc) - point `$DispatchRepo at an existing mis-portal clone" }
+    }
+    Log "Querying weighbridge (dispatch)..."
+    $wb = Invoke-Sql $wbSql
+    Log "  $($wb.Rows.Count) weighbridge rows"
+    if(@($wb.Rows).Count -eq 0){ throw "weighbridge query returned 0 rows - not overwriting data.csv" }
+
+    $DispatchDir = Join-Path $DispatchRepo 'dispatch'
+    if(-not (Test-Path $DispatchDir)){ New-Item $DispatchDir -ItemType Directory -Force | Out-Null }
+    [IO.File]::WriteAllText((Join-Path $DispatchDir 'data.csv'), (ConvertTo-CsvText $wb), $enc)
+    Log "dispatch\data.csv written ($($wb.Rows.Count) rows)."
+
+    Push-Location $DispatchRepo
+    $prevEap=$ErrorActionPreference; $ErrorActionPreference='Continue'
+    try{
+      git add dispatch/data.csv 2>&1 | Out-Null
+      $stamp=[DateTime]::Now.ToString('yyyy-MM-dd HH:mm')
+      git commit -m "dispatch refresh $stamp" 2>&1 | Out-Null       # no-op if nothing changed
+      $pull = git pull --rebase --autostash -X theirs 2>&1
+      if($LASTEXITCODE -ne 0){ git rebase --abort 2>&1 | Out-Null; throw "git pull failed: $pull" }
+      $push = git push 2>&1
+      if($LASTEXITCODE -ne 0){ throw "git push failed: $push" }
+    } finally { $ErrorActionPreference=$prevEap; Pop-Location }
+    Log "Dispatch pushed. Done."
+  }
+  catch{ Log "WARN: dispatch refresh failed ($($_.Exception.Message)) - stock is unaffected; data.csv keeps its previous contents" }
 }
 catch{
   Log "ERROR: $($_.Exception.Message)"
