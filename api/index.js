@@ -890,11 +890,12 @@ async function handlerWheels(req, res){
       if (!(M.plan && M.plan.length)) return json(res, 200, { ok: true, skipped: "no plan rows for today" });
       const sig = planSignature(M);
       const prev = await getPlanSig();
-      // Before 9:30 IST the normal daily plan has not gone out yet, so only record the baseline
-      // (don't send an "Updated" plan before the base plan). After 9:30 any real change sends —
-      // even if the 9:30 cron never set a baseline today (prev === null), so the FIRST same-day
-      // program raised still triggers a send.
-      if (ist.getHours()*60 + ist.getMinutes() < 9*60+30) { await setPlanSig(sig); return json(res, 200, { ok: true, seeded: "before 9:30" }); }
+      // Wheels India keeps editing the plan file until ~10:30 IST, so an "Updated" plan sent in
+      // that window just re-sends the morning items that already went out. Hold until 10:30 WITHOUT
+      // touching the baseline (freeze this morning's sent state); after 10:30 the first check compares
+      // the now-settled plan against the morning baseline and sends the final Updated plan once —
+      // even if no baseline was ever set today (prev === null), so a first-time plan still fires.
+      if (ist.getHours()*60 + ist.getMinutes() < 10*60+30) return json(res, 200, { ok: true, seeded: "holding until 10:30 (baseline frozen)" });
       if (prev === sig) return json(res, 200, { ok: true, unchanged: true });
       const email = await planSendUpdatedEmail(req, M);
       const whatsapp = await planSendUpdatedWhatsapp(req, M);
