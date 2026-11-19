@@ -279,9 +279,8 @@ function renderProdReport(){
 // ---- By Source Coil (traceability): current plates/strips/scrap grouped by their mother coil ----
 // Source coil = the mother coil with slit suffixes (-A, -B, -A-B) rolled up to the parent.
 function srcCoilKey(r){
-  const base=s=>String(s||'').trim().replace(/(-[A-Za-z0-9]{1,2})+$/,'');
   const moth=(r.Mothercoil||'').trim(), own=(r.CoilNo||r.BatchNum||'').trim();
-  return (r.form!=='COIL' && moth) ? base(moth) : base(own);
+  return (r.form!=='COIL' && moth) ? moth : own;   // group by exact SAP Mother Coil (each slit stage separate)
 }
 const TYPELABEL={COIL:'Coil',PLATE:'Plate',ENDBITP:'Plate-End Bit',STRIP:'Strip',ENDBITS:'Strip-End Bit',SCRAP:'Scrap'};
 const TYPECOL={COIL:'#1367a6',PLATE:'#0e7a4b',ENDBITP:'#0e7a4b',STRIP:'#b5651d',ENDBITS:'#b5651d',SCRAP:'#8a1c1c'};
@@ -330,7 +329,7 @@ function renderByCoil(){
     <div style="display:flex;gap:20px;flex-wrap:wrap;font-size:13px;margin-top:6px">
       <div>Plate held: <b>${oP.toFixed(3)} MT</b></div><div>Strip held: <b>${oS.toFixed(3)} MT</b></div><div>Scrap held: <b>${oK.toFixed(3)} MT</b></div>
       <div>Overall usable: <b style="color:#0e7a4b">${ocut?((oP+oS)/ocut*100).toFixed(1):0}%</b></div><div>Overall scrap: <b style="color:#8a1c1c">${ocut?(oK/ocut*100).toFixed(1):0}%</b></div></div>
-    <div class="snote" style="margin:10px 0 0">Grouped by SAP Mother Coil; slit suffixes (-A / -B) are rolled up to the parent coil, and every row shows its own Coil/Batch and Mother Coil so figures trace back. ${wholeKeys.length} coil${wholeKeys.length!==1?'s':''} still whole / not yet cut (${wholeMT.toFixed(3)} MT) are shown on the Stock Statement tab, not here.</div></div>`;
+    <div class="snote" style="margin:10px 0 0">Grouped by the exact SAP Mother Coil (each slit stage shown separately); every row shows its own Coil/Batch and Mother Coil so figures trace back. ${wholeKeys.length} coil${wholeKeys.length!==1?'s':''} still whole / not yet cut (${wholeMT.toFixed(3)} MT) are shown on the Stock Statement tab, not here.</div></div>`;
   $('coilBody').innerHTML = keys.length ? (head+html) : '<div class="card"><div class="empty">No cut products (plates / strips / scrap) currently in stock.</div></div>';
 }
 
