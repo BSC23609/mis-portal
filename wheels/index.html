@@ -34,6 +34,7 @@
   <div class="tabbar">
     <button class="tabbtn active" id="tabbtn-stock" onclick="showTab('stock')">Stock Statement</button>
     <button class="tabbtn" id="tabbtn-prod" onclick="showTab('prod')">Production Report</button>
+    <button class="tabbtn" id="tabbtn-coil" onclick="showTab('coil')">By Source Coil</button>
   </div>
 
   <div id="tabStock">
@@ -96,6 +97,13 @@
     </div>
   </div>
 
+  <div id="tabCoil" style="display:none">
+    <div class="toolbar"><div class="sp">
+      <button class="pbtn" style="background:var(--blue);border-color:var(--blue)" onclick="window.print()">Print / Save PDF</button>
+    </div></div>
+    <div id="coilBody"></div>
+  </div>
+
   <footer id="foot"></footer>
 </div>
 <script src="../_portal.js"></script>
@@ -104,10 +112,13 @@ const SEC=[['COIL','Coil Stock','#1367a6'],['PLATE','Plate Stock (WIP / FG)','#0
 const SMALL_PLATE=0.1, SMALL_STRIP=0.011;   // plate below 0.1 MT & strip below 0.011 MT hidden when the filter is on
 let ROWS=[], META={}, WORKED=[], PRODDAILY=[], HOLIDAYS=[];
 function showTab(t){
-  $('tabStock').style.display = t==='prod'?'none':'';
-  $('tabProd').style.display  = t==='prod'?'':'none';
-  $('tabbtn-stock').classList.toggle('active', t!=='prod');
+  if(!['stock','prod','coil'].includes(t)) t='stock';
+  $('tabStock').style.display = t==='stock'?'':'none';
+  $('tabProd').style.display  = t==='prod' ?'':'none';
+  $('tabCoil').style.display  = t==='coil' ?'':'none';
+  $('tabbtn-stock').classList.toggle('active', t==='stock');
   $('tabbtn-prod').classList.toggle('active', t==='prod');
+  $('tabbtn-coil').classList.toggle('active', t==='coil');
   try{ localStorage.setItem('wheelsTab', t); }catch(e){}
 }
 // rows to display: optionally drop plate/strip under 0.1 MT
@@ -265,6 +276,64 @@ function renderProdReport(){
   $('prodMonthly').innerHTML=ptable(['Month',PMACHS[0][1],PMACHS[1][1],PMACHS[2][1],'Total'],mrows,{label:'TOTAL',vals:[...mg.map(pf),pf(mgt)]});
   $('prodRepSub').textContent='Machine-wise · Qty in MT · as on '+ddmmL(base);
 }
+// ---- By Source Coil (traceability): current plates/strips/scrap grouped by their mother coil ----
+// Source coil = the mother coil with slit suffixes (-A, -B, -A-B) rolled up to the parent.
+function srcCoilKey(r){
+  const base=s=>String(s||'').trim().replace(/(-[A-Za-z0-9]{1,2})+$/,'');
+  const moth=(r.Mothercoil||'').trim(), own=(r.CoilNo||r.BatchNum||'').trim();
+  return (r.form!=='COIL' && moth) ? base(moth) : base(own);
+}
+const TYPELABEL={COIL:'Coil',PLATE:'Plate',ENDBITP:'Plate-End Bit',STRIP:'Strip',ENDBITS:'Strip-End Bit',SCRAP:'Scrap'};
+const TYPECOL={COIL:'#1367a6',PLATE:'#0e7a4b',ENDBITP:'#0e7a4b',STRIP:'#b5651d',ENDBITS:'#b5651d',SCRAP:'#8a1c1c'};
+function renderByCoil(){
+  const G={};
+  ROWS.forEach(r=>{const k=srcCoilKey(r)||'(unlinked)';(G[k]??={coil:[],kids:[]});(r.form==='COIL'?G[k].coil:G[k].kids).push(r);});
+  const keys=Object.keys(G).filter(k=>G[k].kids.length>0);
+  const held=g=>[...g.coil,...g.kids].reduce((a,r)=>a+r.Quantity,0);
+  keys.sort((a,b)=>held(G[b])-held(G[a]));
+  const ord={COIL:0,PLATE:1,ENDBITP:2,STRIP:3,ENDBITS:4,SCRAP:5};
+  let oP=0,oS=0,oC=0,oK=0, html='';
+  keys.forEach(k=>{
+    const g=G[k], buck={PLATE:0,STRIP:0,SCRAP:0};
+    g.kids.forEach(r=>buck[baseForm(r.form)]+=r.Quantity);
+    const coilMT=g.coil.reduce((a,r)=>a+r.Quantity,0);
+    const cut=buck.PLATE+buck.STRIP+buck.SCRAP, tot=cut+coilMT;
+    const usable=cut?(buck.PLATE+buck.STRIP)/cut*100:0, scrp=cut?buck.SCRAP/cut*100:0;
+    oP+=buck.PLATE;oS+=buck.STRIP;oK+=buck.SCRAP;oC+=coilMT;
+    const items=[...g.coil,...g.kids].sort((a,b)=>(ord[a.form]-ord[b.form])||(b.Quantity-a.Quantity));
+    html+=`<div class="sheet" style="margin:12px 0">
+      <div class="shdr" style="padding:11px 18px">
+        <div style="flex:1"><h1 style="font-size:15px">Source Coil — <span class="mono" style="font-weight:700">${esc(k)}</span></h1>
+        <div class="sub">${g.kids.length} cut item${g.kids.length>1?'s':''}${coilMT>0?` · ${coilMT.toFixed(3)} MT still held as coil`:' · source coil fully cut (not in stock)'}</div></div>
+        <div style="text-align:right;font-size:12px"><div style="font-size:17px;font-weight:700">${tot.toFixed(3)} MT</div>
+          <div><span style="color:#8fe3b4">Usable ${usable.toFixed(1)}%</span> · <span style="color:#f3b0a6">Scrap ${scrp.toFixed(1)}%</span></div></div>
+      </div>
+      <div class="swrap"><table class="x">
+        <tr><th style="width:24px">#</th><th class="l">Type</th><th class="l">Mill</th><th class="l">Grade</th><th>Thk</th><th>Width</th><th>Length</th><th class="l">Coil / Batch No</th><th class="l">Mother Coil</th><th>Qty (MT)</th><th>Age (d)</th></tr>`;
+    items.forEach((x,i)=>{ const mill=(x.ItemName||'').split(' ')[0];
+      html+=`<tr><td class="r" style="color:#888">${i+1}</td>
+        <td><span style="font-weight:600;color:${TYPECOL[x.form]||'#333'}">${TYPELABEL[x.form]||x.form}</span></td>
+        <td>${esc(mill)}</td><td>${esc(x.Grade)}</td>
+        <td class="r">${fdim(x.Thick)}</td><td class="r">${fdim(x.Width)}</td><td class="r">${(x.form==='ENDBITP'||x.form==='ENDBITS')?'<b>EB</b>':flen(x.Length)}</td>
+        <td class="mono">${esc(x.CoilNo||x.BatchNum)}</td><td class="mono" style="color:#999">${esc(x.Mothercoil||'—')}</td>
+        <td class="r" style="font-weight:600">${x.Quantity.toFixed(3)}</td><td class="r" style="color:#888">${esc(x.AgeDays)}</td></tr>`; });
+    const sub=(lbl,v,c)=> v>0?`<tr><td class="st" colspan="9" style="color:${c};border-top:1px solid #e6eaed">${lbl}</td><td class="st r" style="color:${c};border-top:1px solid #e6eaed">${v.toFixed(3)}</td><td style="border-top:1px solid #e6eaed"></td></tr>`:'';
+    html+= (coilMT>0?sub('Coil remaining',coilMT,'#1367a6'):'')
+         + sub('Plate total',buck.PLATE,'#0e7a4b') + sub('Strip total',buck.STRIP,'#b5651d') + sub('Scrap total',buck.SCRAP,'#8a1c1c')
+         + `<tr><td class="st" colspan="9">Total held from this coil</td><td class="st r">${tot.toFixed(3)}</td><td class="st"></td></tr>`;
+    html+='</table></div></div>';
+  });
+  const wholeKeys=Object.keys(G).filter(k=>G[k].kids.length===0);
+  const wholeMT=wholeKeys.reduce((a,k)=>a+G[k].coil.reduce((x,r)=>x+r.Quantity,0),0);
+  const ocut=oP+oS+oK;
+  const head=`<div class="card"><h3>Stock by source coil <span class="r">${keys.length} source coils with cut products</span></h3>
+    <div style="display:flex;gap:20px;flex-wrap:wrap;font-size:13px;margin-top:6px">
+      <div>Plate held: <b>${oP.toFixed(3)} MT</b></div><div>Strip held: <b>${oS.toFixed(3)} MT</b></div><div>Scrap held: <b>${oK.toFixed(3)} MT</b></div>
+      <div>Overall usable: <b style="color:#0e7a4b">${ocut?((oP+oS)/ocut*100).toFixed(1):0}%</b></div><div>Overall scrap: <b style="color:#8a1c1c">${ocut?(oK/ocut*100).toFixed(1):0}%</b></div></div>
+    <div class="snote" style="margin:10px 0 0">Grouped by SAP Mother Coil; slit suffixes (-A / -B) are rolled up to the parent coil, and every row shows its own Coil/Batch and Mother Coil so figures trace back. ${wholeKeys.length} coil${wholeKeys.length!==1?'s':''} still whole / not yet cut (${wholeMT.toFixed(3)} MT) are shown on the Stock Statement tab, not here.</div></div>`;
+  $('coilBody').innerHTML = keys.length ? (head+html) : '<div class="card"><div class="empty">No cut products (plates / strips / scrap) currently in stock.</div></div>';
+}
+
 function draw(){
   const {html,gb,gq}=sectionTable(viewRows());
   const asof=$('pStamp').textContent.replace('as of ','') || new Date().toLocaleString('en-IN');
@@ -277,7 +346,7 @@ function draw(){
     <div class="sgt"><span>TOTAL MATERIAL HELD</span><span>${gb} items · ${gq.toFixed(3)} MT</span></div>
     <div class="sfoot"><b>Bharat Steel (Chennai) Pvt. Ltd.</b> · No.147, Survey No.133, Thirunilai Village, Ponneri Taluk, Chennai 600103 · 044 6791 7800 · info@bharatsteels.in<br>
       System-generated statement of your material held at BSC as on the date/time shown. Figures drawn live from our ERP. For queries contact your account manager.</div>`;
-  renderByBrand(); renderWorked(); renderProdReport();
+  renderByBrand(); renderWorked(); renderProdReport(); renderByCoil();
 }
 load().then(()=>{ try{ showTab(localStorage.getItem('wheelsTab')||'stock'); }catch(e){ showTab('stock'); } });
 </script>
