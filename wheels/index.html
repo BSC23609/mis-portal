@@ -98,9 +98,15 @@
   </div>
 
   <div id="tabCoil" style="display:none">
-    <div class="toolbar"><div class="sp">
-      <button class="pbtn" style="background:var(--blue);border-color:var(--blue)" onclick="window.print()">Print / Save PDF</button>
-    </div></div>
+    <div class="toolbar">
+      <label style="font-size:12px;color:var(--gray);display:flex;align-items:center;gap:6px">
+        <input type="checkbox" id="coilOnlyStock" checked onchange="renderByCoil()"/> only coils with stock in warehouse
+      </label>
+      <input id="coilSearch" placeholder="search coil / batch no" oninput="renderByCoil()" style="padding:6px 10px;border:1px solid #cdd6df;border-radius:6px;font-size:12px;min-width:200px"/>
+      <div class="sp">
+        <button class="pbtn" style="background:var(--blue);border-color:var(--blue)" onclick="window.print()">Print / Save PDF</button>
+      </div>
+    </div>
     <div id="coilBody"></div>
   </div>
 
@@ -110,7 +116,7 @@
 <script>
 const SEC=[['COIL','Coil Stock','#1367a6'],['PLATE','Plate Stock (WIP / FG)','#0e7a4b'],['ENDBITP','Plate-End Bit','#5b6670'],['STRIP','Strip / Blank Stock','#b5651d'],['ENDBITS','Strip-End Bit','#7a4e24'],['SCRAP','Scrap','#8a1c1c']];
 const SMALL_PLATE=0.1, SMALL_STRIP=0.011;   // plate below 0.1 MT & strip below 0.011 MT hidden when the filter is on
-let ROWS=[], META={}, WORKED=[], PRODDAILY=[], HOLIDAYS=[];
+let ROWS=[], META={}, WORKED=[], PRODDAILY=[], HOLIDAYS=[], TRACE=[];
 function showTab(t){
   if(!['stock','prod','coil'].includes(t)) t='stock';
   $('tabStock').style.display = t==='stock'?'':'none';
@@ -150,14 +156,15 @@ async function load(){
   catch(e){ $('hideSmall').checked = true; }
   try{
     const b='?t='+Date.now();
-    const [csv,wk,pday,setJson] = await Promise.all([
+    const [csv,wk,pday,setJson,trc] = await Promise.all([
       fetch(DATA_BASE+'/wheels_stock.csv'+b).then(r=>{if(!r.ok)throw 0;return r.text();}),
       fetch(DATA_BASE+'/wheels_worked.csv'+b).then(r=>r.ok?r.text():'').catch(()=>''),
       fetch(DATA_BASE+'/wheels_proddaily.csv'+b).then(r=>r.ok?r.text():'').catch(()=>''),
-      fetch(BASE+'/api/wheels?route=settings'+b).then(r=>r.ok?r.json():{}).catch(()=>({}))
+      fetch(BASE+'/api/wheels?route=settings'+b).then(r=>r.ok?r.json():{}).catch(()=>({})),
+      fetch(DATA_BASE+'/wheels_traceability.csv'+b).then(r=>r.ok?r.text():'').catch(()=>'')
     ]);
     WORKED=parseCSV(wk).map(r=>({Brand:brandNorm(r.Brand),Yr:+r.Yr,Mth:+r.Mth,Qty:gnum(r.Qty)||0}));
-    PRODDAILY=parseCSV(pday); HOLIDAYS=(setJson&&setJson.holidays)||[];
+    PRODDAILY=parseCSV(pday); HOLIDAYS=(setJson&&setJson.holidays)||[]; TRACE=parseCSV(trc);
     ROWS=parseCSV(csv).map(r=>{const q=gnum(r.Quantity)||0;let form=formOf(r.ItemName);const noLen=!(gnum(r.Length)>0);if(form==='PLATE'&&noLen)form='ENDBITP';else if(form==='STRIP'&&noLen)form='ENDBITS';return {...r,Quantity:q,form};});
     const metaRaw=await fetch(DATA_BASE+'/wheels_meta.json'+b).then(r=>r.ok?r.json():{}).catch(()=>({}));
     META=metaRaw; setStamp(META.generated);
@@ -278,59 +285,68 @@ function renderProdReport(){
 }
 // ---- By Source Coil (traceability): current plates/strips/scrap grouped by their mother coil ----
 // Source coil = the mother coil with slit suffixes (-A, -B, -A-B) rolled up to the parent.
-function srcCoilKey(r){
-  const moth=(r.Mothercoil||'').trim(), own=(r.CoilNo||r.BatchNum||'').trim();
-  return (r.form!=='COIL' && moth) ? moth : own;   // group by exact SAP Mother Coil (each slit stage separate)
-}
-const TYPELABEL={COIL:'Coil',PLATE:'Plate',ENDBITP:'Plate-End Bit',STRIP:'Strip',ENDBITS:'Strip-End Bit',SCRAP:'Scrap'};
-const TYPECOL={COIL:'#1367a6',PLATE:'#0e7a4b',ENDBITP:'#0e7a4b',STRIP:'#b5651d',ENDBITS:'#b5651d',SCRAP:'#8a1c1c'};
+// ===== By Source Coil - lifecycle traceability (wide view) =====
+// Feed: wheels_traceability.csv - one row per WH45 WIR batch with InWhsQty / DeliveredQty / ProcessedQty.
+const CLS=[['COIL','Coil','#1367a6'],['PLATE','Plate','#0e7a4b'],['PLATESCRAP','Plate-Scrap','#9a6a1c'],['STRIP','Strip','#0e7a4b'],['STRIPSCRAP','Strip-Scrap','#8a1c1c']];
+function clsOf(name){const n=(name||'').toUpperCase();
+  const scrap=n.includes('SCRAP'), strip=n.includes('BLANK')||n.includes('FLAT')||n.includes('STRIP');
+  if(scrap) return strip?'STRIPSCRAP':'PLATESCRAP';
+  if(strip) return 'STRIP';
+  if(n.includes('PLATE')) return 'PLATE';
+  if(n.includes('COIL')) return 'COIL';
+  return 'PLATE';}
+function statusOf(r){const w=+r.InWhsQty||0,d=+r.DeliveredQty||0,p=+r.ProcessedQty||0;
+  if(w>1e-6) return {s:'In Whs',q:w,c:'#0e7a4b'};
+  if(d>=p&&d>1e-6) return {s:'Delivered',q:d,c:'#1367a6'};
+  if(p>1e-6) return {s:'Processed',q:p,c:'#9a6a1c'};
+  return {s:'In Whs',q:w,c:'#888'};}
 function renderByCoil(){
-  const G={};
-  ROWS.forEach(r=>{const k=srcCoilKey(r)||'(unlinked)';(G[k]??={coil:[],kids:[]});(r.form==='COIL'?G[k].coil:G[k].kids).push(r);});
-  const keys=Object.keys(G).filter(k=>G[k].kids.length>0);
-  const held=g=>[...g.coil,...g.kids].reduce((a,r)=>a+r.Quantity,0);
-  keys.sort((a,b)=>held(G[b])-held(G[a]));
-  const ord={COIL:0,PLATE:1,ENDBITP:2,STRIP:3,ENDBITS:4,SCRAP:5};
-  let oP=0,oS=0,oC=0,oK=0, html='';
+  const body=$('coilBody'); if(!body) return;
+  if(!TRACE.length){ body.innerHTML='<div class="card"><div class="empty">Coil traceability isn\'t published yet. It appears automatically once the updated 15-minute job runs on the SAP box (it writes wheels_traceability.csv).</div></div>'; return; }
+  const onlyStock=$('coilOnlyStock')?$('coilOnlyStock').checked:true;
+  const qs=($('coilSearch')?$('coilSearch').value:'').trim().toUpperCase();
+  const G={}; TRACE.forEach(r=>{const k=(r.CoilNo||'').trim()||'(no coil no)';(G[k]??=[]).push(r);});
+  let keys=Object.keys(G);
+  const inW=k=>G[k].reduce((a,r)=>a+(+r.InWhsQty||0),0);
+  if(onlyStock) keys=keys.filter(k=>inW(k)>1e-6);
+  if(qs) keys=keys.filter(k=>k.toUpperCase().includes(qs)||G[k].some(r=>(r.BatchNum||'').toUpperCase().includes(qs)));
+  keys.sort((a,b)=>inW(b)-inW(a));
+  const stBadge=st=>`<span style="color:${st.c};font-weight:600">${st.s}</span>`;
+  const nm=s=>esc((s||'').replace(/\s+WIR\d+\s*$/i,'').trim());
+  const h2=lbls=>lbls.map(l=>`<th class="l" style="font-size:9px">${l}</th>`).join('');
+  let tW=0,tP=0,tD=0;
+  let html=`<div style="overflow-x:auto"><table class="x" style="font-size:10px;white-space:nowrap">
+    <thead>
+    <tr>${CLS.map(c=>`<th class="l" colspan="${c[0]==='COIL'?6:5}" style="background:${c[2]};color:#fff;font-size:11px;text-align:center">${c[1]}</th>`).join('')}</tr>
+    <tr>${h2(['Item Code','Item Name','Batch No','Coil No','Status','Qty'])}${h2(['Item Code','Item Name','Batch No','Status','Qty'])}${h2(['Item Code','Item Name','Batch No','Status','Qty'])}${h2(['Item Code','Item Name','Batch No','Status','Qty'])}${h2(['Item Code','Item Name','Batch No','Status','Qty'])}</tr>
+    </thead><tbody>`;
   keys.forEach(k=>{
-    const g=G[k], buck={PLATE:0,STRIP:0,SCRAP:0};
-    g.kids.forEach(r=>buck[baseForm(r.form)]+=r.Quantity);
-    const coilMT=g.coil.reduce((a,r)=>a+r.Quantity,0);
-    const cut=buck.PLATE+buck.STRIP+buck.SCRAP, tot=cut+coilMT;
-    const usable=cut?(buck.PLATE+buck.STRIP)/cut*100:0, scrp=cut?buck.SCRAP/cut*100:0;
-    oP+=buck.PLATE;oS+=buck.STRIP;oK+=buck.SCRAP;oC+=coilMT;
-    const items=[...g.coil,...g.kids].sort((a,b)=>(ord[a.form]-ord[b.form])||(b.Quantity-a.Quantity));
-    html+=`<div class="sheet" style="margin:12px 0">
-      <div class="shdr" style="padding:11px 18px">
-        <div style="flex:1"><h1 style="font-size:15px">Source Coil — <span class="mono" style="font-weight:700">${esc(k)}</span></h1>
-        <div class="sub">${g.kids.length} cut item${g.kids.length>1?'s':''}${coilMT>0?` · ${coilMT.toFixed(3)} MT still held as coil`:' · source coil fully cut (not in stock)'}</div></div>
-        <div style="text-align:right;font-size:12px"><div style="font-size:17px;font-weight:700">${tot.toFixed(3)} MT</div>
-          <div><span style="color:#8fe3b4">Usable ${usable.toFixed(1)}%</span> · <span style="color:#f3b0a6">Scrap ${scrp.toFixed(1)}%</span></div></div>
-      </div>
-      <div class="swrap"><table class="x">
-        <tr><th style="width:24px">#</th><th class="l">Type</th><th class="l">Mill</th><th class="l">Grade</th><th>Thk</th><th>Width</th><th>Length</th><th class="l">Coil / Batch No</th><th class="l">Mother Coil</th><th>Qty (MT)</th><th>Age (d)</th></tr>`;
-    items.forEach((x,i)=>{ const mill=(x.ItemName||'').split(' ')[0];
-      html+=`<tr><td class="r" style="color:#888">${i+1}</td>
-        <td><span style="font-weight:600;color:${TYPECOL[x.form]||'#333'}">${TYPELABEL[x.form]||x.form}</span></td>
-        <td>${esc(mill)}</td><td>${esc(x.Grade)}</td>
-        <td class="r">${fdim(x.Thick)}</td><td class="r">${fdim(x.Width)}</td><td class="r">${(x.form==='ENDBITP'||x.form==='ENDBITS')?'<b>EB</b>':flen(x.Length)}</td>
-        <td class="mono">${esc(x.CoilNo||x.BatchNum)}</td><td class="mono" style="color:#999">${esc(x.Mothercoil||'—')}</td>
-        <td class="r" style="font-weight:600">${x.Quantity.toFixed(3)}</td><td class="r" style="color:#888">${esc(x.AgeDays)}</td></tr>`; });
-    const sub=(lbl,v,c)=> v>0?`<tr><td class="st" colspan="9" style="color:${c};border-top:1px solid #e6eaed">${lbl}</td><td class="st r" style="color:${c};border-top:1px solid #e6eaed">${v.toFixed(3)}</td><td style="border-top:1px solid #e6eaed"></td></tr>`:'';
-    html+= (coilMT>0?sub('Coil remaining',coilMT,'#1367a6'):'')
-         + sub('Plate total',buck.PLATE,'#0e7a4b') + sub('Strip total',buck.STRIP,'#b5651d') + sub('Scrap total',buck.SCRAP,'#8a1c1c')
-         + `<tr><td class="st" colspan="9">Total held from this coil</td><td class="st r">${tot.toFixed(3)}</td><td class="st"></td></tr>`;
-    html+='</table></div></div>';
+    const rows=G[k], by={COIL:[],PLATE:[],PLATESCRAP:[],STRIP:[],STRIPSCRAP:[]};
+    rows.forEach(r=>{ by[clsOf(r.ItemName)].push({...r,_st:statusOf(r)}); });
+    Object.values(by).forEach(a=>a.sort((x,y)=>y._st.q-x._st.q));
+    const cW=rows.reduce((a,r)=>a+(+r.InWhsQty||0),0), cP=rows.reduce((a,r)=>a+(+r.ProcessedQty||0),0), cD=rows.reduce((a,r)=>a+(+r.DeliveredQty||0),0);
+    tW+=cW;tP+=cP;tD+=cD;
+    const maxN=Math.max(1,by.COIL.length,by.PLATE.length,by.PLATESCRAP.length,by.STRIP.length,by.STRIPSCRAP.length);
+    html+=`<tr><td colspan="26" style="background:#0e2a47;color:#fff;font-weight:700;padding:6px 10px;font-size:11px">Source Coil: ${esc(k)} &nbsp;<span style="font-weight:400;opacity:.85">In Whs ${cW.toFixed(3)} · Processed ${cP.toFixed(3)} · Delivered ${cD.toFixed(3)} MT</span></td></tr>`;
+    for(let i=0;i<maxN;i++){
+      html+='<tr>';
+      const c=by.COIL[i];
+      html+= c?`<td class="mono">${esc(c.ItemCode)}</td><td>${nm(c.ItemName)}</td><td class="mono">${esc(c.BatchNum)}</td><td class="mono" style="color:#777">${esc(c.CoilNo)}</td><td>${stBadge(c._st)}</td><td class="r" style="font-weight:600">${c._st.q.toFixed(3)}</td>`
+             :'<td></td><td></td><td></td><td></td><td></td><td></td>';
+      ['PLATE','PLATESCRAP','STRIP','STRIPSCRAP'].forEach(cat=>{const x=by[cat][i];
+        html+= x?`<td class="mono">${esc(x.ItemCode)}</td><td>${nm(x.ItemName)}</td><td class="mono">${esc(x.BatchNum)}</td><td>${stBadge(x._st)}</td><td class="r" style="font-weight:600">${x._st.q.toFixed(3)}</td>`
+               :'<td></td><td></td><td></td><td></td><td></td>';});
+      html+='</tr>';
+    }
   });
-  const wholeKeys=Object.keys(G).filter(k=>G[k].kids.length===0);
-  const wholeMT=wholeKeys.reduce((a,k)=>a+G[k].coil.reduce((x,r)=>x+r.Quantity,0),0);
-  const ocut=oP+oS+oK;
-  const head=`<div class="card"><h3>Stock by source coil <span class="r">${keys.length} source coils with cut products</span></h3>
+  html+='</tbody></table></div>';
+  const head=`<div class="card"><h3>Coil traceability <span class="r">${keys.length} source coil${keys.length!==1?'s':''}${onlyStock?' with stock':''}</span></h3>
     <div style="display:flex;gap:20px;flex-wrap:wrap;font-size:13px;margin-top:6px">
-      <div>Plate held: <b>${oP.toFixed(3)} MT</b></div><div>Strip held: <b>${oS.toFixed(3)} MT</b></div><div>Scrap held: <b>${oK.toFixed(3)} MT</b></div>
-      <div>Overall usable: <b style="color:#0e7a4b">${ocut?((oP+oS)/ocut*100).toFixed(1):0}%</b></div><div>Overall scrap: <b style="color:#8a1c1c">${ocut?(oK/ocut*100).toFixed(1):0}%</b></div></div>
-    <div class="snote" style="margin:10px 0 0">Grouped by the exact SAP Mother Coil (each slit stage shown separately); every row shows its own Coil/Batch and Mother Coil so figures trace back. ${wholeKeys.length} coil${wholeKeys.length!==1?'s':''} still whole / not yet cut (${wholeMT.toFixed(3)} MT) are shown on the Stock Statement tab, not here.</div></div>`;
-  $('coilBody').innerHTML = keys.length ? (head+html) : '<div class="card"><div class="empty">No cut products (plates / strips / scrap) currently in stock.</div></div>';
+      <div>In warehouse: <b style="color:#0e7a4b">${tW.toFixed(3)} MT</b></div>
+      <div>Processed (cut): <b style="color:#9a6a1c">${tP.toFixed(3)} MT</b></div>
+      <div>Delivered to Wheels India: <b style="color:#1367a6">${tD.toFixed(3)} MT</b></div></div>
+    <div class="snote" style="margin:10px 0 0">Grouped by SAP source coil number (U_CoilNo). Status is each piece's current state: <b>In Whs</b> held now, <b>Processed</b> cut into the next stage, or <b>Delivered</b> dispatched to Wheels India. Scrap off blanks/flats is Strip-Scrap; plate/defective scrap is Plate-Scrap.</div></div>`;
+  body.innerHTML = keys.length ? (head+html) : '<div class="card"><div class="empty">No source coils match the filter.</div></div>';
 }
 
 function draw(){
