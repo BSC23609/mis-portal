@@ -26,10 +26,13 @@
   .tabbar{display:flex;gap:6px;margin:14px 0 0}
   .tabbtn{background:#fff;border:1px solid #cdd6df;color:#0e2a47;border-radius:7px;padding:7px 16px;font-weight:600;cursor:pointer}
   .tabbtn.active{background:#0e2a47;border-color:#0e2a47;color:#fff}
-  #coilBody td.srcc{background:#eef3f7;font-weight:700;vertical-align:top;border-right:2px solid #cdd6df;white-space:nowrap}
+  #coilBody td.srcc{background:#eef3f7;font-weight:700;vertical-align:top;white-space:nowrap}
   #coilBody select{padding:6px 8px;border:1px solid #cdd6df;border-radius:6px;font-size:12px}
+  #coilBody table.x td, #coilBody table.x th{border:1px solid #c3ccd4}
+  #coilBody table.x td.gs, #coilBody table.x th.gs{border-left:3px solid #0e2a47}
+  #coilBody table.x tr.band td{border-bottom:2px solid #0e2a47}
 </style>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
 </head><body>
 <div class="pw">
   <div id="errbox"></div>
@@ -339,17 +342,17 @@ function coilFiltered(){
   return {out, flat};
 }
 const CLSLABEL={COIL:'Coil',PLATE:'Plate',PLATESCRAP:'Plate-Scrap',STRIP:'Strip',STRIPSCRAP:'Strip-Scrap'};
-let COIL_FLAT=[];
+let COIL_FLAT=[], COIL_OUT=[];
 function renderByCoil(){
   const body=$('coilBody'); if(!body) return;
   if(!TRACE.length){ body.innerHTML='<div class="card"><div class="empty">Coil traceability isn\'t published yet. It appears automatically once the updated 15-minute job runs on the SAP box (it writes wheels_traceability.csv).</div></div>'; return; }
   // populate the mill dropdown once
   const msel=$('coilMill');
   if(msel && msel.options.length<=1){ const mills=[...new Set(TRACE.map(coilMill))].filter(m=>m&&m!=='Others').sort(); if([...new Set(TRACE.map(coilMill))].includes('Others'))mills.push('Others'); msel.insertAdjacentHTML('beforeend', mills.map(m=>`<option value="${esc(m)}">${esc(m)}</option>`).join('')); }
-  const {out, flat}=coilFiltered(); COIL_FLAT=flat;
+  const {out, flat}=coilFiltered(); COIL_FLAT=flat; COIL_OUT=out;
   const stBadge=st=>`<span style="color:${st.c};font-weight:600">${st.s}</span>`;
   const nm=s=>esc((s||'').replace(/\s+WIR\d+\s*$/i,'').trim());
-  const h2=lbls=>lbls.map(l=>`<th class="l" style="font-size:9px">${l}</th>`).join('');
+  const h2=lbls=>lbls.map((l,i)=>`<th class="l${i===0?' gs':''}" style="font-size:9px">${l}</th>`).join('');
   let tW=0,tP=0,tD=0, html=`<div style="overflow-x:auto"><table class="x" style="font-size:10px;white-space:nowrap">
     <thead>
     <tr><th class="l" rowspan="2" style="background:#0e2a47;color:#fff;vertical-align:middle">Source Coil</th>${CLS.map(c=>`<th class="l" colspan="${c[0]==='COIL'?6:5}" style="background:${c[2]};color:#fff;font-size:11px;text-align:center">${c[1]}</th>`).join('')}</tr>
@@ -359,14 +362,14 @@ function renderByCoil(){
     tW+=g.cW;tP+=g.cP;tD+=g.cD;
     const by=g.by, maxN=Math.max(1,by.COIL.length,by.PLATE.length,by.PLATESCRAP.length,by.STRIP.length,by.STRIPSCRAP.length);
     for(let i=0;i<maxN;i++){
-      html+='<tr>';
-      if(i===0) html+=`<td class="srcc" rowspan="${maxN}">${esc(g.coil)}<div style="font-weight:400;font-size:9px;color:#778;margin-top:2px">IW ${g.cW.toFixed(2)} · Pr ${g.cP.toFixed(2)} · Dl ${g.cD.toFixed(2)}</div></td>`;
+      html+= i===maxN-1 ? '<tr class="band">' : '<tr>';
+      if(i===0) html+=`<td class="srcc gs" rowspan="${maxN}">${esc(g.coil)}<div style="font-weight:400;font-size:9px;color:#778;margin-top:2px">IW ${g.cW.toFixed(2)} · Pr ${g.cP.toFixed(2)} · Dl ${g.cD.toFixed(2)}</div></td>`;
       const c=by.COIL[i];
-      html+= c?`<td class="mono">${esc(c.ItemCode)}</td><td>${nm(c.ItemName)}</td><td class="mono">${esc(c.BatchNum)}</td><td class="mono" style="color:#777">${esc(c.CoilNo)}</td><td>${stBadge(c._st)}</td><td class="r" style="font-weight:600">${c._st.q.toFixed(3)}</td>`
-             :'<td></td><td></td><td></td><td></td><td></td><td></td>';
+      html+= c?`<td class="mono gs">${esc(c.ItemCode)}</td><td>${nm(c.ItemName)}</td><td class="mono">${esc(c.BatchNum)}</td><td class="mono" style="color:#777">${esc(c.CoilNo)}</td><td>${stBadge(c._st)}</td><td class="r" style="font-weight:600">${c._st.q.toFixed(3)}</td>`
+             :'<td class="gs"></td><td></td><td></td><td></td><td></td><td></td>';
       ['PLATE','PLATESCRAP','STRIP','STRIPSCRAP'].forEach(cat=>{const x=by[cat][i];
-        html+= x?`<td class="mono">${esc(x.ItemCode)}</td><td>${nm(x.ItemName)}</td><td class="mono">${esc(x.BatchNum)}</td><td>${stBadge(x._st)}</td><td class="r" style="font-weight:600">${x._st.q.toFixed(3)}</td>`
-               :'<td></td><td></td><td></td><td></td><td></td>';});
+        html+= x?`<td class="mono gs">${esc(x.ItemCode)}</td><td>${nm(x.ItemName)}</td><td class="mono">${esc(x.BatchNum)}</td><td>${stBadge(x._st)}</td><td class="r" style="font-weight:600">${x._st.q.toFixed(3)}</td>`
+               :'<td class="gs"></td><td></td><td></td><td></td><td></td>';});
       html+='</tr>';
     }
   });
@@ -379,21 +382,77 @@ function renderByCoil(){
     <div class="snote" style="margin:10px 0 0">Grouped by SAP source coil number (U_CoilNo). Status is each piece's current state: <b>In Whs</b> held now, <b>Processed</b> cut into the next stage, or <b>Delivered</b> dispatched to Wheels India. Scrap off blanks/flats is Strip-Scrap; plate/defective scrap is Plate-Scrap.</div></div>`;
   body.innerHTML = out.length ? (head+html) : '<div class="card"><div class="empty">No source coils match the filter.</div></div>';
 }
-function exportCoilExcel(){
-  if(!COIL_FLAT.length){ alert('Nothing to export for the current filter.'); return; }
+// category layout for the wide Excel export: [key, label, argb colour, sub-columns]
+const XCAT=[
+  ['COIL','Coil','FF1367A6',['Item Code','Item Name','Batch No','Coil No','Status','Qty']],
+  ['PLATE','Plate','FF0E7A4B',['Item Code','Item Name','Batch No','Status','Qty']],
+  ['PLATESCRAP','Plate-Scrap','FF9A6A1C',['Item Code','Item Name','Batch No','Status','Qty']],
+  ['STRIP','Strip','FF0E6A7A',['Item Code','Item Name','Batch No','Status','Qty']],
+  ['STRIPSCRAP','Strip-Scrap','FF8A1C1C',['Item Code','Item Name','Batch No','Status','Qty']]
+];
+const STCOL={'In Whs':'FF0E7A4B','Processed':'FF9A6A1C','Delivered':'FF1367A6'};
+function dlBlob(buf,name,type){ const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([buf],{type})); a.download=name; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),4000); }
+async function exportCoilExcel(){
+  if(!COIL_OUT.length){ alert('Nothing to export for the current filter.'); return; }
+  const stamp=new Date().toISOString().slice(0,10);
+  if(!window.ExcelJS){ exportCoilCSV(stamp); return; }
+  const wb=new ExcelJS.Workbook(); const ws=wb.addWorksheet('Coil Traceability',{views:[{state:'frozen',xSplit:1,ySplit:2}]});
+  // column boundaries: A = Source Coil, then each category's sub-columns
+  const widths=[22]; XCAT.forEach(c=>c[3].forEach(h=>widths.push(h==='Item Name'?34:h==='Batch No'||h==='Coil No'?20:h==='Item Code'?15:h==='Qty'?9:11)));
+  ws.columns=widths.map(w=>({width:w}));
+  const nCols=widths.length;
+  // group column ranges (1-based)
+  const groups=[]; let col=2; XCAT.forEach(c=>{ groups.push({key:c[0],label:c[1],color:c[2],start:col,end:col+c[3].length-1}); col+=c[3].length; });
+  // ---- header row 1: category group titles ----
+  const h1=ws.getRow(1); h1.getCell(1).value='Source Coil';
+  groups.forEach(g=>{ ws.mergeCells(1,g.start,1,g.end); const cell=h1.getCell(g.start); cell.value=g.label;
+    cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:g.color}}; cell.font={bold:true,color:{argb:'FFFFFFFF'},size:11}; cell.alignment={horizontal:'center',vertical:'middle'}; });
+  ws.mergeCells(1,1,2,1); const sc=h1.getCell(1); sc.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF0E2A47'}}; sc.font={bold:true,color:{argb:'FFFFFFFF'}}; sc.alignment={horizontal:'center',vertical:'middle'};
+  // ---- header row 2: sub-headers ----
+  const h2=ws.getRow(2); groups.forEach(g=>{ XCAT.find(c=>c[0]===g.key)[3].forEach((lbl,i)=>{ const cell=h2.getCell(g.start+i); cell.value=lbl; cell.font={bold:true,size:9}; cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFEEF3F7'}}; cell.alignment={horizontal:'left'}; }); });
+  // ---- data rows, one band per coil ----
+  let r=3;
+  COIL_OUT.forEach(g=>{
+    const by=g.by, maxN=Math.max(1,by.COIL.length,by.PLATE.length,by.PLATESCRAP.length,by.STRIP.length,by.STRIPSCRAP.length);
+    const first=r;
+    for(let i=0;i<maxN;i++){
+      const row=ws.getRow(r);
+      groups.forEach(grp=>{ const x=by[grp.key][i]; if(!x) return; const s=x._st;
+        const base=grp.start; const put=(off,v,opts)=>{ const c=row.getCell(base+off); c.value=v; if(opts&&opts.num) c.numFmt='0.000'; if(opts&&opts.font) c.font=opts.font; };
+        if(grp.key==='COIL'){ put(0,x.ItemCode); put(1,(x.ItemName||'').trim()); put(2,x.BatchNum); put(3,x.CoilNo); put(4,s.s,{font:{color:{argb:STCOL[s.s]||'FF333333'},bold:true}}); put(5,+s.q.toFixed(3),{num:true,font:{bold:true}}); }
+        else { put(0,x.ItemCode); put(1,(x.ItemName||'').trim()); put(2,x.BatchNum); put(3,s.s,{font:{color:{argb:STCOL[s.s]||'FF333333'},bold:true}}); put(4,+s.q.toFixed(3),{num:true,font:{bold:true}}); }
+      });
+      r++;
+    }
+    // Source Coil cell merged down the band
+    ws.mergeCells(first,1,r-1,1); const scc=ws.getRow(first).getCell(1);
+    scc.value=`${g.coil}\nIW ${g.cW.toFixed(2)} · Pr ${g.cP.toFixed(2)} · Dl ${g.cD.toFixed(2)}`;
+    scc.font={bold:true,size:10}; scc.alignment={vertical:'top',wrapText:true}; scc.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFEEF3F7'}};
+    // band bottom separator
+    for(let c=1;c<=nCols;c++){ const cell=ws.getRow(r-1).getCell(c); const b=cell.border||{}; b.bottom={style:'medium',color:{argb:'FF0E2A47'}}; cell.border=b; }
+  });
+  const lastRow=r-1;
+  // ---- borders: thin grey everywhere; coloured medium walls around each category ----
+  const thin={style:'thin',color:{argb:'FFC3CCD4'}};
+  for(let rr=1;rr<=lastRow;rr++){ const row=ws.getRow(rr);
+    for(let cc=1;cc<=nCols;cc++){ const cell=row.getCell(cc); const b=cell.border||{}; b.top=b.top||thin; b.left=b.left||thin; b.right=b.right||thin; b.bottom=b.bottom||thin; cell.border=b; }
+  }
+  // coloured category walls
+  groups.forEach(g=>{ const wall={style:'medium',color:{argb:g.color}};
+    for(let rr=1;rr<=lastRow;rr++){ const L=ws.getRow(rr).getCell(g.start), R=ws.getRow(rr).getCell(g.end);
+      L.border={...L.border,left:wall}; R.border={...R.border,right:wall}; } });
+  // Source Coil right wall (navy)
+  for(let rr=1;rr<=lastRow;rr++){ const c=ws.getRow(rr).getCell(1); c.border={...c.border,right:{style:'medium',color:{argb:'FF0E2A47'}},left:{style:'medium',color:{argb:'FF0E2A47'}}}; }
+  ws.getRow(1).height=20; ws.getRow(2).height=16;
+  const buf=await wb.xlsx.writeBuffer();
+  dlBlob(buf,'wheels_coil_traceability_'+stamp+'.xlsx','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+}
+function exportCoilCSV(stamp){
   const cols=['Coil','Mill','Category','ItemCode','ItemName','Batch','Status','Qty','InWhs','Processed','Delivered'];
   const hdr={Coil:'Source Coil',Mill:'Mill',Category:'Category',ItemCode:'Item Code',ItemName:'Item Name',Batch:'Batch No',Status:'Status',Qty:'Qty (MT)',InWhs:'In Whs (MT)',Processed:'Processed (MT)',Delivered:'Delivered (MT)'};
-  const stamp=new Date().toISOString().slice(0,10);
-  if(window.XLSX){
-    const data=[cols.map(c=>hdr[c]), ...COIL_FLAT.map(r=>cols.map(c=>r[c]))];
-    const ws=XLSX.utils.aoa_to_sheet(data); ws['!cols']=[{wch:20},{wch:9},{wch:12},{wch:16},{wch:40},{wch:24},{wch:10},{wch:10},{wch:11},{wch:12},{wch:11}];
-    const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Coil Traceability');
-    XLSX.writeFile(wb, 'wheels_coil_traceability_'+stamp+'.xlsx'); return;
-  }
-  // fallback: CSV (opens in Excel)
   const q=v=>{v=v==null?'':String(v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;};
-  const csv='﻿'+[cols.map(c=>hdr[c]).join(','), ...COIL_FLAT.map(r=>cols.map(c=>q(r[c])).join(','))].join('\r\n');
-  const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'})); a.download='wheels_coil_traceability_'+stamp+'.csv'; a.click();
+  const csv='﻿'+[cols.map(c=>hdr[c]).join(','), ...COIL_FLAT.map(x=>cols.map(c=>q(x[c])).join(','))].join('\r\n');
+  dlBlob(csv,'wheels_coil_traceability_'+stamp+'.csv','text/csv');
 }
 
 function draw(){
