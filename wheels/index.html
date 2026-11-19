@@ -26,7 +26,10 @@
   .tabbar{display:flex;gap:6px;margin:14px 0 0}
   .tabbtn{background:#fff;border:1px solid #cdd6df;color:#0e2a47;border-radius:7px;padding:7px 16px;font-weight:600;cursor:pointer}
   .tabbtn.active{background:#0e2a47;border-color:#0e2a47;color:#fff}
+  #coilBody td.srcc{background:#eef3f7;font-weight:700;vertical-align:top;border-right:2px solid #cdd6df;white-space:nowrap}
+  #coilBody select{padding:6px 8px;border:1px solid #cdd6df;border-radius:6px;font-size:12px}
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head><body>
 <div class="pw">
   <div id="errbox"></div>
@@ -100,10 +103,15 @@
   <div id="tabCoil" style="display:none">
     <div class="toolbar">
       <label style="font-size:12px;color:var(--gray);display:flex;align-items:center;gap:6px">
-        <input type="checkbox" id="coilOnlyStock" checked onchange="renderByCoil()"/> only coils with stock in warehouse
+        <input type="checkbox" id="coilOnlyStock" checked onchange="renderByCoil()"/> only coils with stock
       </label>
-      <input id="coilSearch" placeholder="search coil / batch no" oninput="renderByCoil()" style="padding:6px 10px;border:1px solid #cdd6df;border-radius:6px;font-size:12px;min-width:200px"/>
+      <select id="coilStatus" onchange="renderByCoil()" style="padding:6px 8px;border:1px solid #cdd6df;border-radius:6px;font-size:12px">
+        <option value="">All statuses</option><option value="In Whs">In Whs</option><option value="Processed">Processed</option><option value="Delivered">Delivered</option>
+      </select>
+      <select id="coilMill" onchange="renderByCoil()" style="padding:6px 8px;border:1px solid #cdd6df;border-radius:6px;font-size:12px"><option value="">All mills</option></select>
+      <input id="coilSearch" placeholder="search coil / batch no" oninput="renderByCoil()" style="padding:6px 10px;border:1px solid #cdd6df;border-radius:6px;font-size:12px;min-width:180px"/>
       <div class="sp">
+        <button class="pbtn" style="background:#0e7a4b;border-color:#0e7a4b" onclick="exportCoilExcel()">Download Excel</button>
         <button class="pbtn" style="background:var(--blue);border-color:var(--blue)" onclick="window.print()">Print / Save PDF</button>
       </div>
     </div>
@@ -300,36 +308,59 @@ function statusOf(r){const w=+r.InWhsQty||0,d=+r.DeliveredQty||0,p=+r.ProcessedQ
   if(d>=p&&d>1e-6) return {s:'Delivered',q:d,c:'#1367a6'};
   if(p>1e-6) return {s:'Processed',q:p,c:'#9a6a1c'};
   return {s:'In Whs',q:w,c:'#888'};}
-function renderByCoil(){
-  const body=$('coilBody'); if(!body) return;
-  if(!TRACE.length){ body.innerHTML='<div class="card"><div class="empty">Coil traceability isn\'t published yet. It appears automatically once the updated 15-minute job runs on the SAP box (it writes wheels_traceability.csv).</div></div>'; return; }
+const coilMill=r=>brandNorm(r.ItemName);
+function coilFiltered(){
+  // returns ordered [ {coil, mill, by:{CAT:[items]}, cW,cP,cD} ] after filters, + flat rows for export
   const onlyStock=$('coilOnlyStock')?$('coilOnlyStock').checked:true;
+  const fStatus=$('coilStatus')?$('coilStatus').value:'';
+  const fMill=$('coilMill')?$('coilMill').value:'';
   const qs=($('coilSearch')?$('coilSearch').value:'').trim().toUpperCase();
   const G={}; TRACE.forEach(r=>{const k=(r.CoilNo||'').trim()||'(no coil no)';(G[k]??=[]).push(r);});
-  let keys=Object.keys(G);
   const inW=k=>G[k].reduce((a,r)=>a+(+r.InWhsQty||0),0);
+  let keys=Object.keys(G);
   if(onlyStock) keys=keys.filter(k=>inW(k)>1e-6);
   if(qs) keys=keys.filter(k=>k.toUpperCase().includes(qs)||G[k].some(r=>(r.BatchNum||'').toUpperCase().includes(qs)));
   keys.sort((a,b)=>inW(b)-inW(a));
+  const out=[], flat=[];
+  keys.forEach(k=>{
+    const rows=G[k]; if(fMill && coilMill(rows[0])!==fMill) return;
+    const by={COIL:[],PLATE:[],PLATESCRAP:[],STRIP:[],STRIPSCRAP:[]};
+    let any=false;
+    rows.forEach(r=>{ const st=statusOf(r); if(fStatus && st.s!==fStatus) return;
+      by[clsOf(r.ItemName)].push({...r,_st:st}); any=true;
+      flat.push({Coil:k, Mill:coilMill(r), Category:CLSLABEL[clsOf(r.ItemName)], ItemCode:r.ItemCode, ItemName:(r.ItemName||'').trim(),
+                 Batch:r.BatchNum, Status:st.s, Qty:+st.q.toFixed(3), InWhs:+(+r.InWhsQty||0).toFixed(3), Processed:+(+r.ProcessedQty||0).toFixed(3), Delivered:+(+r.DeliveredQty||0).toFixed(3)});
+    });
+    if(!any) return;
+    Object.values(by).forEach(a=>a.sort((x,y)=>y._st.q-x._st.q));
+    out.push({coil:k, mill:coilMill(rows[0]), by,
+      cW:rows.reduce((a,r)=>a+(+r.InWhsQty||0),0), cP:rows.reduce((a,r)=>a+(+r.ProcessedQty||0),0), cD:rows.reduce((a,r)=>a+(+r.DeliveredQty||0),0)});
+  });
+  return {out, flat};
+}
+const CLSLABEL={COIL:'Coil',PLATE:'Plate',PLATESCRAP:'Plate-Scrap',STRIP:'Strip',STRIPSCRAP:'Strip-Scrap'};
+let COIL_FLAT=[];
+function renderByCoil(){
+  const body=$('coilBody'); if(!body) return;
+  if(!TRACE.length){ body.innerHTML='<div class="card"><div class="empty">Coil traceability isn\'t published yet. It appears automatically once the updated 15-minute job runs on the SAP box (it writes wheels_traceability.csv).</div></div>'; return; }
+  // populate the mill dropdown once
+  const msel=$('coilMill');
+  if(msel && msel.options.length<=1){ const mills=[...new Set(TRACE.map(coilMill))].filter(m=>m&&m!=='Others').sort(); if([...new Set(TRACE.map(coilMill))].includes('Others'))mills.push('Others'); msel.insertAdjacentHTML('beforeend', mills.map(m=>`<option value="${esc(m)}">${esc(m)}</option>`).join('')); }
+  const {out, flat}=coilFiltered(); COIL_FLAT=flat;
   const stBadge=st=>`<span style="color:${st.c};font-weight:600">${st.s}</span>`;
   const nm=s=>esc((s||'').replace(/\s+WIR\d+\s*$/i,'').trim());
   const h2=lbls=>lbls.map(l=>`<th class="l" style="font-size:9px">${l}</th>`).join('');
-  let tW=0,tP=0,tD=0;
-  let html=`<div style="overflow-x:auto"><table class="x" style="font-size:10px;white-space:nowrap">
+  let tW=0,tP=0,tD=0, html=`<div style="overflow-x:auto"><table class="x" style="font-size:10px;white-space:nowrap">
     <thead>
-    <tr>${CLS.map(c=>`<th class="l" colspan="${c[0]==='COIL'?6:5}" style="background:${c[2]};color:#fff;font-size:11px;text-align:center">${c[1]}</th>`).join('')}</tr>
+    <tr><th class="l" rowspan="2" style="background:#0e2a47;color:#fff;vertical-align:middle">Source Coil</th>${CLS.map(c=>`<th class="l" colspan="${c[0]==='COIL'?6:5}" style="background:${c[2]};color:#fff;font-size:11px;text-align:center">${c[1]}</th>`).join('')}</tr>
     <tr>${h2(['Item Code','Item Name','Batch No','Coil No','Status','Qty'])}${h2(['Item Code','Item Name','Batch No','Status','Qty'])}${h2(['Item Code','Item Name','Batch No','Status','Qty'])}${h2(['Item Code','Item Name','Batch No','Status','Qty'])}${h2(['Item Code','Item Name','Batch No','Status','Qty'])}</tr>
     </thead><tbody>`;
-  keys.forEach(k=>{
-    const rows=G[k], by={COIL:[],PLATE:[],PLATESCRAP:[],STRIP:[],STRIPSCRAP:[]};
-    rows.forEach(r=>{ by[clsOf(r.ItemName)].push({...r,_st:statusOf(r)}); });
-    Object.values(by).forEach(a=>a.sort((x,y)=>y._st.q-x._st.q));
-    const cW=rows.reduce((a,r)=>a+(+r.InWhsQty||0),0), cP=rows.reduce((a,r)=>a+(+r.ProcessedQty||0),0), cD=rows.reduce((a,r)=>a+(+r.DeliveredQty||0),0);
-    tW+=cW;tP+=cP;tD+=cD;
-    const maxN=Math.max(1,by.COIL.length,by.PLATE.length,by.PLATESCRAP.length,by.STRIP.length,by.STRIPSCRAP.length);
-    html+=`<tr><td colspan="26" style="background:#0e2a47;color:#fff;font-weight:700;padding:6px 10px;font-size:11px">Source Coil: ${esc(k)} &nbsp;<span style="font-weight:400;opacity:.85">In Whs ${cW.toFixed(3)} · Processed ${cP.toFixed(3)} · Delivered ${cD.toFixed(3)} MT</span></td></tr>`;
+  out.forEach(g=>{
+    tW+=g.cW;tP+=g.cP;tD+=g.cD;
+    const by=g.by, maxN=Math.max(1,by.COIL.length,by.PLATE.length,by.PLATESCRAP.length,by.STRIP.length,by.STRIPSCRAP.length);
     for(let i=0;i<maxN;i++){
       html+='<tr>';
+      if(i===0) html+=`<td class="srcc" rowspan="${maxN}">${esc(g.coil)}<div style="font-weight:400;font-size:9px;color:#778;margin-top:2px">IW ${g.cW.toFixed(2)} · Pr ${g.cP.toFixed(2)} · Dl ${g.cD.toFixed(2)}</div></td>`;
       const c=by.COIL[i];
       html+= c?`<td class="mono">${esc(c.ItemCode)}</td><td>${nm(c.ItemName)}</td><td class="mono">${esc(c.BatchNum)}</td><td class="mono" style="color:#777">${esc(c.CoilNo)}</td><td>${stBadge(c._st)}</td><td class="r" style="font-weight:600">${c._st.q.toFixed(3)}</td>`
              :'<td></td><td></td><td></td><td></td><td></td><td></td>';
@@ -340,13 +371,29 @@ function renderByCoil(){
     }
   });
   html+='</tbody></table></div>';
-  const head=`<div class="card"><h3>Coil traceability <span class="r">${keys.length} source coil${keys.length!==1?'s':''}${onlyStock?' with stock':''}</span></h3>
+  const head=`<div class="card"><h3>Coil traceability <span class="r">${out.length} source coil${out.length!==1?'s':''}</span></h3>
     <div style="display:flex;gap:20px;flex-wrap:wrap;font-size:13px;margin-top:6px">
       <div>In warehouse: <b style="color:#0e7a4b">${tW.toFixed(3)} MT</b></div>
       <div>Processed (cut): <b style="color:#9a6a1c">${tP.toFixed(3)} MT</b></div>
       <div>Delivered to Wheels India: <b style="color:#1367a6">${tD.toFixed(3)} MT</b></div></div>
     <div class="snote" style="margin:10px 0 0">Grouped by SAP source coil number (U_CoilNo). Status is each piece's current state: <b>In Whs</b> held now, <b>Processed</b> cut into the next stage, or <b>Delivered</b> dispatched to Wheels India. Scrap off blanks/flats is Strip-Scrap; plate/defective scrap is Plate-Scrap.</div></div>`;
-  body.innerHTML = keys.length ? (head+html) : '<div class="card"><div class="empty">No source coils match the filter.</div></div>';
+  body.innerHTML = out.length ? (head+html) : '<div class="card"><div class="empty">No source coils match the filter.</div></div>';
+}
+function exportCoilExcel(){
+  if(!COIL_FLAT.length){ alert('Nothing to export for the current filter.'); return; }
+  const cols=['Coil','Mill','Category','ItemCode','ItemName','Batch','Status','Qty','InWhs','Processed','Delivered'];
+  const hdr={Coil:'Source Coil',Mill:'Mill',Category:'Category',ItemCode:'Item Code',ItemName:'Item Name',Batch:'Batch No',Status:'Status',Qty:'Qty (MT)',InWhs:'In Whs (MT)',Processed:'Processed (MT)',Delivered:'Delivered (MT)'};
+  const stamp=new Date().toISOString().slice(0,10);
+  if(window.XLSX){
+    const data=[cols.map(c=>hdr[c]), ...COIL_FLAT.map(r=>cols.map(c=>r[c]))];
+    const ws=XLSX.utils.aoa_to_sheet(data); ws['!cols']=[{wch:20},{wch:9},{wch:12},{wch:16},{wch:40},{wch:24},{wch:10},{wch:10},{wch:11},{wch:12},{wch:11}];
+    const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Coil Traceability');
+    XLSX.writeFile(wb, 'wheels_coil_traceability_'+stamp+'.xlsx'); return;
+  }
+  // fallback: CSV (opens in Excel)
+  const q=v=>{v=v==null?'':String(v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;};
+  const csv='﻿'+[cols.map(c=>hdr[c]).join(','), ...COIL_FLAT.map(r=>cols.map(c=>q(r[c])).join(','))].join('\r\n');
+  const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'})); a.download='wheels_coil_traceability_'+stamp+'.csv'; a.click();
 }
 
 function draw(){
