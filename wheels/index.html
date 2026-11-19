@@ -31,6 +31,15 @@
   #coilBody table.x td, #coilBody table.x th{border:1px solid #c3ccd4}
   #coilBody table.x td.gs, #coilBody table.x th.gs{border-left:3px solid #0e2a47}
   #coilBody table.x tr.band td{border-bottom:2px solid #0e2a47}
+  .msd{position:relative;display:inline-block}
+  .msd>button{background:#fff;border:1px solid #cdd6df;border-radius:6px;padding:6px 10px;font-size:12px;cursor:pointer;color:#0e2a47}
+  .msd>button.on{border-color:#0e7a4b;color:#0e7a4b;font-weight:600}
+  .msd .pnl{position:absolute;z-index:40;top:calc(100% + 4px);left:0;background:#fff;border:1px solid #cdd6df;border-radius:8px;box-shadow:0 6px 18px rgba(0,0,0,.14);padding:8px;min-width:210px;max-height:320px;overflow:auto;display:none}
+  .msd.open .pnl{display:block}
+  .msd .pnl input.s{width:100%;box-sizing:border-box;padding:5px 8px;border:1px solid #cdd6df;border-radius:5px;margin-bottom:6px;font-size:12px}
+  .msd .pnl label{display:flex;align-items:center;gap:7px;padding:3px 4px;font-size:12px;cursor:pointer;white-space:nowrap;border-radius:4px}
+  .msd .pnl label:hover{background:#f0f4f8}
+  .msd .pnl a.cl{display:block;font-size:11px;color:#1367a6;margin-bottom:6px;cursor:pointer}
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
 </head><body>
@@ -108,11 +117,10 @@
       <label style="font-size:12px;color:var(--gray);display:flex;align-items:center;gap:6px">
         <input type="checkbox" id="coilOnlyStock" checked onchange="renderByCoil()"/> only coils with stock
       </label>
-      <select id="coilStatus" onchange="renderByCoil()" style="padding:6px 8px;border:1px solid #cdd6df;border-radius:6px;font-size:12px">
-        <option value="">All statuses</option><option value="In Whs">In Whs</option><option value="Processed">Processed</option><option value="Delivered">Delivered</option>
-      </select>
+      <div class="msd" id="msCoil"><button type="button" onclick="msToggle('msCoil',event)">Coil No &#9662;</button><div class="pnl" id="msCoil-pnl"></div></div>
+      <div class="msd" id="msStatus"><button type="button" onclick="msToggle('msStatus',event)">Status &#9662;</button><div class="pnl" id="msStatus-pnl"></div></div>
       <select id="coilMill" onchange="renderByCoil()" style="padding:6px 8px;border:1px solid #cdd6df;border-radius:6px;font-size:12px"><option value="">All mills</option></select>
-      <input id="coilSearch" placeholder="search coil / batch no" oninput="renderByCoil()" style="padding:6px 10px;border:1px solid #cdd6df;border-radius:6px;font-size:12px;min-width:180px"/>
+      <input id="coilSearch" placeholder="search coil / batch no" oninput="renderByCoil()" style="padding:6px 10px;border:1px solid #cdd6df;border-radius:6px;font-size:12px;min-width:160px"/>
       <div class="sp">
         <button class="pbtn" style="background:#0e7a4b;border-color:#0e7a4b" onclick="exportCoilExcel()">Download Excel</button>
         <button class="pbtn" style="background:var(--blue);border-color:var(--blue)" onclick="window.print()">Print / Save PDF</button>
@@ -312,30 +320,50 @@ function statusOf(r){const w=+r.InWhsQty||0,d=+r.DeliveredQty||0,p=+r.ProcessedQ
   if(p>1e-6) return {s:'Processed',q:p,c:'#9a6a1c'};
   return {s:'In Whs',q:w,c:'#888'};}
 const coilMill=r=>brandNorm(r.ItemName);
+// multi-select state: Coil No and (coil-stock) Status
+const MS={coil:new Set(), status:new Set()};
+function msToggle(id,ev){ ev.stopPropagation(); const el=$(id), open=el.classList.contains('open');
+  document.querySelectorAll('.msd.open').forEach(d=>d.classList.remove('open')); if(!open) el.classList.add('open'); }
+document.addEventListener('click',e=>{ if(!e.target.closest('.msd')) document.querySelectorAll('.msd.open').forEach(d=>d.classList.remove('open')); });
+function msLabel(){ const b1=$('msCoil').querySelector('button'), b2=$('msStatus').querySelector('button');
+  b1.innerHTML='Coil No'+(MS.coil.size?` (${MS.coil.size})`:'')+' &#9662;'; b1.classList.toggle('on',MS.coil.size>0);
+  b2.innerHTML='Status'+(MS.status.size?` (${MS.status.size})`:'')+' &#9662;'; b2.classList.toggle('on',MS.status.size>0); }
+function msCheck(key,el){ if(el.checked) MS[key].add(el.value); else MS[key].delete(el.value); msLabel(); renderByCoil(); }
+function msClear(key){ MS[key].clear(); const pnl=$((key==='coil'?'msCoil':'msStatus')+'-pnl'); pnl.querySelectorAll('input[type=checkbox]').forEach(c=>c.checked=false); msLabel(); renderByCoil(); }
+function msCoilFilter(q){ q=(q||'').toUpperCase(); $('msCoil-pnl').querySelectorAll('label[data-c]').forEach(l=>{ l.style.display=l.dataset.c.includes(q)?'':'none'; }); }
+function msPopulate(){
+  const sp=$('msStatus-pnl');
+  if(sp && !sp.dataset.done){ sp.dataset.done='1';
+    sp.innerHTML=`<a class="cl" onclick="msClear('status')">clear</a>`+['In Whs','Processed','Delivered'].map(s=>`<label><input type="checkbox" value="${s}" onchange="msCheck('status',this)"> ${s}</label>`).join(''); }
+  const cp=$('msCoil-pnl');
+  if(cp && !cp.dataset.done && TRACE.length){ cp.dataset.done='1';
+    const coils=[...new Set(TRACE.map(r=>(r.CoilNo||'').trim()).filter(Boolean))].sort();
+    cp.innerHTML=`<input class="s" placeholder="filter coil no" oninput="msCoilFilter(this.value)"><a class="cl" onclick="msClear('coil')">clear</a>`+
+      coils.map(c=>`<label data-c="${esc(c).toUpperCase()}"><input type="checkbox" value="${esc(c)}" onchange="msCheck('coil',this)"> ${esc(c)}</label>`).join(''); }
+}
 function coilFiltered(){
   // returns ordered [ {coil, mill, by:{CAT:[items]}, cW,cP,cD} ] after filters, + flat rows for export
   const onlyStock=$('coilOnlyStock')?$('coilOnlyStock').checked:true;
-  const fStatus=$('coilStatus')?$('coilStatus').value:'';
   const fMill=$('coilMill')?$('coilMill').value:'';
   const qs=($('coilSearch')?$('coilSearch').value:'').trim().toUpperCase();
   const G={}; TRACE.forEach(r=>{const k=(r.CoilNo||'').trim()||'(no coil no)';(G[k]??=[]).push(r);});
   const inW=k=>G[k].reduce((a,r)=>a+(+r.InWhsQty||0),0);
   let keys=Object.keys(G);
   if(onlyStock) keys=keys.filter(k=>inW(k)>1e-6);
+  if(MS.coil.size) keys=keys.filter(k=>MS.coil.has(k));                 // multi-select Coil No
   if(qs) keys=keys.filter(k=>k.toUpperCase().includes(qs)||G[k].some(r=>(r.BatchNum||'').toUpperCase().includes(qs)));
   keys.sort((a,b)=>inW(b)-inW(a));
   const out=[], flat=[];
   keys.forEach(k=>{
     const rows=G[k]; if(fMill && coilMill(rows[0])!==fMill) return;
     const by={COIL:[],PLATE:[],PLATESCRAP:[],STRIP:[],STRIPSCRAP:[]};
-    let any=false;
-    rows.forEach(r=>{ const st=statusOf(r); if(fStatus && st.s!==fStatus) return;
-      by[clsOf(r.ItemName)].push({...r,_st:st}); any=true;
-      flat.push({Coil:k, Mill:coilMill(r), Category:CLSLABEL[clsOf(r.ItemName)], ItemCode:r.ItemCode, ItemName:(r.ItemName||'').trim(),
-                 Batch:r.BatchNum, Status:st.s, Qty:+st.q.toFixed(3), InWhs:+(+r.InWhsQty||0).toFixed(3), Processed:+(+r.ProcessedQty||0).toFixed(3), Delivered:+(+r.DeliveredQty||0).toFixed(3)});
-    });
-    if(!any) return;
+    rows.forEach(r=>{ by[clsOf(r.ItemName)].push({...r,_st:statusOf(r)}); });
+    // multi-select Status on coil stock ALONE: keep coil only if a coil-item's status is selected
+    if(MS.status.size){ const coilSt=new Set(by.COIL.map(x=>x._st.s)); if(![...MS.status].some(s=>coilSt.has(s))) return; }
     Object.values(by).forEach(a=>a.sort((x,y)=>y._st.q-x._st.q));
+    rows.forEach(r=>{ const st=statusOf(r);
+      flat.push({Coil:k, Mill:coilMill(r), Category:CLSLABEL[clsOf(r.ItemName)], ItemCode:r.ItemCode, ItemName:(r.ItemName||'').trim(),
+                 Batch:r.BatchNum, Status:st.s, Qty:+st.q.toFixed(3), InWhs:+(+r.InWhsQty||0).toFixed(3), Processed:+(+r.ProcessedQty||0).toFixed(3), Delivered:+(+r.DeliveredQty||0).toFixed(3)}); });
     out.push({coil:k, mill:coilMill(rows[0]), by,
       cW:rows.reduce((a,r)=>a+(+r.InWhsQty||0),0), cP:rows.reduce((a,r)=>a+(+r.ProcessedQty||0),0), cD:rows.reduce((a,r)=>a+(+r.DeliveredQty||0),0)});
   });
@@ -346,9 +374,10 @@ let COIL_FLAT=[], COIL_OUT=[];
 function renderByCoil(){
   const body=$('coilBody'); if(!body) return;
   if(!TRACE.length){ body.innerHTML='<div class="card"><div class="empty">Coil traceability isn\'t published yet. It appears automatically once the updated 15-minute job runs on the SAP box (it writes wheels_traceability.csv).</div></div>'; return; }
-  // populate the mill dropdown once
+  // populate the mill dropdown + multi-selects once
   const msel=$('coilMill');
   if(msel && msel.options.length<=1){ const mills=[...new Set(TRACE.map(coilMill))].filter(m=>m&&m!=='Others').sort(); if([...new Set(TRACE.map(coilMill))].includes('Others'))mills.push('Others'); msel.insertAdjacentHTML('beforeend', mills.map(m=>`<option value="${esc(m)}">${esc(m)}</option>`).join('')); }
+  msPopulate();
   const {out, flat}=coilFiltered(); COIL_FLAT=flat; COIL_OUT=out;
   const stBadge=st=>`<span style="color:${st.c};font-weight:600">${st.s}</span>`;
   const nm=s=>esc((s||'').replace(/\s+WIR\d+\s*$/i,'').trim());
