@@ -1404,14 +1404,14 @@ async function renderWheelsHtml(baseUrl, wipSet, note){
     const rs=rows.filter(r=>r.form===k).sort(wheelsSortCmp(k)); if(!rs.length)continue;
     const tq=rs.reduce((a,r)=>a+r.Quantity,0); gb+=rs.length; gq+=tq;
     const pcs=rs.reduce((a,r)=>a+wheelsPieces(r),0);
-    body+=`<tr><td colspan="9" style="background:${c};color:#fff;font-weight:700;padding:7px 10px;font-size:13px">${t}<span style="float:right;font-weight:600">~${pcs} pieces</span></td></tr>`+
-      `<tr style="background:#eef3f7"><th>#</th><th>Mill</th><th>Grade</th><th>Thk</th><th>Width</th><th>Length</th><th>Coil / Batch No</th><th>Qty (MT)</th><th>Aging (d)</th></tr>`;
+    body+=`<tr><td colspan="10" style="background:${c};color:#fff;font-weight:700;padding:7px 10px;font-size:13px">${t}</td></tr>`+
+      `<tr style="background:#eef3f7"><th>#</th><th>Mill</th><th>Grade</th><th>Thk</th><th>Width</th><th>Length</th><th>Coil / Batch No</th><th>Qty (MT)</th><th>No. of pcs</th><th>Aging (d)</th></tr>`;
     rs.forEach((x,i)=>{ const mill=(x.ItemName||"").split(" ")[0];
       const bc=(+x.BatchCount>1)?` <span style="color:#999">(${x.BatchCount} batches)</span>`:"";
       const old=(parseInt(x.AgeDays)||0)>=ageThresh(k);   // Plate only: 5 days and older -> red AGING CELL only
       const ageS=old?'text-align:center;color:#fff;font-weight:700;background:#b00020':'text-align:center;color:#888';
-      body+=`<tr><td style="text-align:center;color:#888">${i+1}</td><td style="text-align:center">${esc2(mill)}</td><td style="text-align:center">${esc2(x.Grade)}</td><td style="text-align:center">${dimS(x.Thick)}</td><td style="text-align:center">${dimS(x.Width)}</td><td style="text-align:center">${k==="ENDBIT"?"EB":lenS(x.Length)}</td><td style="text-align:center;font-family:monospace;font-size:11px">${esc2(x.CoilNo||x.BatchNum)}${bc}</td><td style="text-align:center;font-weight:600">${x.Quantity.toFixed(3)}</td><td style="${ageS}">${esc2(x.AgeDays)}</td></tr>`; });
-    body+=`<tr><td colspan="8" style="text-align:right;font-weight:700;padding:6px 10px;border-top:2px solid #333">${t} total</td><td style="text-align:right;font-weight:700;border-top:2px solid #333">${tq.toFixed(3)}</td><td style="border-top:2px solid #333"></td></tr>`;
+      body+=`<tr><td style="text-align:center;color:#888">${i+1}</td><td style="text-align:center">${esc2(mill)}</td><td style="text-align:center">${esc2(x.Grade)}</td><td style="text-align:center">${dimS(x.Thick)}</td><td style="text-align:center">${dimS(x.Width)}</td><td style="text-align:center">${k==="ENDBIT"?"EB":lenS(x.Length)}</td><td style="text-align:center;font-family:monospace;font-size:11px">${esc2(x.CoilNo||x.BatchNum)}${bc}</td><td style="text-align:center;font-weight:600">${x.Quantity.toFixed(3)}</td><td style="text-align:center">${wheelsPieces(x)}</td><td style="${ageS}">${esc2(x.AgeDays)}</td></tr>`; });
+    body+=`<tr><td colspan="7" style="text-align:right;font-weight:700;padding:6px 10px;border-top:2px solid #333">${t} total</td><td style="text-align:center;font-weight:700;border-top:2px solid #333">${tq.toFixed(3)}</td><td style="text-align:center;font-weight:700;border-top:2px solid #333">${pcs}</td><td style="border-top:2px solid #333"></td></tr>`;
   }
   const asof=new Date().toLocaleString("en-IN",{timeZone:"Asia/Kolkata",day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"});
   const noteHtml = note && note.trim() ? `<div style="padding:14px 22px 0;font-size:13px;color:#222;line-height:1.6">${esc2(note).replace(/\n/g,"<br>")}</div>` : "";
@@ -1435,25 +1435,26 @@ async function buildWheelsXlsx(rows){
              ["Job Work Stock Statement"],
              ["As on: "+new Date().toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})],
              []];
-  const hdr=["#","Mill","Grade","Thk","Width","Length","Coil / Batch No","Mother Coil","Qty (MT)","Aging (d)"];
+  const hdr=["#","Mill","Grade","Thk","Width","Length","Coil / Batch No","Mother Coil","Qty (MT)","No. of pcs","Aging (d)"];
   let gGrand=0, secRanges=[];
   for(const [k,t] of SEC){
     const rs=rows.filter(r=>r.form===k).sort(wheelsSortCmp(k)); if(!rs.length)continue;
     const tq=rs.reduce((a,r)=>a+r.Quantity,0); gGrand+=tq;
-    aoa.push([t + "   (~" + rs.reduce((a,r)=>a+wheelsPieces(r),0) + " pieces)"]);
+    const pcs=rs.reduce((a,r)=>a+wheelsPieces(r),0);
+    aoa.push([t]);
     aoa.push(hdr);
     rs.forEach((x,i)=>{ const mill=(x.ItemName||"").split(" ")[0];
       const T=parseFloat(x.Thick), W=parseFloat(x.Width), L=parseFloat(x.Length);
-      aoa.push([i+1, mill, x.Grade, isNaN(T)?"":T, isNaN(W)?"":W, (k==="ENDBIT"?"EB":(L>0?L:"")), (x.CoilNo||x.BatchNum), (x.Mothercoil||"-"), Number(x.Quantity.toFixed(3)), x.AgeDays?parseInt(x.AgeDays):""]); });
-    aoa.push(["","","","","","","","",Number(tq.toFixed(3)),""]);
+      aoa.push([i+1, mill, x.Grade, isNaN(T)?"":T, isNaN(W)?"":W, (k==="ENDBIT"?"EB":(L>0?L:"")), (x.CoilNo||x.BatchNum), (x.Mothercoil||"-"), Number(x.Quantity.toFixed(3)), wheelsPieces(x), x.AgeDays?parseInt(x.AgeDays):""]); });
+    aoa.push(["","","","","","","","",Number(tq.toFixed(3)),pcs,""]);
     aoa.push([]);
   }
-  aoa.push(["TOTAL MATERIAL HELD","","","","","","","",Number(gGrand.toFixed(3)),""]);
+  aoa.push(["TOTAL MATERIAL HELD","","","","","","","",Number(gGrand.toFixed(3)),"",""]);
   aoa.push([]);
   aoa.push(["*The number of pieces shown is an approximate, calculated value and may vary slightly (plus or minus)."]);
   aoa.push(["System generated statement - might have mistakes"]);
   const ws=XLSX.utils.aoa_to_sheet(aoa);
-  ws["!cols"]=[{wch:4},{wch:10},{wch:16},{wch:7},{wch:8},{wch:9},{wch:22},{wch:22},{wch:11},{wch:7}];
+  ws["!cols"]=[{wch:4},{wch:10},{wch:16},{wch:7},{wch:8},{wch:9},{wch:22},{wch:22},{wch:11},{wch:10},{wch:7}];
   const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,"Stock Statement");
   return XLSX.write(wb,{type:"base64",bookType:"xlsx"});
 }
@@ -1498,6 +1499,7 @@ async function buildWheelsPdf(){
     {k:"len", t:"Length",         w:48, a:"center"},
     {k:"coil",t:"Coil / Batch No",w:118,a:"left"},
     {k:"qty", t:"Qty (MT)",       w:56, a:"right"},
+    {k:"pcs", t:"No. of pcs",     w:44, a:"center"},
     {k:"age", t:"Aging",          w:34, a:"center"}
   ];
   const sumW=cols.reduce((a,c)=>a+c.w,0), scale=W/sumW; let cx=L;
@@ -1536,7 +1538,6 @@ async function buildWheelsPdf(){
     ensure(16+headH+rowH*2);
     doc.rect(L,y,W,16).fill(hex);
     doc.fillColor("#fff").font("Helvetica-Bold").fontSize(9).text(t, L+8, y+4, {lineBreak:false});
-    doc.font("Helvetica").fontSize(8).text("~"+rs.reduce((a,r)=>a+wheelsPieces(r),0)+" pieces", L, y+4, {width:W-8, align:"right"});
     y+=16;
     drawHeadRow();
     rs.forEach((x,i)=>{
@@ -1547,7 +1548,7 @@ async function buildWheelsPdf(){
       if(old && ageCol){ doc.rect(ageCol.x,y,ageCol.w,rowH).fill("#b00020"); } // red shade only on the Aging cell
       doc.fontSize(7.5);
       const mill=(x.ItemName||"").split(" ")[0];
-      const vals={ n:String(i+1), mill, grade:x.Grade||"", thk:dimS(x.Thick), wid:dimS(x.Width), len:(form==="ENDBIT"?"EB":lenS(x.Length)), coil:(x.CoilNo||x.BatchNum||""), qty:x.Quantity.toFixed(3), age:(x.AgeDays||"") };
+      const vals={ n:String(i+1), mill, grade:x.Grade||"", thk:dimS(x.Thick), wid:dimS(x.Width), len:(form==="ENDBIT"?"EB":lenS(x.Length)), coil:(x.CoilNo||x.BatchNum||""), qty:x.Quantity.toFixed(3), pcs:String(wheelsPieces(x)), age:(x.AgeDays||"") };
       cols.forEach(c=>{ const redC=old&&c.k==="age"; doc.fillColor(redC?"#fff":"#222").font(redC?"Helvetica-Bold":"Helvetica").text(String(vals[c.k]), c.x+2, y+3.3, {width:c.w-4, align:c.a, lineBreak:false, ellipsis:true}); });
       y+=rowH;
     });
@@ -1595,7 +1596,7 @@ function wheelsStockSvg(rows, asof){
   const L=16;
   const SEC=[["PLATE","Plate Stock","#0e7a4b"],["ENDBIT","Plate-End Bit","#5b6670"],["STRIP","Strip Stock","#b5651d"],["SCRAP","Scrap Stock","#8a1c1c"],["COIL","Coil Stock","#1367a6"],["COIL_NP","Coil Stock (without Packing Slip)","#7a4f1c"]];
   // content-sized columns (no stretch-to-fill) so the image stays compact on a phone
-  const cols=[{k:"n",t:"#",w:22,a:"c"},{k:"mill",t:"Mill",w:52,a:"c"},{k:"grade",t:"Grade",w:54,a:"l"},{k:"thk",t:"Thk",w:40,a:"c"},{k:"wid",t:"Width",w:44,a:"c"},{k:"len",t:"Length",w:46,a:"c"},{k:"coil",t:"Coil / Batch No",w:142,a:"l"},{k:"qty",t:"Qty (MT)",w:64,a:"r"},{k:"age",t:"Aging",w:38,a:"c"}];
+  const cols=[{k:"n",t:"#",w:22,a:"c"},{k:"mill",t:"Mill",w:52,a:"c"},{k:"grade",t:"Grade",w:54,a:"l"},{k:"thk",t:"Thk",w:40,a:"c"},{k:"wid",t:"Width",w:44,a:"c"},{k:"len",t:"Length",w:46,a:"c"},{k:"coil",t:"Coil / Batch No",w:142,a:"l"},{k:"qty",t:"Qty (MT)",w:64,a:"r"},{k:"pcs",t:"No. of pcs",w:58,a:"c"},{k:"age",t:"Aging",w:38,a:"c"}];
   let cx=L; cols.forEach(c=>{ c.x=cx; cx+=c.w; });
   const W=cx+L, R=W-L;
   const qtyCol=cols.find(c=>c.k==="qty");
@@ -1617,7 +1618,7 @@ function wheelsStockSvg(rows, asof){
     const rs=rows.filter(r=>r.form===form).sort(wheelsSortCmp(form));
     if(!rs.length) continue;
     const tq=rs.reduce((a,r)=>a+r.Quantity,0); gb+=rs.length; gq+=tq;
-    rect(L,y,R-L,23,hex); txt(L+8,y+16,title,{size:13,bold:true,fill:"#fff"}); txt(R-6,y+16,"~"+rs.reduce((a,r)=>a+wheelsPieces(r),0)+" pieces",{size:10.5,fill:"#fff",anchor:"end"}); y+=23;
+    rect(L,y,R-L,23,hex); txt(L+8,y+16,title,{size:13,bold:true,fill:"#fff"}); y+=23;
     const rowYs=[y];
     rect(L,y,R-L,21,"#eef3f7"); cols.forEach(c=>put(c,y+14,c.t,{size:10,bold:true,fill:"#1a2a3a"})); y+=21; rowYs.push(y);
     const rH=19;
@@ -1626,7 +1627,7 @@ function wheelsStockSvg(rows, asof){
       const ageCol=cols.find(c=>c.k==="age");
       if(old && ageCol) rect(ageCol.x,y,ageCol.w,rH,"#b00020");   // red shade only on the Aging cell
       const mill=(xr.ItemName||"").split(" ")[0];
-      const v={n:String(i+1),mill,grade:xr.Grade||"",thk:dimS(xr.Thick),wid:dimS(xr.Width),len:(form==="ENDBIT"?"EB":lenS(xr.Length)),coil:(xr.CoilNo||xr.BatchNum||""),qty:xr.Quantity.toFixed(3),age:(xr.AgeDays||"")};
+      const v={n:String(i+1),mill,grade:xr.Grade||"",thk:dimS(xr.Thick),wid:dimS(xr.Width),len:(form==="ENDBIT"?"EB":lenS(xr.Length)),coil:(xr.CoilNo||xr.BatchNum||""),qty:xr.Quantity.toFixed(3),pcs:String(wheelsPieces(xr)),age:(xr.AgeDays||"")};
       cols.forEach(c=>{ const redC=old&&c.k==="age"; put(c,y+13,String(v[c.k]),{size:10,fill:redC?"#fff":"#222",bold:redC}); }); y+=rH; rowYs.push(y); });
     rect(L,y,R-L,21,"#e7eef4"); txt(qtyCol.x-6,y+14,title+" total",{size:10.5,bold:true,fill:"#1a2233",anchor:"end"}); put(qtyCol,y+14,tq.toFixed(3),{size:10.5,bold:true,fill:"#1a2233"}); y+=21; rowYs.push(y);
     grid(rowYs);
