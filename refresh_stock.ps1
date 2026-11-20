@@ -318,6 +318,43 @@ WHERE B.WhsCode = '45'
 ORDER BY B.U_CoilNo, B.BatchNum
 "@
 
+# ---- Wheels India stock statement (WIL format) - document-level movements ----
+# One row per (batch, document): the coil's GRPO receipt (with the GRPO Vendor Ref No =
+# Wheels India packing slip no) and every job-work Delivery note / direct A/R invoice
+# out of WH45 (DC no + date + net MT). Cancelled documents and their cancellation
+# counterparts are excluded, so a cancelled DC never shows. Source coil = the WH45
+# batch's U_CoilNo (same key as wheels_traceability.csv). The portal builds the
+# Opening / Receipts / 3 DC + 2 Scrap DC / Closing statement for any date range.
+$wsmSql = @"
+SELECT
+  ISNULL(X.U_CoilNo,'')            AS CoilNo,
+  T.ItemCode,
+  I.ItemName,
+  T.BatchNum,
+  CASE T.BaseType WHEN 20 THEN 'GRPO' WHEN 15 THEN 'DC' ELSE 'INV' END AS DocType,
+  T.BaseNum                        AS DocNum,
+  CONVERT(varchar(10), MIN(T.DocDate), 23) AS DocDate,
+  ISNULL(MAX(P.NumAtCard),'')      AS VendorRef,
+  CAST(SUM(CASE WHEN T.BaseType=20 THEN (CASE WHEN T.Direction=0 THEN T.Quantity ELSE -T.Quantity END)
+                ELSE (CASE WHEN T.Direction=1 THEN T.Quantity ELSE -T.Quantity END) END) AS DECIMAL(19,3)) AS Qty
+FROM IBT1 T
+INNER JOIN OITM I ON I.ItemCode = T.ItemCode
+INNER JOIN OIBT X ON X.ItemCode = T.ItemCode AND X.BatchNum = T.BatchNum AND X.WhsCode = '45'
+LEFT JOIN OPDN P ON T.BaseType = 20 AND P.DocEntry = T.BaseEntry
+LEFT JOIN ODLN D ON T.BaseType = 15 AND D.DocEntry = T.BaseEntry
+LEFT JOIN OINV V ON T.BaseType = 13 AND V.DocEntry = T.BaseEntry
+WHERE (I.ItemName LIKE '%WIR0%' OR I.ItemName LIKE '%WIR %' OR I.ItemName LIKE '%WIR')
+  AND (
+        (T.BaseType = 20 AND P.CANCELED = 'N')
+     OR (T.BaseType = 15 AND T.WhsCode = '45' AND D.CANCELED = 'N')
+     OR (T.BaseType = 13 AND T.WhsCode = '45' AND V.CANCELED = 'N')
+      )
+GROUP BY X.U_CoilNo, T.ItemCode, I.ItemName, T.BatchNum, T.BaseType, T.BaseNum
+HAVING SUM(CASE WHEN T.BaseType=20 THEN (CASE WHEN T.Direction=0 THEN T.Quantity ELSE -T.Quantity END)
+                ELSE (CASE WHEN T.Direction=1 THEN T.Quantity ELSE -T.Quantity END) END) <> 0
+ORDER BY X.U_CoilNo, MIN(T.DocDate), T.BaseNum
+"@
+
 # ---- Production plan schedule (recursive SMS schedule flow: coil -> cut plates, all stages) ----
 # Feeds the Wheels India "Production Schedule" portal tab. Returns ALL production; the tab
 # defaults the view to Open + WIR grades. One row per output line per stage.
@@ -543,6 +580,9 @@ try{
   Log "Querying Wheels coil traceability..."; $wtrace=$null
   try{ $wtrace=Invoke-Sql $wtSql; Log "  $($wtrace.Rows.Count) batch rows" }
   catch{ Log "WARN: traceability query failed ($($_.Exception.Message)) - keeping previous wheels_traceability.csv" }
+  Log "Querying Wheels statement movements..."; $wsm=$null
+  try{ $wsm=Invoke-Sql $wsmSql; Log "  $($wsm.Rows.Count) document rows" }
+  catch{ Log "WARN: statement query failed ($($_.Exception.Message)) - keeping previous wheels_statement_moves.csv" }
 
   # Wheels production - daily machine-wise feed for the current calendar year.
   # The portal aggregates this into the 3-section report (Total / Wheels India / Monthly)
@@ -620,6 +660,7 @@ ORDER BY CASE T1.U_Machcode
   [IO.File]::WriteAllText("$WheelsDir\wheels_proddaily.csv",         (ConvertTo-CsvText $wdaily), $enc)
   [IO.File]::WriteAllText("$WheelsDir\wheels_prod_schedule.csv",     (ConvertTo-CsvText $wsched), $enc)
   if($wtrace -and $wtrace.Rows.Count -gt 0){ [IO.File]::WriteAllText("$WheelsDir\wheels_traceability.csv", (ConvertTo-CsvText $wtrace), $enc) }
+  if($wsm -and $wsm.Rows.Count -gt 0){ [IO.File]::WriteAllText("$WheelsDir\wheels_statement_moves.csv", (ConvertTo-CsvText $wsm), $enc) }
   [IO.File]::WriteAllText("$WheelsDir\wheels_meta.json", (@{ generated=$now.ToString('yyyy-MM-ddTHH:mm:ss'); rows=$wheels.Rows.Count } | ConvertTo-Json -Compress), $enc)
   $meta=@{ generated=$now.ToString('yyyy-MM-ddTHH:mm:ss'); fyStart="$fy-04-01"; dataFrom=$StartDate;
            rows=@{ coils=$coils.Rows.Count; plates=$plates.Rows.Count; stock=$misStock.Rows.Count; sales=$misSales.Rows.Count; purchase=$misPurch.Rows.Count; jobwork=$jwDocs.Rows.Count } }
@@ -632,7 +673,7 @@ ORDER BY CASE T1.U_Machcode
   # Judge git by exit code only.
   $prevEap=$ErrorActionPreference; $ErrorActionPreference='Continue'
   try{
-    git add coils.csv plates.csv mis_stock.csv mis_sales.csv mis_purchase.csv production.csv mis_jobwork_flow.csv mis_jobwork_docs.csv mis_jobwork_balance.csv mis_meta.json wheels_stock.csv wheels_proddaily.csv wheels_prod_schedule.csv wheels_traceability.csv wheels_meta.json 2>&1 | Out-Null
+    git add coils.csv plates.csv mis_stock.csv mis_sales.csv mis_purchase.csv production.csv mis_jobwork_flow.csv mis_jobwork_docs.csv mis_jobwork_balance.csv mis_meta.json wheels_stock.csv wheels_proddaily.csv wheels_prod_schedule.csv wheels_traceability.csv wheels_statement_moves.csv wheels_meta.json 2>&1 | Out-Null
     $stamp=[DateTime]::Now.ToString('yyyy-MM-dd HH:mm')
     git commit -m "stock refresh $stamp" 2>&1 | Out-Null          # no-op if nothing changed
     # commit first, THEN rebase: -X theirs = keep our freshly generated CSVs on conflict,

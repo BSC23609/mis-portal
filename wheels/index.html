@@ -26,6 +26,12 @@
   .tabbar{display:flex;gap:6px;margin:14px 0 0}
   .tabbtn{background:#fff;border:1px solid #cdd6df;color:#0e2a47;border-radius:7px;padding:7px 16px;font-weight:600;cursor:pointer}
   .tabbtn.active{background:#0e2a47;border-color:#0e2a47;color:#fff}
+  #wilBody table.w{width:auto;border-collapse:collapse;font-size:11px;white-space:nowrap;font-family:Calibri,Arial,sans-serif}
+  #wilBody table.w th,#wilBody table.w td{border:1px solid #9aa5ae;padding:3px 6px;text-align:center}
+  #wilBody table.w th{background:#fff2cc;font-weight:700;color:#111}
+  #wilBody table.w td.n{text-align:right}
+  #wilBody table.w td.dc{white-space:normal;max-width:120px}
+  #wilBody .wh td{border:1px solid #9aa5ae;padding:4px 10px;font-weight:700;font-size:13px}
   #coilBody td.srcc{background:#eef3f7;font-weight:700;vertical-align:top;white-space:nowrap}
   #coilBody select{padding:6px 8px;border:1px solid #cdd6df;border-radius:6px;font-size:12px}
   #coilBody table.x td, #coilBody table.x th{border:1px solid #c3ccd4}
@@ -50,6 +56,7 @@
     <button class="tabbtn active" id="tabbtn-stock" onclick="showTab('stock')">Stock Statement</button>
     <button class="tabbtn" id="tabbtn-prod" onclick="showTab('prod')">Production Report</button>
     <button class="tabbtn" id="tabbtn-coil" onclick="showTab('coil')">By Source Coil</button>
+    <button class="tabbtn" id="tabbtn-wil" onclick="showTab('wil')">WIL Statement</button>
   </div>
 
   <div id="tabStock">
@@ -136,15 +143,36 @@
     <div id="coilBody"></div>
   </div>
 
+  <div id="tabWil" style="display:none">
+    <div class="toolbar">
+      <span style="font-size:12px;color:var(--gray)">Period</span>
+      <input type="date" id="wilFrom" onchange="renderWil()" style="padding:5px 8px;border:1px solid #cdd6df;border-radius:6px;font-size:12px"/>
+      <span style="font-size:12px;color:var(--gray)">to</span>
+      <input type="date" id="wilTo" onchange="renderWil()" style="padding:5px 8px;border:1px solid #cdd6df;border-radius:6px;font-size:12px"/>
+      <button class="tabbtn" style="padding:5px 10px;font-size:12px" onclick="wilPreset('m')">This month</button>
+      <button class="tabbtn" style="padding:5px 10px;font-size:12px" onclick="wilPreset('lm')">Last month</button>
+      <button class="tabbtn" style="padding:5px 10px;font-size:12px" onclick="wilPreset('fy')">FY to date</button>
+      <input id="wilSearch" placeholder="search coil / DC no" oninput="renderWil()" style="padding:6px 10px;border:1px solid #cdd6df;border-radius:6px;font-size:12px;min-width:150px"/>
+      <div class="sp">
+        <button class="pbtn" style="background:#0e7a4b;border-color:#0e7a4b" onclick="exportWilExcel()">Download Excel</button>
+        <button class="pbtn" style="background:var(--blue);border-color:var(--blue)" onclick="window.print()">Print / Save PDF</button>
+      </div>
+    </div>
+    <div id="wilBody"></div>
+  </div>
+
   <footer id="foot"></footer>
 </div>
 <script src="../_portal.js"></script>
 <script>
 const SEC=[['COIL','Coil Stock','#1367a6'],['PLATE','Plate Stock (WIP / FG)','#0e7a4b'],['ENDBITP','Plate-End Bit','#5b6670'],['STRIP','Strip / Blank Stock','#b5651d'],['ENDBITS','Strip-End Bit','#7a4e24'],['SCRAP','Scrap','#8a1c1c']];
 const SMALL_PLATE=0.1, SMALL_STRIP=0.011;   // plate below 0.1 MT & strip below 0.011 MT hidden when the filter is on
-let ROWS=[], META={}, WORKED=[], PRODDAILY=[], HOLIDAYS=[], TRACE=[];
+let ROWS=[], META={}, WORKED=[], PRODDAILY=[], HOLIDAYS=[], TRACE=[], MOVES=[];
 function showTab(t){
-  if(!['stock','prod','coil'].includes(t)) t='stock';
+  if(!['stock','prod','coil','wil'].includes(t)) t='stock';
+  $('tabWil').style.display   = t==='wil'  ?'':'none';
+  $('tabbtn-wil').classList.toggle('active', t==='wil');
+  if(t==='wil') renderWil();
   $('tabStock').style.display = t==='stock'?'':'none';
   $('tabProd').style.display  = t==='prod' ?'':'none';
   $('tabCoil').style.display  = t==='coil' ?'':'none';
@@ -182,15 +210,16 @@ async function load(){
   catch(e){ $('hideSmall').checked = true; }
   try{
     const b='?t='+Date.now();
-    const [csv,wk,pday,setJson,trc] = await Promise.all([
+    const [csv,wk,pday,setJson,trc,mv] = await Promise.all([
       fetch(DATA_BASE+'/wheels_stock.csv'+b).then(r=>{if(!r.ok)throw 0;return r.text();}),
       fetch(DATA_BASE+'/wheels_worked.csv'+b).then(r=>r.ok?r.text():'').catch(()=>''),
       fetch(DATA_BASE+'/wheels_proddaily.csv'+b).then(r=>r.ok?r.text():'').catch(()=>''),
       fetch(BASE+'/api/wheels?route=settings'+b).then(r=>r.ok?r.json():{}).catch(()=>({})),
-      fetch(DATA_BASE+'/wheels_traceability.csv'+b).then(r=>r.ok?r.text():'').catch(()=>'')
+      fetch(DATA_BASE+'/wheels_traceability.csv'+b).then(r=>r.ok?r.text():'').catch(()=>''),
+      fetch(DATA_BASE+'/wheels_statement_moves.csv'+b).then(r=>r.ok?r.text():'').catch(()=>'')
     ]);
     WORKED=parseCSV(wk).map(r=>({Brand:brandNorm(r.Brand),Yr:+r.Yr,Mth:+r.Mth,Qty:gnum(r.Qty)||0}));
-    PRODDAILY=parseCSV(pday); HOLIDAYS=(setJson&&setJson.holidays)||[]; TRACE=parseCSV(trc);
+    PRODDAILY=parseCSV(pday); HOLIDAYS=(setJson&&setJson.holidays)||[]; TRACE=parseCSV(trc); MOVES=parseCSV(mv);
     ROWS=parseCSV(csv).map(r=>{const q=gnum(r.Quantity)||0;let form=formOf(r.ItemName);const noLen=!(gnum(r.Length)>0);if(form==='PLATE'&&noLen)form='ENDBITP';else if(form==='STRIP'&&noLen)form='ENDBITS';return {...r,Quantity:q,form};});
     const metaRaw=await fetch(DATA_BASE+'/wheels_meta.json'+b).then(r=>r.ok?r.json():{}).catch(()=>({}));
     META=metaRaw; setStamp(META.generated);
@@ -671,6 +700,164 @@ function draw(){
       System-generated statement of your material held at BSC as on the date/time shown. Figures drawn live from our ERP. For queries contact your account manager.</div>`;
   renderByBrand(); renderWorked(); renderProdReport(); renderByCoil();
 }
+// ===== WIL Statement - Wheels India stock statement in their own Excel format =====
+// Feed: wheels_statement_moves.csv (GRPO receipts + DC / invoice dispatches per batch,
+// cancelled documents excluded) + wheels_traceability.csv (coil specs, what is still in WH45).
+const WIL_VENDOR=121809;
+const isoD=d=>{const z=new Date(d.getTime()-d.getTimezoneOffset()*60000);return z.toISOString().slice(0,10);};
+const dmy=s=>s?`${s.slice(8,10)}-${s.slice(5,7)}-${s.slice(0,4)}`:'';
+function wilPreset(k){
+  const t=new Date(); let f=new Date(t.getFullYear(),t.getMonth(),1), to=t;
+  if(k==='lm'){ f=new Date(t.getFullYear(),t.getMonth()-1,1); to=new Date(t.getFullYear(),t.getMonth(),0); }
+  if(k==='fy'){ const y=t.getMonth()>=3?t.getFullYear():t.getFullYear()-1; f=new Date(y,3,1); }
+  $('wilFrom').value=isoD(f); $('wilTo').value=isoD(to); renderWil();
+}
+function wilSource(name){ const w=(name||'').trim().split(/\s+/)[0].toUpperCase(); return w==='HYUNDAI'?'HYN':w; }
+function wilGrade(name,g){ const m=(name||'').toUpperCase().match(/WIR\w*/); return m?m[0]:(g||''); }
+// fold a list of {no,date,qty} into N slots; anything beyond goes into the last slot as "a/b"
+function wilSlots(list,n){
+  const out=list.slice(0,n).map(x=>({...x}));
+  if(list.length>n){ const last=out[n-1]; list.slice(n).forEach(x=>{ last.no+='/'+x.no; last.qty+=x.qty; if(x.date>last.date) last.date=x.date; }); }
+  while(out.length<n) out.push(null);
+  return out;
+}
+let WIL_ROWS=[], WIL_HDR={};
+function buildWil(){
+  const from=$('wilFrom').value, to=$('wilTo').value;
+  const G={};
+  MOVES.forEach(m=>{ const k=(m.CoilNo||'').trim(); if(!k) return; (G[k]??={rec:[],dsp:[]});
+    const q=+m.Qty||0;
+    if(m.DocType==='GRPO'){ if(clsOf(m.ItemName)==='COIL') G[k].rec.push({...m,q}); }
+    else G[k].dsp.push({...m,q,scrap:clsOf(m.ItemName).includes('SCRAP')});
+  });
+  const TR={}; TRACE.forEach(r=>{const k=(r.CoilNo||'').trim(); (TR[k]??=[]).push(r);});
+  const rows=[];
+  Object.keys(G).forEach(k=>{
+    const g=G[k], tr=TR[k]||[];
+    const coilTr=tr.filter(r=>clsOf(r.ItemName)==='COIL');
+    let recQty=g.rec.reduce((a,r)=>a+r.q,0);
+    let recDate=g.rec.map(r=>r.DocDate).sort()[0]||'';
+    if(!g.rec.length){ // no GRPO found: fall back to the coil batch weight, dated by its first movement
+      recQty=coilTr.reduce((a,r)=>a+(+r.InWhsQty||0)+(+r.DeliveredQty||0)+(+r.ProcessedQty||0),0);
+      recDate=g.dsp.map(d=>d.DocDate).sort()[0]||'';
+    }
+    if(!recDate || (to && recDate>to)) return;
+    const before=g.dsp.filter(d=>from&&d.DocDate<from).reduce((a,d)=>a+d.q,0);
+    const inP=g.dsp.filter(d=>(!from||d.DocDate>=from)&&(!to||d.DocDate<=to));
+    const recBefore=from && recDate<from;
+    const opening=recBefore? recQty-before : 0;
+    const receipt=recBefore? 0 : recQty;
+    if(recBefore && opening<=0.0005 && !inP.length) return;   // fully closed before the period
+    // group period dispatches by document, prime vs scrap
+    const agg=(arr)=>{const M={}; arr.forEach(d=>{const key=d.DocNum; (M[key]??={no:String(d.DocNum),date:d.DocDate,qty:0}); M[key].qty+=d.q; if(d.DocDate<M[key].date)M[key].date=d.DocDate;});
+      return Object.values(M).filter(x=>Math.abs(x.qty)>0.0005).sort((a,b)=>a.date.localeCompare(b.date)||a.no.localeCompare(b.no));};
+    const prime=wilSlots(agg(inP.filter(d=>!d.scrap)),3), scrap=wilSlots(agg(inP.filter(d=>d.scrap)),2);
+    const total=[...prime,...scrap].reduce((a,x)=>a+(x?x.qty:0),0);
+    const closing=opening+receipt-total;
+    const anyDsp=g.dsp.some(d=>!to||d.DocDate<=to);
+    const primeInWhs=tr.some(r=>(+r.InWhsQty||0)>1e-6 && !clsOf(r.ItemName).includes('SCRAP'));
+    let status='';
+    if(Math.abs(closing)<=0.05 && anyDsp) status='completed';
+    else if(anyDsp) status=primeInWhs?'PRIME +SCRAP':'scrap';
+    const spec=coilTr[0]||tr[0]||g.rec[0]||{};
+    const nm=spec.ItemName||'';
+    const dimM=nm.toUpperCase().match(/(\d+(?:\.\d+)?)\s*X\s*(\d+)/);
+    rows.push({
+      bcoil:[...new Set((coilTr.length?coilTr:g.rec).map(r=>r.BatchNum))].join(' / '),
+      slip:[...new Set(g.rec.map(r=>(r.VendorRef||'').trim()).filter(Boolean))].join(' / '),
+      coilNo:k.split('/')[0].trim(),
+      thick:+(spec.Thick||(dimM?dimM[1]:''))||'', width:+(spec.Width||(dimM?dimM[2]:''))||'',
+      source:wilSource(nm), grade:wilGrade(nm,spec.Grade),
+      opening, receipt, recDate, prime, scrap, total, closing, status, key:k
+    });
+  });
+  rows.sort((a,b)=>a.recDate.localeCompare(b.recDate)||a.coilNo.localeCompare(b.coilNo));
+  const hdr={opening:rows.reduce((a,r)=>a+r.opening,0), receipt:rows.reduce((a,r)=>a+r.receipt,0),
+             despatch:rows.reduce((a,r)=>a+r.total,0), closing:rows.reduce((a,r)=>a+r.closing,0)};
+  return {rows,hdr,from,to};
+}
+function renderWil(){
+  const body=$('wilBody'); if(!body) return;
+  if(!$('wilFrom').value){ wilPreset('m'); return; }
+  if(!MOVES.length){ body.innerHTML='<div class="card"><div class="empty">The statement feed isn\'t published yet. It appears automatically once the updated 15-minute job runs on the SAP box (it writes wheels_statement_moves.csv).</div></div>'; return; }
+  const {rows,hdr,from,to}=buildWil();
+  const qs=($('wilSearch').value||'').trim().toUpperCase();
+  WIL_ROWS=qs?rows.filter(r=>[r.bcoil,r.slip,r.coilNo,...r.prime,...r.scrap].some(x=>x&&String(x.no??x).toUpperCase().includes(qs))):rows;
+  WIL_HDR={...hdr,from,to};
+  const f3=v=>v?(+v).toFixed(3):'', slot=x=>x?`<td class="dc">${esc(x.no).replace(/\//g,'/<wbr>')}</td><td>${dmy(x.date)}</td><td class="n">${x.qty.toFixed(3)}</td>`:'<td></td><td></td><td></td>';
+  const stCell=s=>s==='completed'?`<td style="background:#92d050;font-weight:700">completed</td>`:s==='PRIME +SCRAP'?`<td style="color:#ff0000;font-weight:700">PRIME +SCRAP</td>`:s==='scrap'?`<td style="background:#ffff00;font-weight:700">scrap</td>`:'<td></td>';
+  let h=`<div class="card" style="overflow-x:auto">
+   <div style="font-weight:700;font-size:16px;margin-bottom:8px">STOCK STATEMENT DURING THE MONTH &nbsp;${dmy(from).replace(/-/g,'.')}-${dmy(to).replace(/-/g,'.')}</div>
+   <table class="wh" style="border-collapse:collapse;margin-bottom:12px;width:auto;min-width:420px">
+    <tr><td>VENDOR CODE</td><td style="text-align:center">${WIL_VENDOR}</td></tr>
+    <tr><td>OPENING STOCK</td><td style="text-align:center">${hdr.opening.toFixed(3)}</td></tr>
+    <tr><td>RECEIPTS</td><td style="text-align:center">${hdr.receipt.toFixed(3)}</td></tr>
+    <tr><td>DESPATCH</td><td style="text-align:center">${hdr.despatch.toFixed(3)}</td></tr>
+    <tr><td>CLOSING STOCK</td><td style="text-align:center">${hdr.closing.toFixed(3)}</td></tr>
+   </table>
+   <table class="w"><thead>
+    <tr><th rowspan="3">BHARAT COIL NO</th><th rowspan="3">Packing slip No</th><th rowspan="3">Coil No / Batch No</th><th colspan="4">Material Description</th><th rowspan="2">Opening Stock</th><th rowspan="2">Receipts</th><th colspan="16">Dispatch details</th><th rowspan="2">Closing Balance</th><th rowspan="2">STATUS</th></tr>
+    <tr><th rowspan="2">Thick</th><th rowspan="2">Width</th><th rowspan="2">Source</th><th rowspan="2">WIL Grade</th><th colspan="3">DC</th><th colspan="3">DC</th><th colspan="3">DC</th><th colspan="3">Scrap DC</th><th colspan="3">Scrap DC</th><th>Total despatch</th></tr>
+    <tr><th>Qty in MT</th><th>Qty in MT</th>${'<th>No</th><th>Date</th><th>MT</th>'.repeat(5)}<th>MT</th><th>MT</th><th></th></tr>
+   </thead><tbody>`;
+  WIL_ROWS.forEach(r=>{
+    h+=`<tr><td class="mono">${esc(r.bcoil)}</td><td>${esc(r.slip)}</td><td>${esc(r.coilNo)}</td><td>${r.thick}</td><td>${r.width}</td><td>${esc(r.source)}</td><td>${esc(r.grade)}</td>
+      <td class="n">${f3(r.opening)}</td><td class="n">${f3(r.receipt)}</td>${r.prime.map(slot).join('')}${r.scrap.map(slot).join('')}
+      <td class="n" style="font-weight:700">${r.total.toFixed(3)}</td><td class="n" style="font-weight:700">${r.closing.toFixed(3)}</td>${stCell(r.status)}</tr>`;
+  });
+  h+=`</tbody></table>${WIL_ROWS.length?'':'<div class="empty">No coils in this period.</div>'}
+   <div class="snote" style="margin:10px 0 0">One row per Wheels India coil. Opening = received before the period less everything despatched before it; Receipts = coils received (GRPO) inside the period. DC = job-work delivery notes for prime plates/strips; Scrap DC = deliveries of scrap. More than 3 prime (or 2 scrap) DCs in the period are combined into the last slot as "a/b". Cancelled DCs are excluded. Packing slip = GRPO Vendor Ref No.</div></div>`;
+  body.innerHTML=h;
+}
+async function exportWilExcel(){
+  if(!WIL_ROWS.length){ alert('Nothing to export for this period.'); return; }
+  if(!window.ExcelJS){ alert('Excel library did not load - check your internet connection and reload the page.'); return; }
+  const {from,to}=WIL_HDR;
+  const wb=new ExcelJS.Workbook(); const ws=wb.addWorksheet('STATEMENT',{views:[{state:'frozen',xSplit:3,ySplit:13}]});
+  const W=[18,32.4,25.3,18.9,14.4,10.7,10.1,13.4,14.9,12.7,14.4,10.7,12.7,14.4,10.7,12.7,14.9,10.7,17.3,14,10.7,18.9,22,10.7,12.6,14.3,18.3];
+  ws.columns=W.map(w=>({width:w}));
+  const thin={style:'thin',color:{argb:'FF000000'}}, bd={top:thin,left:thin,right:thin,bottom:thin};
+  const hfill={type:'pattern',pattern:'solid',fgColor:{argb:'FFFFF2CC'}};
+  const HF={name:'Calibri Light',size:15,bold:true}, BF={name:'Calibri Light',size:11,bold:true};
+  ws.mergeCells('A1:D1'); const t=ws.getCell('A1');
+  t.value=`STOCK STATEMENT DURING THE MONTH  ${dmy(from).replace(/-/g,'.')}-${dmy(to).replace(/-/g,'.')}`; t.font={name:'Calibri Light',size:14,bold:true}; t.alignment={horizontal:'center'};
+  const N=WIL_ROWS.length, first=14, last=first+N-1;
+  const hd=[['VENDOR CODE',WIL_VENDOR],['OPENING STOCK',{formula:`SUM(H${first}:H${last})`}],['RECEIPTS',{formula:`SUM(I${first}:I${last})`}],['DESPATCH',{formula:`SUM(Y${first}:Y${last})`}],['CLOSING STOCK',{formula:`SUM(Z${first}:Z${last})`}]];
+  hd.forEach((x,i)=>{ const r=4+i; const a=ws.getCell(`A${r}`), b=ws.getCell(`B${r}`); a.value=x[0]; b.value=x[1];
+    a.font={name:'Calibri Light',size:11,bold:true}; b.font={name:'Calibri Light',size:15,bold:true}; a.border=bd; b.border=bd; b.alignment={horizontal:'center'}; if(i) b.numFmt='0.000'; ws.getRow(r).height=19.5; });
+  // header block rows 10-13 (same merges as the WIL sheet)
+  const put=(addr,v)=>{ const c=ws.getCell(addr); c.value=v; };
+  [['A10:A13','BHARAT COIL NO'],['B10:B13','Packing slip No'],['C10:C13','Coil No / Batch No'],['D10:G10','Material Description'],['H10:H11','Opening Stock'],['I10:I11','Receipts'],['J10:Y10','Dispatch details'],['Z10:Z11','Closing Balance'],['AA10:AA11','STATUS'],
+   ['D11:D13','Thick'],['E11:E13','Width'],['F11:F13','Source'],['G11:G13','WIL Grade'],['J11:L11','DC'],['M11:O11','DC'],['P11:R11','DC'],['S11:U11','Scrap DC'],['V11:X11','Scrap DC']].forEach(([rg,v])=>{ ws.mergeCells(rg); put(rg.split(':')[0],v); });
+  put('Y11','Total despatch');
+  ['H','I'].forEach(c=>put(c+'13','Qty in MT'));
+  ['J','M','P','S','V'].forEach(c=>{ const i=ws.getColumn(c).number; put(ws.getRow(13).getCell(i).address,'No'); put(ws.getRow(13).getCell(i+1).address,'Date'); put(ws.getRow(13).getCell(i+2).address,'MT'); });
+  put('Y13','MT'); put('Z13','MT');
+  for(let r=10;r<=13;r++) for(let c=1;c<=27;c++){ const cell=ws.getRow(r).getCell(c); cell.font=HF; cell.fill=hfill; cell.border=bd; cell.alignment={horizontal:'center',vertical:'middle',wrapText:true}; }
+  ws.getRow(10).height=19.5; ws.getRow(11).height=58.5; ws.getRow(12).height=19.5; ws.getRow(13).height=39;
+  // data
+  WIL_ROWS.forEach((d,i)=>{
+    const r=first+i, row=ws.getRow(r);
+    const vals=[d.bcoil,d.slip,d.coilNo,d.thick,d.width,d.source,d.grade,d.opening?+d.opening.toFixed(3):null,d.receipt?+d.receipt.toFixed(3):null];
+    [...d.prime,...d.scrap].forEach(x=>{ vals.push(x?(isNaN(+x.no)?x.no:+x.no):null, x?new Date(Date.UTC(+x.date.slice(0,4),+x.date.slice(5,7)-1,+x.date.slice(8,10))):null, x?+x.qty.toFixed(3):null); });
+    vals.forEach((v,j)=>{ if(v!==null && v!=='') row.getCell(j+1).value=v; });
+    row.getCell(25).value={formula:`+L${r}+O${r}+R${r}+U${r}+X${r}`, result:+d.total.toFixed(3)};
+    row.getCell(26).value={formula:`+H${r}+I${r}-Y${r}`, result:+d.closing.toFixed(3)};
+    row.getCell(27).value=d.status||null;
+    for(let c=1;c<=27;c++){ const cell=row.getCell(c); cell.border=bd; cell.alignment={horizontal:'center'}; cell.font=c===1?{name:'Calibri',size:12}:BF;
+      if([8,9,12,15,18,21,24,25,26].includes(c)) cell.numFmt='0.000';
+      if([11,14,17,20,23].includes(c)) cell.numFmt='dd-mm-yyyy'; }
+    const st=row.getCell(27);
+    if(d.status==='completed') st.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF92D050'}};
+    else if(d.status==='scrap') st.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFFFFF00'}};
+    else if(d.status==='PRIME +SCRAP') st.font={...BF,color:{argb:'FFFF0000'}};
+    row.height=18;
+  });
+  const buf=await wb.xlsx.writeBuffer();
+  const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
+  a.download=`wheels_india_statement_${from}_to_${to}.xlsx`; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+}
+
 load().then(()=>{ try{ showTab(localStorage.getItem('wheelsTab')||'stock'); }catch(e){ showTab('stock'); } });
 </script>
 </body></html>
