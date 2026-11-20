@@ -284,7 +284,10 @@ ORDER BY WI.ItemName
 # One row per batch ever in WH45: current on-hand (In Whs), plus how much of it was
 # Delivered (IBT1 BaseType 15 = Delivery note, OR 13 = A/R Invoice billed directly
 # with no delivery note - both post the goods movement) or Processed/cut (goods issue,
-# IBT1 BaseType 60 out). Source coil = U_CoilNo (SAP keeps it identical on the coil and
+# IBT1 BaseType 60). Both are NET of direction: an OUT movement (Direction=1) adds,
+# an IN movement (Direction=2) subtracts, so a reversed/returned delivery or a
+# cancelled goods-issue nets back to zero instead of being double-counted.
+# Source coil = U_CoilNo (SAP keeps it identical on the coil and
 # every derivative). The portal classifies Coil/Plate/Plate-Scrap/Strip/Strip-Scrap by
 # item name and picks the status from these three quantities.
 $wtSql = @"
@@ -305,13 +308,13 @@ FROM OIBT B
 INNER JOIN OITM I ON I.ItemCode = B.ItemCode
 LEFT JOIN (
   SELECT ItemCode, BatchNum,
-    SUM(CASE WHEN BaseType IN (13,15) AND Direction=1 THEN Quantity ELSE 0 END) AS DelQty,
-    SUM(CASE WHEN BaseType=60 AND Direction=1 THEN Quantity ELSE 0 END) AS IssQty
+    SUM(CASE WHEN BaseType IN (13,15) THEN (CASE WHEN Direction=1 THEN Quantity ELSE -Quantity END) ELSE 0 END) AS DelQty,
+    SUM(CASE WHEN BaseType=60 THEN (CASE WHEN Direction=1 THEN Quantity ELSE -Quantity END) ELSE 0 END) AS IssQty
   FROM IBT1 WHERE WhsCode='45' GROUP BY ItemCode, BatchNum
 ) M ON M.ItemCode = B.ItemCode AND M.BatchNum = B.BatchNum
 WHERE B.WhsCode = '45'
   AND (I.ItemName LIKE '%WIR0%' OR I.ItemName LIKE '%WIR %' OR I.ItemName LIKE '%WIR')
-  AND (B.Quantity > 0 OR M.DelQty > 0 OR M.IssQty > 0)
+  AND (B.Quantity > 0 OR M.DelQty <> 0 OR M.IssQty <> 0)
 ORDER BY B.U_CoilNo, B.BatchNum
 "@
 
