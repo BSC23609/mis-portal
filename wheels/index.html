@@ -392,13 +392,14 @@ function renderByCoil(){
   const stBadge=st=>`<span style="color:${st.c};font-weight:600">${st.s}</span>`;
   const nm=s=>esc((s||'').replace(/\s+WIR\d+\s*$/i,'').trim());
   const h2=lbls=>lbls.map((l,i)=>`<th class="l${i===0?' gs':''}" style="font-size:9px">${l}</th>`).join('');
-  let tW=0,tP=0,tD=0, html=`<div style="overflow-x:auto"><table class="x" style="font-size:10px;white-space:nowrap">
+  let tW=0,tP=0,tD=0, catTot={COIL:0,PLATE:0,PLATESCRAP:0,STRIP:0,STRIPSCRAP:0}, html=`<div style="overflow-x:auto"><table class="x" style="font-size:10px;white-space:nowrap">
     <thead>
     <tr><th class="l" rowspan="2" style="background:#0e2a47;color:#fff;vertical-align:middle">Source Coil</th>${CLS.map(c=>`<th class="l" colspan="${c[0]==='COIL'?6:5}" style="background:${c[2]};color:#fff;font-size:11px;text-align:center">${c[1]}</th>`).join('')}</tr>
     <tr>${h2(['Item Code','Item Name','Batch No','Coil No','Status','Qty'])}${h2(['Item Code','Item Name','Batch No','Status','Qty'])}${h2(['Item Code','Item Name','Batch No','Status','Qty'])}${h2(['Item Code','Item Name','Batch No','Status','Qty'])}${h2(['Item Code','Item Name','Batch No','Status','Qty'])}</tr>
     </thead><tbody>`;
   out.forEach(g=>{
     tW+=g.cW;tP+=g.cP;tD+=g.cD;
+    ['COIL','PLATE','PLATESCRAP','STRIP','STRIPSCRAP'].forEach(c=>g.by[c].forEach(x=>catTot[c]+=x._st.q));
     const by=g.by, maxN=Math.max(1,by.COIL.length,by.PLATE.length,by.PLATESCRAP.length,by.STRIP.length,by.STRIPSCRAP.length);
     for(let i=0;i<maxN;i++){
       html+= i===maxN-1 ? '<tr class="band">' : '<tr>';
@@ -418,6 +419,14 @@ function renderByCoil(){
       <div>In warehouse: <b style="color:#0e7a4b">${tW.toFixed(3)} MT</b></div>
       <div>Processed (cut): <b style="color:#9a6a1c">${tP.toFixed(3)} MT</b></div>
       <div>Delivered to Wheels India: <b style="color:#1367a6">${tD.toFixed(3)} MT</b></div></div>
+    <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:12px;margin-top:8px;padding-top:8px;border-top:1px dashed #e7deb4">
+      <span style="color:#667;font-weight:600">By category (MT):</span>
+      <div>Coil <b style="color:#1367a6">${catTot.COIL.toFixed(3)}</b></div>
+      <div>Plate <b style="color:#0e7a4b">${catTot.PLATE.toFixed(3)}</b></div>
+      <div>Plate-Scrap <b style="color:#9a6a1c">${catTot.PLATESCRAP.toFixed(3)}</b></div>
+      <div>Strip <b style="color:#0e6a7a">${catTot.STRIP.toFixed(3)}</b></div>
+      <div>Strip-Scrap <b style="color:#8a1c1c">${catTot.STRIPSCRAP.toFixed(3)}</b></div>
+      <div style="padding-left:6px;border-left:2px solid #d9c98f">Total Scrap <b style="color:#8a1c1c">${(catTot.PLATESCRAP+catTot.STRIPSCRAP).toFixed(3)}</b></div></div>
     <div class="snote" style="margin:10px 0 0">Grouped by SAP source coil number (U_CoilNo). Status is each piece's current state: <b>In Whs</b> held now, <b>Processed</b> cut into the next stage, or <b>Delivered</b> dispatched to Wheels India. Scrap off blanks/flats is Strip-Scrap; plate/defective scrap is Plate-Scrap.</div></div>`;
   body.innerHTML = out.length ? (head+html) : '<div class="card"><div class="empty">No source coils match the filter.</div></div>';
 }
