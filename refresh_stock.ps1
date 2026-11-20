@@ -16,6 +16,11 @@
 #>
 
 $ErrorActionPreference = "Stop"
+# Never let git block on a credential prompt in the background (a prompt would hang the whole
+# run forever and freeze every feed). With these set, git fails fast instead of waiting for input.
+$env:GIT_TERMINAL_PROMPT = "0"
+$env:GCM_INTERACTIVE     = "never"
+$env:GIT_ASKPASS         = ""
 $RepoDir  = "C:\github\bsc-stock-data"
 $StockDir = $RepoDir
 $Cfg      = "C:\scripts\config.ini"
