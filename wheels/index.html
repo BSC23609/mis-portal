@@ -313,11 +313,12 @@ function renderProdReport(){
 const CLS=[['COIL','Coil','#1367a6'],['PLATE','Plate','#0e7a4b'],['PLATESCRAP','Plate-Scrap','#9a6a1c'],['STRIP','Strip','#0e7a4b'],['STRIPSCRAP','Strip-Scrap','#8a1c1c']];
 function clsOf(name){const n=(name||'').toUpperCase();
   const scrap=n.includes('SCRAP'), strip=n.includes('BLANK')||n.includes('FLAT')||n.includes('STRIP');
+  const ctl=n.includes('XCTL')||/(?:^|[X\s])CTL(?:\s|$)/.test(n);   // length = CTL -> treat as scrap
   if(scrap) return strip?'STRIPSCRAP':'PLATESCRAP';
-  if(strip) return 'STRIP';
-  if(n.includes('PLATE')) return 'PLATE';
+  if(strip) return ctl?'STRIPSCRAP':'STRIP';
+  if(n.includes('PLATE')) return ctl?'PLATESCRAP':'PLATE';
   if(n.includes('COIL')) return 'COIL';
-  return 'PLATE';}
+  return ctl?'PLATESCRAP':'PLATE';}
 function statusOf(r){const w=+r.InWhsQty||0,d=+r.DeliveredQty||0,p=+r.ProcessedQty||0;
   if(w>1e-6) return {s:'In Whs',q:w,c:'#0e7a4b'};
   if(d>=p&&d>1e-6) return {s:'Delivered',q:d,c:'#1367a6'};
