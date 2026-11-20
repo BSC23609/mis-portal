@@ -1363,6 +1363,15 @@ function wheelsFormOf(n){ n=(n||"").toUpperCase();
   if(n.includes("BLANK")||n.includes("FLAT")||n.includes("STRIP"))return "STRIP";
   if(n.includes("PLATE"))return "PLATE";
   if(n.includes("COIL"))return "COIL"; return "OTHER"; }
+// Approximate number of pieces: weight / per-piece weight (T x W x L x steel density
+// 7850 kg/m3). Dimensioned items (plate/strip) are calculated; coils/scrap/end-bits
+// without a usable length fall back to the batch count. Always approximate.
+function wheelsPieces(x){
+  const T=parseFloat(x.Thick), W=parseFloat(x.Width), L=parseFloat(x.Length), q=parseFloat(x.Quantity)||0;
+  if(q<=0) return 0;
+  if(T>0 && W>0 && L>0){ const pw=T*W*L*7.85e-9; if(pw>0) return Math.max(1, Math.round(q/pw)); }
+  return Math.max(1, parseInt(x.BatchCount)||1);
+}
 function parseCsvSrv(t){ if(!t)return[]; if(t.charCodeAt(0)===0xFEFF)t=t.slice(1);
   const rows=[];let row=[],cur="",q=false;
   for(let i=0;i<t.length;i++){const c=t[i];
@@ -1394,7 +1403,8 @@ async function renderWheelsHtml(baseUrl, wipSet, note){
   for(const [k,t,c] of SEC){
     const rs=rows.filter(r=>r.form===k).sort(wheelsSortCmp(k)); if(!rs.length)continue;
     const tq=rs.reduce((a,r)=>a+r.Quantity,0); gb+=rs.length; gq+=tq;
-    body+=`<tr><td colspan="9" style="background:${c};color:#fff;font-weight:700;padding:7px 10px;font-size:13px">${t}</td></tr>`+
+    const pcs=rs.reduce((a,r)=>a+wheelsPieces(r),0);
+    body+=`<tr><td colspan="9" style="background:${c};color:#fff;font-weight:700;padding:7px 10px;font-size:13px">${t}<span style="float:right;font-weight:600">~${pcs} pieces</span></td></tr>`+
       `<tr style="background:#eef3f7"><th>#</th><th>Mill</th><th>Grade</th><th>Thk</th><th>Width</th><th>Length</th><th>Coil / Batch No</th><th>Qty (MT)</th><th>Aging (d)</th></tr>`;
     rs.forEach((x,i)=>{ const mill=(x.ItemName||"").split(" ")[0];
       const bc=(+x.BatchCount>1)?` <span style="color:#999">(${x.BatchCount} batches)</span>`:"";
@@ -1412,6 +1422,7 @@ async function renderWheelsHtml(baseUrl, wipSet, note){
     <div class="wk-pad" style="padding:14px 22px 4px;overflow-x:auto;-webkit-overflow-scrolling:touch"><table class="wk-tbl" style="width:100%;border-collapse:collapse;font-size:12px">${body}</table></div>
     <div style="margin:14px 22px;padding:12px 16px;background:#0e2a47;color:#fff;border-radius:5px;display:flex;justify-content:space-between;font-size:15px;font-weight:700"><span>TOTAL MATERIAL HELD</span><span>${gb} items &middot; ${gq.toFixed(3)} MT</span></div>
     <div style="margin:0 22px 14px;padding:9px 13px;background:#fff8e1;border:1px solid #f0dc9a;color:#6b5200;font-size:11px;border-radius:5px">Plates currently under process (awaiting shearing) are excluded from this statement.</div>
+    <div style="margin:0 22px 10px;font-size:10px;color:#777;font-style:italic">*The number of pieces shown is an approximate, calculated value and may vary slightly (plus or minus).</div>
     <div style="padding:6px 22px;font-size:9px;color:#aaa;font-style:italic">Computer generated Statement - may contain mistakes</div><div style="padding:16px 22px;font-size:11px;color:#667;border-top:1px solid #e3e8ec;line-height:1.6"><b>Bharat Steel (Chennai) Pvt. Ltd.</b> &middot; No.147, Survey No.133, Thirunilai Village, Ponneri Taluk, Chennai 600103 &middot; 044 6791 7800 &middot; info@bharatsteels.in<br>System-generated statement of your material held at BSC as on the date/time shown.</div></div></body></html>`;
   return { html, gb, gq, rows };
 }
@@ -1429,7 +1440,7 @@ async function buildWheelsXlsx(rows){
   for(const [k,t] of SEC){
     const rs=rows.filter(r=>r.form===k).sort(wheelsSortCmp(k)); if(!rs.length)continue;
     const tq=rs.reduce((a,r)=>a+r.Quantity,0); gGrand+=tq;
-    aoa.push([t]);
+    aoa.push([t + "   (~" + rs.reduce((a,r)=>a+wheelsPieces(r),0) + " pieces)"]);
     aoa.push(hdr);
     rs.forEach((x,i)=>{ const mill=(x.ItemName||"").split(" ")[0];
       const T=parseFloat(x.Thick), W=parseFloat(x.Width), L=parseFloat(x.Length);
@@ -1439,6 +1450,7 @@ async function buildWheelsXlsx(rows){
   }
   aoa.push(["TOTAL MATERIAL HELD","","","","","","","",Number(gGrand.toFixed(3)),""]);
   aoa.push([]);
+  aoa.push(["*The number of pieces shown is an approximate, calculated value and may vary slightly (plus or minus)."]);
   aoa.push(["System generated statement - might have mistakes"]);
   const ws=XLSX.utils.aoa_to_sheet(aoa);
   ws["!cols"]=[{wch:4},{wch:10},{wch:16},{wch:7},{wch:8},{wch:9},{wch:22},{wch:22},{wch:11},{wch:7}];
@@ -1524,6 +1536,7 @@ async function buildWheelsPdf(){
     ensure(16+headH+rowH*2);
     doc.rect(L,y,W,16).fill(hex);
     doc.fillColor("#fff").font("Helvetica-Bold").fontSize(9).text(t, L+8, y+4, {lineBreak:false});
+    doc.font("Helvetica").fontSize(8).text("~"+rs.reduce((a,r)=>a+wheelsPieces(r),0)+" pieces", L, y+4, {width:W-8, align:"right"});
     y+=16;
     drawHeadRow();
     rs.forEach((x,i)=>{
@@ -1558,6 +1571,8 @@ async function buildWheelsPdf(){
   function footerNote(){
     ensure(26);
     doc.fillColor("#6b5200").font("Helvetica").fontSize(7).text("Plates currently under process (awaiting shearing) are excluded from this statement.", L, y, {width:W});
+    y+=10;
+    doc.fillColor("#777").font("Helvetica-Oblique").fontSize(7).text("*The number of pieces shown is an approximate, calculated value and may vary slightly (plus or minus).", L, y, {width:W});
     y+=11;
     doc.fillColor("#999").font("Helvetica-Oblique").fontSize(6.5).text("System generated statement - might have mistakes.  Bharat Steel (Chennai) Pvt. Ltd. · No.147, Survey No.133, Thirunilai Village, Ponneri Taluk, Chennai 600103 · 044 6791 7800 · info@bharatsteels.in", L, y, {width:W});
   }
@@ -1602,7 +1617,7 @@ function wheelsStockSvg(rows, asof){
     const rs=rows.filter(r=>r.form===form).sort(wheelsSortCmp(form));
     if(!rs.length) continue;
     const tq=rs.reduce((a,r)=>a+r.Quantity,0); gb+=rs.length; gq+=tq;
-    rect(L,y,R-L,23,hex); txt(L+8,y+16,title,{size:13,bold:true,fill:"#fff"}); y+=23;
+    rect(L,y,R-L,23,hex); txt(L+8,y+16,title,{size:13,bold:true,fill:"#fff"}); txt(R-6,y+16,"~"+rs.reduce((a,r)=>a+wheelsPieces(r),0)+" pieces",{size:10.5,fill:"#fff",anchor:"end"}); y+=23;
     const rowYs=[y];
     rect(L,y,R-L,21,"#eef3f7"); cols.forEach(c=>put(c,y+14,c.t,{size:10,bold:true,fill:"#1a2a3a"})); y+=21; rowYs.push(y);
     const rH=19;
@@ -1617,7 +1632,8 @@ function wheelsStockSvg(rows, asof){
     grid(rowYs);
     y+=4;
   }
-  rect(L,y,R-L,27,"#0e2a47"); txt(L+10,y+18,"TOTAL MATERIAL HELD",{size:13,bold:true,fill:"#fff"}); txt(R-8,y+18,gb+" items · "+gq.toFixed(3)+" MT",{size:13,bold:true,fill:"#fff",anchor:"end"}); y+=40;
+  rect(L,y,R-L,27,"#0e2a47"); txt(L+10,y+18,"TOTAL MATERIAL HELD",{size:13,bold:true,fill:"#fff"}); txt(R-8,y+18,gb+" items · "+gq.toFixed(3)+" MT",{size:13,bold:true,fill:"#fff",anchor:"end"}); y+=36;
+  txt(L,y,"*The number of pieces shown is an approximate, calculated value and may vary slightly (plus or minus).",{size:9,fill:"#777"}); y+=14;
   txt(L,y,"System generated statement - might have mistakes.  Bharat Steel (Chennai) Pvt. Ltd. · info@bharatsteels.in",{size:9.5,fill:"#999"}); y+=10;
   const H=y+6;
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><rect width="${W}" height="${H}" fill="#ffffff"/>${els.join("")}</svg>`;
