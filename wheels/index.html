@@ -121,6 +121,8 @@
       <div class="msd" id="msSCOIL"><button type="button" onclick="msToggle('msSCOIL',event)">Coil Status &#9662;</button><div class="pnl" id="msSCOIL-pnl"></div></div>
       <div class="msd" id="msSPLATE"><button type="button" onclick="msToggle('msSPLATE',event)">Plate Status &#9662;</button><div class="pnl" id="msSPLATE-pnl"></div></div>
       <div class="msd" id="msSSTRIP"><button type="button" onclick="msToggle('msSSTRIP',event)">Strip Status &#9662;</button><div class="pnl" id="msSSTRIP-pnl"></div></div>
+      <div class="msd" id="msSPLATESCRAP"><button type="button" onclick="msToggle('msSPLATESCRAP',event)">Plate-Scrap Status &#9662;</button><div class="pnl" id="msSPLATESCRAP-pnl"></div></div>
+      <div class="msd" id="msSSTRIPSCRAP"><button type="button" onclick="msToggle('msSSTRIPSCRAP',event)">Strip-Scrap Status &#9662;</button><div class="pnl" id="msSSTRIPSCRAP-pnl"></div></div>
       <select id="coilMill" onchange="renderByCoil()" style="padding:6px 8px;border:1px solid #cdd6df;border-radius:6px;font-size:12px"><option value="">All mills</option></select>
       <input id="coilSearch" placeholder="search coil / batch no" oninput="renderByCoil()" style="padding:6px 10px;border:1px solid #cdd6df;border-radius:6px;font-size:12px;min-width:160px"/>
       <div class="sp">
@@ -323,9 +325,9 @@ function statusOf(r){const w=+r.InWhsQty||0,d=+r.DeliveredQty||0,p=+r.ProcessedQ
   return {s:'In Whs',q:w,c:'#888'};}
 const coilMill=r=>brandNorm(r.ItemName);
 // multi-select state: Coil No, plus per-category Status (coil-stock / plate-stock / strip-stock)
-const MS={coil:new Set(), status:{COIL:new Set(), PLATE:new Set(), STRIP:new Set()}};
-const MSID={coil:'msCoil', COIL:'msSCOIL', PLATE:'msSPLATE', STRIP:'msSSTRIP'};
-const MSLBL={coil:'Coil No', COIL:'Coil Status', PLATE:'Plate Status', STRIP:'Strip Status'};
+const MS={coil:new Set(), status:{COIL:new Set(), PLATE:new Set(), PLATESCRAP:new Set(), STRIP:new Set(), STRIPSCRAP:new Set()}};
+const MSID={coil:'msCoil', COIL:'msSCOIL', PLATE:'msSPLATE', PLATESCRAP:'msSPLATESCRAP', STRIP:'msSSTRIP', STRIPSCRAP:'msSSTRIPSCRAP'};
+const MSLBL={coil:'Coil No', COIL:'Coil Status', PLATE:'Plate Status', PLATESCRAP:'Plate-Scrap Status', STRIP:'Strip Status', STRIPSCRAP:'Strip-Scrap Status'};
 const msSet=t=> t==='coil'?MS.coil:MS.status[t];
 function msToggle(id,ev){ ev.stopPropagation(); const el=$(id), open=el.classList.contains('open');
   document.querySelectorAll('.msd.open').forEach(d=>d.classList.remove('open')); if(!open) el.classList.add('open'); }
@@ -337,7 +339,7 @@ function msClear(t){ msSet(t).clear(); $(MSID[t]+'-pnl').querySelectorAll('input
 function msCoilFilter(q){ q=(q||'').toUpperCase(); $('msCoil-pnl').querySelectorAll('label[data-c]').forEach(l=>{ l.style.display=l.dataset.c.includes(q)?'':'none'; }); }
 function msStatusPanel(t){ return `<a class="cl" onclick="msClear('${t}')">clear</a>`+['In Whs','Processed','Delivered'].map(s=>`<label><input type="checkbox" value="${s}" onchange="msCheck('${t}',this)"> ${s}</label>`).join(''); }
 function msPopulate(){
-  ['COIL','PLATE','STRIP'].forEach(t=>{ const p=$(MSID[t]+'-pnl'); if(p && !p.dataset.done){ p.dataset.done='1'; p.innerHTML=msStatusPanel(t); } });
+  ['COIL','PLATE','PLATESCRAP','STRIP','STRIPSCRAP'].forEach(t=>{ const p=$(MSID[t]+'-pnl'); if(p && !p.dataset.done){ p.dataset.done='1'; p.innerHTML=msStatusPanel(t); } });
   const cp=$('msCoil-pnl');
   if(cp && !cp.dataset.done && TRACE.length){ cp.dataset.done='1';
     const coils=[...new Set(TRACE.map(r=>(r.CoilNo||'').trim()).filter(Boolean))].sort();
@@ -364,7 +366,7 @@ function coilFiltered(){
     // per-category Status filters (Coil / Plate / Strip stock): keep only matching items,
     // and drop the whole coil if a filtered category ends up with nothing.
     let drop=false;
-    ['COIL','PLATE','STRIP'].forEach(cat=>{ const sf=MS.status[cat]; if(sf.size){ by[cat]=by[cat].filter(x=>sf.has(x._st.s)); if(!by[cat].length) drop=true; } });
+    ['COIL','PLATE','PLATESCRAP','STRIP','STRIPSCRAP'].forEach(cat=>{ const sf=MS.status[cat]; if(sf.size){ by[cat]=by[cat].filter(x=>sf.has(x._st.s)); if(!by[cat].length) drop=true; } });
     if(drop) return;
     Object.values(by).forEach(a=>a.sort((x,y)=>y._st.q-x._st.q));
     const shown=[].concat(by.COIL,by.PLATE,by.PLATESCRAP,by.STRIP,by.STRIPSCRAP);
