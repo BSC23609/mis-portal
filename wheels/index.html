@@ -357,6 +357,9 @@ function coilFiltered(){
   const fMill=$('coilMill')?$('coilMill').value:'';
   const qs=($('coilSearch')?$('coilSearch').value:'').trim().toUpperCase();
   const G={}; TRACE.forEach(r=>{const k=(r.CoilNo||'').trim()||'(no coil no)';(G[k]??=[]).push(r);});
+  // global batch hierarchy: Mothercoil(=parent batch no) -> child rows, across ALL coils,
+  // because SAP sometimes tags a coil's plates with a different U_CoilNo than the coil.
+  const CHILD={}; TRACE.forEach(r=>{const m=(r.Mothercoil||'').trim(); if(m)(CHILD[m]??=[]).push(r);});
   const inW=k=>G[k].reduce((a,r)=>a+(+r.InWhsQty||0),0);
   let keys=Object.keys(G);
   if(onlyStock && !onlyMismatch) keys=keys.filter(k=>inW(k)>1e-6);  // excess/shortage view spans all coils
@@ -378,17 +381,22 @@ function coilFiltered(){
     shown.forEach(x=>{ const st=x._st;
       flat.push({Coil:k, Mill:coilMill(x), Category:CLSLABEL[clsOf(x.ItemName)], ItemCode:x.ItemCode, ItemName:(x.ItemName||'').trim(),
                  Batch:x.BatchNum, Status:st.s, Qty:+st.q.toFixed(3), InWhs:+(+x.InWhsQty||0).toFixed(3), Processed:+(+x.ProcessedQty||0).toFixed(3), Delivered:+(+x.DeliveredQty||0).toFixed(3)}); });
-    // reconciliation: coil weight vs total output booked against it.
-    // output uses In-Whs + Delivered of every piece (NOT Processed) so an intermediate
-    // plate that was re-cut into strips/scrap is not double-counted - its weight shows up
-    // only in the strips/scrap it became. rec = output - coil weight (+ excess, - shortage).
-    const term=x=>(+x.InWhsQty||0)+(+x.DeliveredQty||0);
-    const coilWt=by.COIL.reduce((a,x)=>a+term(x)+(+x.ProcessedQty||0),0);
-    const output=by.COIL.reduce((a,x)=>a+term(x),0)
-      +['PLATE','PLATESCRAP','STRIP','STRIPSCRAP'].reduce((a,c)=>a+by[c].reduce((s,x)=>s+term(x),0),0);
+    // reconciliation: coil weight vs the production booked DIRECTLY off it
+    // (its immediate children, linked by Mothercoil = the coil's batch no).
+    // A coil is cut into plates; a plate may then be slit into strips - that is
+    // the SAME steel re-measured at the next stage, so we count only the coil's
+    // direct children (not the strips a plate became) to avoid double-counting.
+    // output = coil's own uncut/sold residual (In-Whs+Delivered) + sum of direct
+    // children (full weight). rec = output - coil weight (+ excess, - shortage).
+    // Computed on the full coil group so display filters never distort the balance.
+    const totR=r=>(+r.InWhsQty||0)+(+r.DeliveredQty||0)+(+r.ProcessedQty||0);
+    const coilRows=rows.filter(r=>clsOf(r.ItemName)==='COIL');
+    const coilWt=coilRows.reduce((a,r)=>a+totR(r),0);
+    let childSum=0; coilRows.forEach(r=>{(CHILD[(r.BatchNum||'').trim()]||[]).forEach(ch=>childSum+=totR(ch));});
+    const output=coilRows.reduce((a,r)=>a+(+r.InWhsQty||0)+(+r.DeliveredQty||0),0)+childSum;
     out.push({coil:k, mill:coilMill(rows[0]), by,
       cW:shown.reduce((a,x)=>a+(+x.InWhsQty||0),0), cP:shown.reduce((a,x)=>a+(+x.ProcessedQty||0),0), cD:shown.reduce((a,x)=>a+(+x.DeliveredQty||0),0),
-      hasCoil:by.COIL.length>0, coilWt, output, rec:output-coilWt});
+      hasCoil:coilRows.length>0, coilWt, output, rec:output-coilWt});
   });
   if(onlyMismatch){ const keep=new Set(out.filter(g=>g.hasCoil&&Math.abs(g.rec)>0.05).map(g=>g.coil));
     return {out:out.filter(g=>keep.has(g.coil)), flat:flat.filter(x=>keep.has(x.Coil))}; }
@@ -407,14 +415,14 @@ function renderByCoil(){
   const stBadge=st=>`<span style="color:${st.c};font-weight:600">${st.s}</span>`;
   const nm=s=>esc((s||'').replace(/\s+WIR\d+\s*$/i,'').trim());
   const h2=lbls=>lbls.map((l,i)=>`<th class="l${i===0?' gs':''}" style="font-size:9px">${l}</th>`).join('');
-  let tW=0,tP=0,tD=0, recExc=0,recShort=0,recMiss=0, mat={IW:{COIL:0,PLATE:0,PLATESCRAP:0,STRIP:0,STRIPSCRAP:0},PR:{COIL:0,PLATE:0,PLATESCRAP:0,STRIP:0,STRIPSCRAP:0},DL:{COIL:0,PLATE:0,PLATESCRAP:0,STRIP:0,STRIPSCRAP:0}}, html=`<div style="overflow-x:auto"><table class="x" style="font-size:10px;white-space:nowrap">
+  let tW=0,tP=0,tD=0, recExc=0,recShort=0,recExcN=0,recShortN=0, mat={IW:{COIL:0,PLATE:0,PLATESCRAP:0,STRIP:0,STRIPSCRAP:0},PR:{COIL:0,PLATE:0,PLATESCRAP:0,STRIP:0,STRIPSCRAP:0},DL:{COIL:0,PLATE:0,PLATESCRAP:0,STRIP:0,STRIPSCRAP:0}}, html=`<div style="overflow-x:auto"><table class="x" style="font-size:10px;white-space:nowrap">
     <thead>
     <tr><th class="l" rowspan="2" style="background:#0e2a47;color:#fff;vertical-align:middle">Source Coil</th><th class="l gs" rowspan="2" style="background:#5b2a2a;color:#fff;vertical-align:middle;font-size:10px">Excess /<br>Shortage<br>(MT)</th>${CLS.map(c=>`<th class="l" colspan="${c[0]==='COIL'?6:5}" style="background:${c[2]};color:#fff;font-size:11px;text-align:center">${c[1]}</th>`).join('')}</tr>
     <tr>${h2(['Item Code','Item Name','Batch No','Coil No','Status','Qty'])}${h2(['Item Code','Item Name','Batch No','Status','Qty'])}${h2(['Item Code','Item Name','Batch No','Status','Qty'])}${h2(['Item Code','Item Name','Batch No','Status','Qty'])}${h2(['Item Code','Item Name','Batch No','Status','Qty'])}</tr>
     </thead><tbody>`;
   out.forEach(g=>{
     tW+=g.cW;tP+=g.cP;tD+=g.cD;
-    if(g.hasCoil){ if(g.rec>0.05){recExc+=g.rec;recMiss++;} else if(g.rec<-0.05){recShort+=g.rec;recMiss++;} }
+    if(g.hasCoil){ if(g.rec>0.05){recExc+=g.rec;recExcN++;} else if(g.rec<-0.05){recShort+=g.rec;recShortN++;} }
     ['COIL','PLATE','PLATESCRAP','STRIP','STRIPSCRAP'].forEach(c=>g.by[c].forEach(x=>{const k=x._st.s==='In Whs'?'IW':x._st.s==='Delivered'?'DL':'PR'; mat[k][c]+=x._st.q;}));
     const by=g.by, maxN=Math.max(1,by.COIL.length,by.PLATE.length,by.PLATESCRAP.length,by.STRIP.length,by.STRIPSCRAP.length);
     for(let i=0;i<maxN;i++){
@@ -438,7 +446,10 @@ function renderByCoil(){
       <div>In warehouse: <b style="color:#0e7a4b">${tW.toFixed(3)} MT</b></div>
       <div>Production: <b style="color:#9a6a1c">${tP.toFixed(3)} MT</b></div>
       <div>Delivered to Wheels India: <b style="color:#1367a6">${tD.toFixed(3)} MT</b></div></div>
-    <div style="margin-top:6px;font-size:12px;color:#555">Reconciliation: <b style="color:#9a6a1c">${recExc>0?'+':''}${recExc.toFixed(3)} MT excess</b> · <b style="color:#b3261e">${recShort.toFixed(3)} MT shortage</b> · net <b>${(recExc+recShort>=0?'+':'')}${(recExc+recShort).toFixed(3)} MT</b> <span style="color:#889">across ${recMiss} coil${recMiss!==1?'s':''} over &plusmn;0.05 MT</span></div>
+    <div style="display:flex;gap:28px;flex-wrap:wrap;margin-top:8px;padding-top:8px;border-top:1px dashed #e7deb4;font-size:13px">
+      <div>Total excess: <b style="color:#9a6a1c">+${recExc.toFixed(3)} MT</b> <span style="color:#889;font-size:11px">(${recExcN} coil${recExcN!==1?'s':''})</span></div>
+      <div>Total shortage: <b style="color:#b3261e">${recShort.toFixed(3)} MT</b> <span style="color:#889;font-size:11px">(${recShortN} coil${recShortN!==1?'s':''})</span></div>
+      <div style="color:#667">Net: <b>${(recExc+recShort>=0?'+':'')}${(recExc+recShort).toFixed(3)} MT</b></div></div>
     ${(()=>{const CK=['COIL','PLATE','PLATESCRAP','STRIP','STRIPSCRAP'],CL={COIL:'Coil',PLATE:'Plate',PLATESCRAP:'Plate-Scrap',STRIP:'Strip',STRIPSCRAP:'Strip-Scrap'},CC={COIL:'#1367a6',PLATE:'#0e7a4b',PLATESCRAP:'#9a6a1c',STRIP:'#0e6a7a',STRIPSCRAP:'#8a1c1c'};
       const tot={}; CK.forEach(c=>tot[c]=mat.IW[c]+mat.PR[c]+mat.DL[c]);
       const row=(lbl,col,m,strong)=>`<tr${strong?' style="border-top:2px solid #d9c98f"':''}><td style="text-align:left;padding:3px 10px 3px 2px;font-weight:600;color:${col};border-bottom:1px solid #eee">${lbl}</td>${CK.map(c=>`<td style="text-align:right;padding:3px 10px;border-bottom:1px solid #eee${strong?';font-weight:600':''}">${m[c].toFixed(3)}</td>`).join('')}<td style="text-align:right;padding:3px 2px 3px 10px;border-bottom:1px solid #eee;border-left:2px solid #d9c98f;font-weight:600;color:#8a1c1c">${(m.PLATESCRAP+m.STRIPSCRAP).toFixed(3)}</td></tr>`;
@@ -450,7 +461,7 @@ function renderByCoil(){
       ${row('Delivered','#1367a6',mat.DL)}
       ${row('Total','#333',tot,true)}
       </tbody></table></div>`;})()}
-    <div class="snote" style="margin:10px 0 0">Grouped by SAP source coil number (U_CoilNo). Status is each piece's current state: <b>In Whs</b> held now, <b>Processed</b> cut into the next stage, or <b>Delivered</b> dispatched to Wheels India. Scrap off blanks/flats is Strip-Scrap; plate/defective scrap is Plate-Scrap. <b>Excess / Shortage</b> = total output booked (plate + strip + both scraps) minus the coil weight; a re-cut plate is counted only in the strips/scrap it became, never twice. &plusmn; small values are rounding; tick <b>only excess / shortage</b> to list just the coils that don't balance.</div></div>`;
+    <div class="snote" style="margin:10px 0 0">Grouped by SAP source coil number (U_CoilNo). Status is each piece's current state: <b>In Whs</b> held now, <b>Processed</b> cut into the next stage, or <b>Delivered</b> dispatched to Wheels India. Scrap off blanks/flats is Strip-Scrap; plate/defective scrap is Plate-Scrap. <b>Excess / Shortage</b> = production booked directly off the coil (its immediate plates/strips/scrap, linked by batch no) minus the coil weight. A plate later slit into strips is the same steel at the next stage, so only the coil's direct children are counted - strips are not added on top of the plate they came from. &plusmn; small values are rounding; tick <b>only excess / shortage</b> to list just the coils that don't balance.</div></div>`;
   body.innerHTML = out.length ? (head+html) : '<div class="card"><div class="empty">No source coils match the filter.</div></div>';
 }
 // category layout for the wide Excel export: [key, label, argb colour, sub-columns]
