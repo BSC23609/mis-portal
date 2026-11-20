@@ -1394,7 +1394,7 @@ async function renderWheelsHtml(baseUrl, wipSet, note){
   for(const [k,t,c] of SEC){
     const rs=rows.filter(r=>r.form===k).sort(wheelsSortCmp(k)); if(!rs.length)continue;
     const tq=rs.reduce((a,r)=>a+r.Quantity,0); gb+=rs.length; gq+=tq;
-    body+=`<tr><td colspan="9" style="background:${c};color:#fff;font-weight:700;padding:7px 10px;font-size:13px">${t}<span style="float:right">${rs.length} items &middot; ${tq.toFixed(3)} MT</span></td></tr>`+
+    body+=`<tr><td colspan="9" style="background:${c};color:#fff;font-weight:700;padding:7px 10px;font-size:13px">${t}</td></tr>`+
       `<tr style="background:#eef3f7"><th>#</th><th>Mill</th><th>Grade</th><th>Thk</th><th>Width</th><th>Length</th><th>Coil / Batch No</th><th>Qty (MT)</th><th>Aging (d)</th></tr>`;
     rs.forEach((x,i)=>{ const mill=(x.ItemName||"").split(" ")[0];
       const bc=(+x.BatchCount>1)?` <span style="color:#999">(${x.BatchCount} batches)</span>`:"";
@@ -1429,7 +1429,7 @@ async function buildWheelsXlsx(rows){
   for(const [k,t] of SEC){
     const rs=rows.filter(r=>r.form===k).sort(wheelsSortCmp(k)); if(!rs.length)continue;
     const tq=rs.reduce((a,r)=>a+r.Quantity,0); gGrand+=tq;
-    aoa.push([`${t}   (${rs.length} items, ${tq.toFixed(3)} MT)`]);
+    aoa.push([t]);
     aoa.push(hdr);
     rs.forEach((x,i)=>{ const mill=(x.ItemName||"").split(" ")[0];
       const T=parseFloat(x.Thick), W=parseFloat(x.Width), L=parseFloat(x.Length);
@@ -1524,7 +1524,6 @@ async function buildWheelsPdf(){
     ensure(16+headH+rowH*2);
     doc.rect(L,y,W,16).fill(hex);
     doc.fillColor("#fff").font("Helvetica-Bold").fontSize(9).text(t, L+8, y+4, {lineBreak:false});
-    doc.font("Helvetica").fontSize(8).text(rs.length+" items · "+tq.toFixed(3)+" MT", L, y+4, {width:W-8, align:"right"});
     y+=16;
     drawHeadRow();
     rs.forEach((x,i)=>{
@@ -1603,7 +1602,7 @@ function wheelsStockSvg(rows, asof){
     const rs=rows.filter(r=>r.form===form).sort(wheelsSortCmp(form));
     if(!rs.length) continue;
     const tq=rs.reduce((a,r)=>a+r.Quantity,0); gb+=rs.length; gq+=tq;
-    rect(L,y,R-L,23,hex); txt(L+8,y+16,title,{size:13,bold:true,fill:"#fff"}); txt(R-6,y+16,rs.length+" items · "+tq.toFixed(3)+" MT",{size:10.5,fill:"#fff",anchor:"end"}); y+=23;
+    rect(L,y,R-L,23,hex); txt(L+8,y+16,title,{size:13,bold:true,fill:"#fff"}); y+=23;
     const rowYs=[y];
     rect(L,y,R-L,21,"#eef3f7"); cols.forEach(c=>put(c,y+14,c.t,{size:10,bold:true,fill:"#1a2a3a"})); y+=21; rowYs.push(y);
     const rH=19;
