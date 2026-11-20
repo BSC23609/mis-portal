@@ -118,7 +118,7 @@
         <input type="checkbox" id="coilOnlyStock" checked onchange="renderByCoil()"/> only coils with stock
       </label>
       <label style="font-size:12px;color:#8a1c1c;display:flex;align-items:center;gap:6px;font-weight:600">
-        <input type="checkbox" id="coilOnlyMismatch" onchange="renderByCoil()"/> only excess / shortage
+        <input type="checkbox" id="coilOnlyMismatch" onchange="renderByCoil()"/> only mismatches (excess / scrap / strip)
       </label>
       <div class="msd" id="msCoil"><button type="button" onclick="msToggle('msCoil',event)">Coil No &#9662;</button><div class="pnl" id="msCoil-pnl"></div></div>
       <div class="msd" id="msSCOIL"><button type="button" onclick="msToggle('msSCOIL',event)">Coil Status &#9662;</button><div class="pnl" id="msSCOIL-pnl"></div></div>
@@ -400,11 +400,16 @@ function coilFiltered(){
       coilRows:coilRows.map(r=>({b:r.BatchNum,n:r.ItemName,iw:+(+r.InWhsQty||0),dl:+(+r.DeliveredQty||0),pr:+(+r.ProcessedQty||0),t:+totR(r)})),
       kids:kidRows.map(r=>({b:r.BatchNum,n:r.ItemName,cat:clsOf(r.ItemName),iw:+(+r.InWhsQty||0),dl:+(+r.DeliveredQty||0),pr:+(+r.ProcessedQty||0),t:+totR(r)})),
       coilResid:+coilResid };
+    // scenario inputs: what's physically In-Whs for this coil, by category, and total delivered
+    const iwScrap=rows.filter(r=>clsOf(r.ItemName)==='STRIPSCRAP').reduce((a,r)=>a+(+r.InWhsQty||0),0);
+    const iwStrip=rows.filter(r=>clsOf(r.ItemName)==='STRIP').reduce((a,r)=>a+(+r.InWhsQty||0),0);
+    const iwProc=rows.filter(r=>{const c=clsOf(r.ItemName);return c==='PLATE'||c==='PLATESCRAP'||c==='COIL';}).reduce((a,r)=>a+(+r.InWhsQty||0),0);
+    const deliv=rows.reduce((a,r)=>a+(+r.DeliveredQty||0),0);
     out.push({coil:k, mill:coilMill(rows[0]), by,
       cW:shown.reduce((a,x)=>a+(+x.InWhsQty||0),0), cP:shown.reduce((a,x)=>a+(+x.ProcessedQty||0),0), cD:shown.reduce((a,x)=>a+(+x.DeliveredQty||0),0),
-      hasCoil:coilRows.length>0, coilWt, output, rec:output-coilWt, rd});
+      hasCoil:coilRows.length>0, coilWt, output, rec:output-coilWt, rd, iwScrap, iwStrip, iwProc, deliv});
   });
-  if(onlyMismatch){ const keep=new Set(out.filter(g=>g.hasCoil&&Math.abs(g.rec)>0.05).map(g=>g.coil));
+  if(onlyMismatch){ const keep=new Set(out.filter(g=>g.hasCoil&&(Math.abs(g.rec)>0.05||g.iwScrap>0.05||g.iwStrip>0.05)).map(g=>g.coil));
     return {out:out.filter(g=>keep.has(g.coil)), flat:flat.filter(x=>keep.has(x.Coil))}; }
   return {out, flat};
 }
@@ -415,6 +420,21 @@ let COIL_FLAT=[], COIL_OUT=[], REC_DETAIL={};
 const SCRAP_PHYS_DATE='20-Nov-2026';
 const SCRAP_PHYSICAL=new Set(['2613730029/F65235-A-B','26646242/E2048140-B-C','26646241/E2048144-A-D','JW-011944','JW-011951','2613720023/F65235-B-B','2613720023/F65235-A-B','JW-011945','NI9737-A-D','JW-011947','JW-011946','JW-011948','JW-011949','NI8811/P39391-A-E','JW-011950','2613720035/F65237-A-D']);
 function isExcessScrap(cat,x){ return cat==='STRIPSCRAP' && x && x._st && x._st.s==='In Whs' && !SCRAP_PHYSICAL.has((x.BatchNum||'').trim()); }
+// Classify a coil into the reconciliation scenarios. #2 (Excess/Shortage) uses the
+// coil-vs-output balance so in-process material isn't flagged; #3/#4 are driven by
+// what physically sits In-Whs. A coil can carry more than one tag.
+function coilScenario(g){
+  let rr=g.rec; if(Math.abs(rr)<5e-4)rr=0;
+  const bad=Math.abs(rr)>0.05, tags=[];
+  if(bad) tags.push({t:rr<0?'SHORTAGE':'EXCESS', c:rr<0?'#b3261e':'#9a6a1c'});   // #2 real booking error
+  if(g.iwScrap>0.05) tags.push({t:'SCRAP IN WHS', c:'#8a1c1c'});   // #3 GRPO excess
+  if(g.iwStrip>0.05) tags.push({t:'STRIP PENDING', c:'#1367a6'});  // #4 scrap not pulled
+  // coil cut but not yet fully delivered (and not explained by scrap/strip above) = still in process
+  const pending=g.coilWt-g.deliv-g.iwScrap-g.iwStrip;
+  if(!bad && pending>0.05) tags.push({t:'IN PROCESS', c:'#8a93a0'});
+  if(!tags.length) tags.push({t:'OK', c:'#0e7a4b'});   // #1 coil = delivered
+  return {rr, bad, tags};
+}
 function renderByCoil(){
   const body=$('coilBody'); if(!body) return;
   if(!TRACE.length){ body.innerHTML='<div class="card"><div class="empty">Coil traceability isn\'t published yet. It appears automatically once the updated 15-minute job runs on the SAP box (it writes wheels_traceability.csv).</div></div>'; return; }
@@ -426,7 +446,7 @@ function renderByCoil(){
   const stBadge=st=>`<span style="color:${st.c};font-weight:600">${st.s}</span>`;
   const nm=s=>esc((s||'').replace(/\s+WIR\d+\s*$/i,'').trim());
   const h2=lbls=>lbls.map((l,i)=>`<th class="l${i===0?' gs':''}" style="font-size:9px">${l}</th>`).join('');
-  let tW=0,tP=0,tD=0, recExc=0,recShort=0,recExcN=0,recShortN=0, scrapExcN=0,scrapExcMT=0, mat={IW:{COIL:0,PLATE:0,PLATESCRAP:0,STRIP:0,STRIPSCRAP:0},PR:{COIL:0,PLATE:0,PLATESCRAP:0,STRIP:0,STRIPSCRAP:0},DL:{COIL:0,PLATE:0,PLATESCRAP:0,STRIP:0,STRIPSCRAP:0}}, html=`<div style="overflow-x:auto"><table class="x" style="font-size:10px;white-space:nowrap">
+  let tW=0,tP=0,tD=0, recExc=0,recShort=0,recExcN=0,recShortN=0, scrapExcN=0,scrapExcMT=0, scN={ok:0,es:0,scrap:0,strip:0,proc:0}, mat={IW:{COIL:0,PLATE:0,PLATESCRAP:0,STRIP:0,STRIPSCRAP:0},PR:{COIL:0,PLATE:0,PLATESCRAP:0,STRIP:0,STRIPSCRAP:0},DL:{COIL:0,PLATE:0,PLATESCRAP:0,STRIP:0,STRIPSCRAP:0}}, html=`<div style="overflow-x:auto"><table class="x" style="font-size:10px;white-space:nowrap">
     <thead>
     <tr><th class="l" rowspan="2" style="background:#0e2a47;color:#fff;vertical-align:middle">Source Coil</th><th class="l gs" rowspan="2" style="background:#5b2a2a;color:#fff;vertical-align:middle;font-size:10px">Excess /<br>Shortage<br>(MT)</th>${CLS.map(c=>`<th class="l" colspan="${c[0]==='COIL'?6:5}" style="background:${c[2]};color:#fff;font-size:11px;text-align:center">${c[1]}</th>`).join('')}</tr>
     <tr>${h2(['Item Code','Item Name','Batch No','Coil No','Status','Qty'])}${h2(['Item Code','Item Name','Batch No','Status','Qty'])}${h2(['Item Code','Item Name','Batch No','Status','Qty'])}${h2(['Item Code','Item Name','Batch No','Status','Qty'])}${h2(['Item Code','Item Name','Batch No','Status','Qty'])}</tr>
@@ -435,15 +455,19 @@ function renderByCoil(){
   out.forEach(g=>{
     tW+=g.cW;tP+=g.cP;tD+=g.cD;
     if(g.hasCoil) REC_DETAIL[g.coil]={coil:g.coil,rec:g.rec,coilWt:g.coilWt,output:g.output,rd:g.rd};
-    if(g.hasCoil){ if(g.rec>0.05){recExc+=g.rec;recExcN++;} else if(g.rec<-0.05){recShort+=g.rec;recShortN++;} }
+    if(g.hasCoil){ if(g.rec>0.05){recExc+=g.rec;recExcN++;} else if(g.rec<-0.05){recShort+=g.rec;recShortN++;}
+      const bad=Math.abs(g.rec)>0.05, pending=g.coilWt-g.deliv-g.iwScrap-g.iwStrip;
+      if(bad) scN.es++; if(g.iwScrap>0.05) scN.scrap++; if(g.iwStrip>0.05) scN.strip++;
+      if(!bad&&pending>0.05) scN.proc++;
+      if(!bad&&g.iwScrap<=0.05&&g.iwStrip<=0.05&&pending<=0.05) scN.ok++; }
     ['COIL','PLATE','PLATESCRAP','STRIP','STRIPSCRAP'].forEach(c=>g.by[c].forEach(x=>{const k=x._st.s==='In Whs'?'IW':x._st.s==='Delivered'?'DL':'PR'; mat[k][c]+=x._st.q;}));
     const by=g.by, maxN=Math.max(1,by.COIL.length,by.PLATE.length,by.PLATESCRAP.length,by.STRIP.length,by.STRIPSCRAP.length);
     for(let i=0;i<maxN;i++){
       html+= i===maxN-1 ? '<tr class="band">' : '<tr>';
       if(i===0){ html+=`<td class="srcc gs" rowspan="${maxN}">${esc(g.coil)}<div style="font-weight:400;font-size:9px;color:#778;margin-top:2px">IW ${g.cW.toFixed(2)} · Pr ${g.cP.toFixed(2)} · Dl ${g.cD.toFixed(2)}</div></td>`;
         if(!g.hasCoil){ html+=`<td class="srcc gs" rowspan="${maxN}" style="text-align:center;color:#aaa">—<div style="font-size:8px">no coil row</div></td>`; }
-        else { let rr=g.rec; if(Math.abs(rr)<5e-4)rr=0; const ok=Math.abs(rr)<=0.05, col=ok?'#0e7a4b':(rr<0?'#b3261e':'#9a6a1c'), lbl=ok?'OK':(rr<0?'Short':'Excess');
-          html+=`<td class="srcc gs" rowspan="${maxN}" data-coil="${esc(g.coil)}" onclick="openRecDetail(this.dataset.coil)" title="click to see how this is calculated" style="text-align:right;cursor:pointer"><div style="font-weight:700;font-size:12px;color:${col}">${rr>0?'+':''}${rr.toFixed(3)}</div><div style="font-size:8px;font-weight:600;color:${col}">${lbl}</div><div style="font-size:8px;color:#8a93a0;margin-top:3px">coil ${g.coilWt.toFixed(2)}<br>out ${g.output.toFixed(2)}</div><div style="font-size:8px;color:#6b7bd6;margin-top:2px;text-decoration:underline">show calc</div></td>`; } }
+        else { const sc=coilScenario(g); const rr=sc.rr;
+          html+=`<td class="srcc gs" rowspan="${maxN}" data-coil="${esc(g.coil)}" onclick="openRecDetail(this.dataset.coil)" title="click to see how this is calculated" style="text-align:right;cursor:pointer">${sc.bad?`<div style="font-weight:700;font-size:12px;color:${rr<0?'#b3261e':'#9a6a1c'}">${rr>0?'+':''}${rr.toFixed(3)}</div>`:''}${sc.tags.map(t=>`<div style="font-size:8px;font-weight:700;color:${t.c}">${t.t}</div>`).join('')}<div style="font-size:8px;color:#8a93a0;margin-top:3px">coil ${g.coilWt.toFixed(2)}<br>del ${g.deliv.toFixed(2)}</div><div style="font-size:8px;color:#6b7bd6;margin-top:2px;text-decoration:underline">show calc</div></td>`; } }
       const c=by.COIL[i];
       html+= c?`<td class="mono gs">${esc(c.ItemCode)}</td><td>${nm(c.ItemName)}</td><td class="mono">${esc(c.BatchNum)}</td><td class="mono" style="color:#777">${esc(c.CoilNo)}</td><td>${stBadge(c._st)}</td><td class="r" style="font-weight:600">${c._st.q.toFixed(3)}</td>`
              :'<td class="gs"></td><td></td><td></td><td></td><td></td><td></td>';
@@ -461,10 +485,13 @@ function renderByCoil(){
       <div>In warehouse: <b style="color:#0e7a4b">${tW.toFixed(3)} MT</b></div>
       <div>Production: <b style="color:#9a6a1c">${tP.toFixed(3)} MT</b></div>
       <div>Delivered to Wheels India: <b style="color:#1367a6">${tD.toFixed(3)} MT</b></div></div>
-    <div style="display:flex;gap:28px;flex-wrap:wrap;margin-top:8px;padding-top:8px;border-top:1px dashed #e7deb4;font-size:13px">
-      <div>Total excess: <b style="color:#9a6a1c">+${recExc.toFixed(3)} MT</b> <span style="color:#889;font-size:11px">(${recExcN} coil${recExcN!==1?'s':''})</span></div>
-      <div>Total shortage: <b style="color:#b3261e">${recShort.toFixed(3)} MT</b> <span style="color:#889;font-size:11px">(${recShortN} coil${recShortN!==1?'s':''})</span></div>
-      <div style="color:#667">Net: <b>${(recExc+recShort>=0?'+':'')}${(recExc+recShort).toFixed(3)} MT</b></div></div>
+    <div style="display:flex;gap:20px;flex-wrap:wrap;margin-top:8px;padding-top:8px;border-top:1px dashed #e7deb4;font-size:12px">
+      <span style="color:#667;font-weight:600">Scenarios:</span>
+      <div><b style="color:#0e7a4b">${scN.ok}</b> OK</div>
+      <div><b style="color:#9a6a1c">${scN.es}</b> Excess/Shortage <span style="color:#889">(net ${(recExc+recShort>=0?'+':'')}${(recExc+recShort).toFixed(2)} MT)</span></div>
+      <div><b style="color:#8a1c1c">${scN.scrap}</b> Scrap in Whs <span style="color:#889">(GRPO excess)</span></div>
+      <div><b style="color:#1367a6">${scN.strip}</b> Strip pending</div>
+      <div><b style="color:#8a93a0">${scN.proc}</b> In process</div></div>
     ${scrapExcN?`<div style="margin-top:8px;padding:8px 12px;border-radius:8px;background:#fbeceb;border:1px solid #e0b4b0;font-size:12px;color:#8a1c1c">&#9888; <b>Strip-scrap excess to remove:</b> ${scrapExcN} batch${scrapExcN!==1?'es':''}, <b>${scrapExcMT.toFixed(3)} MT</b> &mdash; In-Whs strip-scrap not in the physical count (${SCRAP_PHYS_DATE}), flagged in the Strip-Scrap column.</div>`:''}
     ${(()=>{const CK=['COIL','PLATE','PLATESCRAP','STRIP','STRIPSCRAP'],CL={COIL:'Coil',PLATE:'Plate',PLATESCRAP:'Plate-Scrap',STRIP:'Strip',STRIPSCRAP:'Strip-Scrap'},CC={COIL:'#1367a6',PLATE:'#0e7a4b',PLATESCRAP:'#9a6a1c',STRIP:'#0e6a7a',STRIPSCRAP:'#8a1c1c'};
       const tot={}; CK.forEach(c=>tot[c]=mat.IW[c]+mat.PR[c]+mat.DL[c]);
@@ -477,7 +504,7 @@ function renderByCoil(){
       ${row('Delivered','#1367a6',mat.DL)}
       ${row('Total','#333',tot,true)}
       </tbody></table></div>`;})()}
-    <div class="snote" style="margin:10px 0 0">Grouped by SAP source coil number (U_CoilNo). Status is each piece's current state: <b>In Whs</b> held now, <b>Processed</b> cut into the next stage, or <b>Delivered</b> dispatched to Wheels India. Scrap off blanks/flats is Strip-Scrap; plate/defective scrap is Plate-Scrap. <b>Excess / Shortage</b> = production booked directly off the coil (its immediate plates/strips/scrap, linked by batch no) minus the coil weight. A plate later slit into strips is the same steel at the next stage, so only the coil's direct children are counted - strips are not added on top of the plate they came from. &plusmn; small values are rounding; tick <b>only excess / shortage</b> to list just the coils that don't balance.</div></div>`;
+    <div class="snote" style="margin:10px 0 0">Grouped by SAP source coil number (U_CoilNo). Status is each piece's current state: <b>In Whs</b> held now, <b>Processed</b> cut into the next stage, or <b>Delivered</b> dispatched to Wheels India. Scrap off blanks/flats is Strip-Scrap; plate/defective scrap is Plate-Scrap. The status column records one of four scenarios per coil: <b style="color:#0e7a4b">OK</b> (coil fully delivered, balances), <b style="color:#9a6a1c">Excess / Shortage</b> (production booked off the coil - its direct plates/strips/scrap - doesn't equal the coil weight; a real booking error), <b style="color:#8a1c1c">Scrap in Whs</b> (strip-scrap still sitting in stock = excess qty recorded at GRPO - major concern) and <b style="color:#1367a6">Strip pending</b> (prime strip still in stock, scrap not yet pulled); <b style="color:#8a93a0">In process</b> means plate/coil not yet fully cut. A coil can carry more than one. A plate later slit into strips is the same steel re-counted, so Excess/Shortage counts only the coil's direct children. Tick <b>only mismatches</b> to list the coils that aren't OK.</div></div>`;
   body.innerHTML = out.length ? (head+html) : '<div class="card"><div class="empty">No source coils match the filter.</div></div>';
 }
 // category layout for the wide Excel export: [key, label, argb colour, sub-columns]
@@ -543,7 +570,7 @@ async function exportCoilExcel(){
   groups.forEach(g=>{ ws.mergeCells(1,g.start,1,g.end); const cell=h1.getCell(g.start); cell.value=g.label;
     cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:g.color}}; cell.font={bold:true,color:{argb:'FFFFFFFF'},size:11}; cell.alignment={horizontal:'center',vertical:'middle'}; });
   ws.mergeCells(1,1,2,1); const sc=h1.getCell(1); sc.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF0E2A47'}}; sc.font={bold:true,color:{argb:'FFFFFFFF'}}; sc.alignment={horizontal:'center',vertical:'middle'};
-  ws.mergeCells(1,2,2,2); const rc=h1.getCell(2); rc.value='Excess / Shortage (MT)'; rc.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF5B2A2A'}}; rc.font={bold:true,color:{argb:'FFFFFFFF'},size:10}; rc.alignment={horizontal:'center',vertical:'middle',wrapText:true};
+  ws.mergeCells(1,2,2,2); const rc=h1.getCell(2); rc.value='Status / Scenario'; rc.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF5B2A2A'}}; rc.font={bold:true,color:{argb:'FFFFFFFF'},size:10}; rc.alignment={horizontal:'center',vertical:'middle',wrapText:true};
   // ---- header row 2: sub-headers ----
   const h2=ws.getRow(2); groups.forEach(g=>{ XCAT.find(c=>c[0]===g.key)[3].forEach((lbl,i)=>{ const cell=h2.getCell(g.start+i); cell.value=lbl; cell.font={bold:true,size:9}; cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFEEF3F7'}}; cell.alignment={horizontal:'left'}; }); });
   // ---- data rows, one band per coil ----
@@ -567,9 +594,11 @@ async function exportCoilExcel(){
     // Excess/Shortage cell merged down the band (col 2)
     ws.mergeCells(first,2,r-1,2); const rcc=ws.getRow(first).getCell(2);
     if(!g.hasCoil){ rcc.value='-\nno coil row'; rcc.font={size:9,color:{argb:'FFAAAAAA'}}; }
-    else { let rr2=g.rec; if(Math.abs(rr2)<5e-4)rr2=0; const okb=Math.abs(rr2)<=0.05, cl=okb?'FF0E7A4B':(rr2<0?'FFB3261E':'FF9A6A1C'), lb=okb?'OK':(rr2<0?'Short':'Excess');
-      rcc.value=`${rr2>0?'+':''}${rr2.toFixed(3)} ${lb}\ncoil ${g.coilWt.toFixed(2)} / out ${g.output.toFixed(2)}`;
-      rcc.font={bold:true,size:10,color:{argb:cl}}; }
+    else { const sc=coilScenario(g); const rr2=sc.rr;
+      const lbl=sc.tags.map(t=>t.t).join(' + ');
+      const cl=sc.bad?(rr2<0?'FFB3261E':'FF9A6A1C'):(g.iwScrap>0.05?'FF8A1C1C':(g.iwStrip>0.05?'FF1367A6':(g.iwProc>0.05?'FF8A93A0':'FF0E7A4B')));
+      rcc.value=(sc.bad?`${rr2>0?'+':''}${rr2.toFixed(3)} MT\n`:'')+`${lbl}\ncoil ${g.coilWt.toFixed(2)} / del ${g.deliv.toFixed(2)}`;
+      rcc.font={bold:true,size:9,color:{argb:cl}}; }
     rcc.alignment={vertical:'middle',horizontal:'center',wrapText:true}; rcc.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFF7F3F3'}};
     // band bottom separator
     for(let c=1;c<=nCols;c++){ const cell=ws.getRow(r-1).getCell(c); const b=cell.border||{}; b.bottom={style:'medium',color:{argb:'FF0E2A47'}}; cell.border=b; }
