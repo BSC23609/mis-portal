@@ -392,18 +392,24 @@ function coilFiltered(){
     const totR=r=>(+r.InWhsQty||0)+(+r.DeliveredQty||0)+(+r.ProcessedQty||0);
     const coilRows=rows.filter(r=>clsOf(r.ItemName)==='COIL');
     const coilWt=coilRows.reduce((a,r)=>a+totR(r),0);
-    let childSum=0; coilRows.forEach(r=>{(CHILD[(r.BatchNum||'').trim()]||[]).forEach(ch=>childSum+=totR(ch));});
-    const output=coilRows.reduce((a,r)=>a+(+r.InWhsQty||0)+(+r.DeliveredQty||0),0)+childSum;
+    const kidRows=[]; coilRows.forEach(r=>{(CHILD[(r.BatchNum||'').trim()]||[]).forEach(ch=>kidRows.push(ch));});
+    const childSum=kidRows.reduce((a,ch)=>a+totR(ch),0);
+    const coilResid=coilRows.reduce((a,r)=>a+(+r.InWhsQty||0)+(+r.DeliveredQty||0),0);
+    const output=coilResid+childSum;
+    const rd={  // reconciliation breakdown, for the "show calculation" popover
+      coilRows:coilRows.map(r=>({b:r.BatchNum,n:r.ItemName,iw:+(+r.InWhsQty||0),dl:+(+r.DeliveredQty||0),pr:+(+r.ProcessedQty||0),t:+totR(r)})),
+      kids:kidRows.map(r=>({b:r.BatchNum,n:r.ItemName,cat:clsOf(r.ItemName),iw:+(+r.InWhsQty||0),dl:+(+r.DeliveredQty||0),pr:+(+r.ProcessedQty||0),t:+totR(r)})),
+      coilResid:+coilResid };
     out.push({coil:k, mill:coilMill(rows[0]), by,
       cW:shown.reduce((a,x)=>a+(+x.InWhsQty||0),0), cP:shown.reduce((a,x)=>a+(+x.ProcessedQty||0),0), cD:shown.reduce((a,x)=>a+(+x.DeliveredQty||0),0),
-      hasCoil:coilRows.length>0, coilWt, output, rec:output-coilWt});
+      hasCoil:coilRows.length>0, coilWt, output, rec:output-coilWt, rd});
   });
   if(onlyMismatch){ const keep=new Set(out.filter(g=>g.hasCoil&&Math.abs(g.rec)>0.05).map(g=>g.coil));
     return {out:out.filter(g=>keep.has(g.coil)), flat:flat.filter(x=>keep.has(x.Coil))}; }
   return {out, flat};
 }
 const CLSLABEL={COIL:'Coil',PLATE:'Plate',PLATESCRAP:'Plate-Scrap',STRIP:'Strip',STRIPSCRAP:'Strip-Scrap'};
-let COIL_FLAT=[], COIL_OUT=[];
+let COIL_FLAT=[], COIL_OUT=[], REC_DETAIL={};
 function renderByCoil(){
   const body=$('coilBody'); if(!body) return;
   if(!TRACE.length){ body.innerHTML='<div class="card"><div class="empty">Coil traceability isn\'t published yet. It appears automatically once the updated 15-minute job runs on the SAP box (it writes wheels_traceability.csv).</div></div>'; return; }
@@ -420,8 +426,10 @@ function renderByCoil(){
     <tr><th class="l" rowspan="2" style="background:#0e2a47;color:#fff;vertical-align:middle">Source Coil</th><th class="l gs" rowspan="2" style="background:#5b2a2a;color:#fff;vertical-align:middle;font-size:10px">Excess /<br>Shortage<br>(MT)</th>${CLS.map(c=>`<th class="l" colspan="${c[0]==='COIL'?6:5}" style="background:${c[2]};color:#fff;font-size:11px;text-align:center">${c[1]}</th>`).join('')}</tr>
     <tr>${h2(['Item Code','Item Name','Batch No','Coil No','Status','Qty'])}${h2(['Item Code','Item Name','Batch No','Status','Qty'])}${h2(['Item Code','Item Name','Batch No','Status','Qty'])}${h2(['Item Code','Item Name','Batch No','Status','Qty'])}${h2(['Item Code','Item Name','Batch No','Status','Qty'])}</tr>
     </thead><tbody>`;
+  REC_DETAIL={};
   out.forEach(g=>{
     tW+=g.cW;tP+=g.cP;tD+=g.cD;
+    if(g.hasCoil) REC_DETAIL[g.coil]={coil:g.coil,rec:g.rec,coilWt:g.coilWt,output:g.output,rd:g.rd};
     if(g.hasCoil){ if(g.rec>0.05){recExc+=g.rec;recExcN++;} else if(g.rec<-0.05){recShort+=g.rec;recShortN++;} }
     ['COIL','PLATE','PLATESCRAP','STRIP','STRIPSCRAP'].forEach(c=>g.by[c].forEach(x=>{const k=x._st.s==='In Whs'?'IW':x._st.s==='Delivered'?'DL':'PR'; mat[k][c]+=x._st.q;}));
     const by=g.by, maxN=Math.max(1,by.COIL.length,by.PLATE.length,by.PLATESCRAP.length,by.STRIP.length,by.STRIPSCRAP.length);
@@ -430,7 +438,7 @@ function renderByCoil(){
       if(i===0){ html+=`<td class="srcc gs" rowspan="${maxN}">${esc(g.coil)}<div style="font-weight:400;font-size:9px;color:#778;margin-top:2px">IW ${g.cW.toFixed(2)} · Pr ${g.cP.toFixed(2)} · Dl ${g.cD.toFixed(2)}</div></td>`;
         if(!g.hasCoil){ html+=`<td class="srcc gs" rowspan="${maxN}" style="text-align:center;color:#aaa">—<div style="font-size:8px">no coil row</div></td>`; }
         else { let rr=g.rec; if(Math.abs(rr)<5e-4)rr=0; const ok=Math.abs(rr)<=0.05, col=ok?'#0e7a4b':(rr<0?'#b3261e':'#9a6a1c'), lbl=ok?'OK':(rr<0?'Short':'Excess');
-          html+=`<td class="srcc gs" rowspan="${maxN}" style="text-align:right"><div style="font-weight:700;font-size:12px;color:${col}">${rr>0?'+':''}${rr.toFixed(3)}</div><div style="font-size:8px;font-weight:600;color:${col}">${lbl}</div><div style="font-size:8px;color:#8a93a0;margin-top:3px">coil ${g.coilWt.toFixed(2)}<br>out ${g.output.toFixed(2)}</div></td>`; } }
+          html+=`<td class="srcc gs" rowspan="${maxN}" data-coil="${esc(g.coil)}" onclick="openRecDetail(this.dataset.coil)" title="click to see how this is calculated" style="text-align:right;cursor:pointer"><div style="font-weight:700;font-size:12px;color:${col}">${rr>0?'+':''}${rr.toFixed(3)}</div><div style="font-size:8px;font-weight:600;color:${col}">${lbl}</div><div style="font-size:8px;color:#8a93a0;margin-top:3px">coil ${g.coilWt.toFixed(2)}<br>out ${g.output.toFixed(2)}</div><div style="font-size:8px;color:#6b7bd6;margin-top:2px;text-decoration:underline">show calc</div></td>`; } }
       const c=by.COIL[i];
       html+= c?`<td class="mono gs">${esc(c.ItemCode)}</td><td>${nm(c.ItemName)}</td><td class="mono">${esc(c.BatchNum)}</td><td class="mono" style="color:#777">${esc(c.CoilNo)}</td><td>${stBadge(c._st)}</td><td class="r" style="font-weight:600">${c._st.q.toFixed(3)}</td>`
              :'<td class="gs"></td><td></td><td></td><td></td><td></td><td></td>';
@@ -473,6 +481,43 @@ const XCAT=[
   ['STRIPSCRAP','Strip-Scrap','FF8A1C1C',['Item Code','Item Name','Batch No','Status','Qty']]
 ];
 const STCOL={'In Whs':'FF0E7A4B','Processed':'FF9A6A1C','Delivered':'FF1367A6'};
+function nmPlain(s){return esc((s||'').replace(/\s+WIR\d+\s*$/i,'').trim());}
+function closeRecDetail(){ const m=$('recModal'); if(m)m.style.display='none'; }
+function openRecDetail(coil){
+  const d=REC_DETAIL[coil]; if(!d) return; const rd=d.rd;
+  let rr=d.rec; if(Math.abs(rr)<5e-4)rr=0;
+  const ok=Math.abs(rr)<=0.05, col=ok?'#0e7a4b':(rr<0?'#b3261e':'#9a6a1c'), lbl=ok?'Balanced':(rr<0?'SHORTAGE':'EXCESS');
+  const catL={COIL:'Coil',PLATE:'Plate',PLATESCRAP:'Plate-Scrap',STRIP:'Strip',STRIPSCRAP:'Strip-Scrap'};
+  const hc=`<tr style="background:#f3f0e7"><th style="text-align:left;padding:4px 8px">Batch No</th><th style="text-align:left;padding:4px 8px">Item</th><th style="text-align:right;padding:4px 8px">In-Whs</th><th style="text-align:right;padding:4px 8px">Delivered</th><th style="text-align:right;padding:4px 8px">Cut</th><th style="text-align:right;padding:4px 8px">Total</th></tr>`;
+  const line=(b,label,r)=>`<tr><td class="mono" style="padding:3px 8px;border-top:1px solid #eee">${esc(b)}</td><td style="padding:3px 8px;border-top:1px solid #eee">${label}</td><td style="text-align:right;padding:3px 8px;border-top:1px solid #eee">${r.iw.toFixed(3)}</td><td style="text-align:right;padding:3px 8px;border-top:1px solid #eee">${r.dl.toFixed(3)}</td><td style="text-align:right;padding:3px 8px;border-top:1px solid #eee">${r.pr.toFixed(3)}</td><td style="text-align:right;padding:3px 8px;border-top:1px solid #eee;font-weight:600">${r.t.toFixed(3)}</td></tr>`;
+  const coilLines=rd.coilRows.map(r=>line(r.b,nmPlain(r.n),r)).join('');
+  const kidLines=rd.kids.length?rd.kids.map(r=>line(r.b,'<b>'+(catL[r.cat]||r.cat)+'</b> · '+nmPlain(r.n),r)).join('')
+    :`<tr><td colspan="6" style="padding:8px;text-align:center;color:#b3261e">No plates/strips/scrap are booked against this coil — nothing was produced from it on SAP.</td></tr>`;
+  const sum=(label,v,c)=>`<tr style="background:#eef3f7"><td colspan="5" style="padding:4px 8px;text-align:right;font-weight:600">${label}</td><td style="padding:4px 8px;text-align:right;font-weight:700;color:${c||'#111'}">${v.toFixed(3)}</td></tr>`;
+  const residLine=`<tr><td class="mono" style="padding:3px 8px;border-top:1px solid #eee;color:#889">—</td><td style="padding:3px 8px;border-top:1px solid #eee;color:#667">Coil still in warehouse / sold as coil (In-Whs + Delivered)</td><td colspan="3"></td><td style="text-align:right;padding:3px 8px;border-top:1px solid #eee;font-weight:600">${rd.coilResid.toFixed(3)}</td></tr>`;
+  const inner=`
+    <div style="background:#fff;border-radius:10px;max-width:760px;width:94%;max-height:88vh;overflow:auto;box-shadow:0 10px 40px rgba(0,0,0,.3)">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 18px;border-bottom:1px solid #eee;position:sticky;top:0;background:#fff">
+        <div><div style="font-weight:700;font-size:15px">Excess / Shortage — how it's calculated</div><div style="font-size:12px;color:#667">Source coil <b>${esc(coil)}</b></div></div>
+        <button onclick="closeRecDetail()" style="border:none;background:#eee;border-radius:6px;width:30px;height:30px;font-size:16px;cursor:pointer">&times;</button>
+      </div>
+      <div style="padding:14px 18px">
+        <div style="font-size:14px;margin-bottom:10px;padding:10px 12px;border-radius:8px;background:${ok?'#eef7f1':(rr<0?'#fbeceb':'#fbf3e6')};border:1px solid ${col}33">
+          <b style="color:${col}">${lbl}${ok?'':' '+(rr>0?'+':'')+rr.toFixed(3)+' MT'}</b>
+          &nbsp;=&nbsp; Output booked <b>${d.output.toFixed(3)}</b> &minus; Coil weight <b>${d.coilWt.toFixed(3)}</b>
+        </div>
+        <div style="font-size:12px;color:#667;margin:6px 0 3px"><b>A. Coil weight</b> (Total = In-Whs + Delivered + Cut)</div>
+        <table style="width:100%;border-collapse:collapse;font-size:12px">${hc}${coilLines}${sum('Coil weight (A)',d.coilWt)}</table>
+        <div style="font-size:12px;color:#667;margin:14px 0 3px"><b>B. Production booked directly off this coil</b> (its immediate plates / strips / scrap)</div>
+        <table style="width:100%;border-collapse:collapse;font-size:12px">${hc}${kidLines}${residLine}${sum('Output booked (B)',d.output)}</table>
+        <table style="width:100%;border-collapse:collapse;font-size:13px;margin-top:12px"><tr style="background:${ok?'#eef7f1':(rr<0?'#fbeceb':'#fbf3e6')}"><td style="padding:8px;text-align:right;font-weight:700">Difference  (B &minus; A)</td><td style="padding:8px;text-align:right;font-weight:800;color:${col};width:120px">${rr>0?'+':''}${rr.toFixed(3)} MT</td></tr></table>
+        <div style="font-size:11px;color:#889;margin-top:10px">A plate later slit into strips is the same steel at the next stage, so it is counted once here — at the plate (direct-child) stage. Children are matched by batch number even if SAP tags them under a different coil number.</div>
+      </div>
+    </div>`;
+  let m=$('recModal');
+  if(!m){ m=document.createElement('div'); m.id='recModal'; m.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px'; m.onclick=e=>{if(e.target===m)closeRecDetail();}; document.body.appendChild(m); }
+  m.innerHTML=inner; m.style.display='flex';
+}
 function dlBlob(buf,name,type){ const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([buf],{type})); a.download=name; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),4000); }
 async function exportCoilExcel(){
   if(!COIL_OUT.length){ alert('Nothing to export for the current filter.'); return; }
@@ -535,6 +580,35 @@ async function exportCoilExcel(){
   for(let rr=1;rr<=lastRow;rr++){ const c=ws.getRow(rr).getCell(1); c.border={...c.border,left:{style:'medium',color:{argb:'FF0E2A47'}}};
     const c2=ws.getRow(rr).getCell(2); c2.border={...c2.border,right:{style:'medium',color:{argb:'FF0E2A47'}}}; }
   ws.getRow(1).height=20; ws.getRow(2).height=16;
+
+  // ===== second sheet: Reconciliation (full calculation, auditable) =====
+  const rs=wb.addWorksheet('Reconciliation',{views:[{state:'frozen',ySplit:1}]});
+  rs.columns=[{width:22},{width:30},{width:38},{width:11},{width:11},{width:11},{width:12}].map(c=>({width:c.width}));
+  const RH=['Source Coil','Role / Batch','Item','In-Whs','Delivered','Cut','Total (MT)'];
+  const hr=rs.getRow(1); RH.forEach((h,i)=>{const c=hr.getCell(i+1); c.value=h; c.font={bold:true,color:{argb:'FFFFFFFF'}}; c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF0E2A47'}}; c.alignment={horizontal:i>=3?'right':'left'};});
+  const catL2={COIL:'Coil',PLATE:'Plate',PLATESCRAP:'Plate-Scrap',STRIP:'Strip',STRIPSCRAP:'Strip-Scrap'};
+  let rr3=2;
+  COIL_OUT.filter(g=>g.hasCoil).forEach(g=>{
+    const rd=g.rd; let rv=g.rec; if(Math.abs(rv)<5e-4)rv=0;
+    const okb=Math.abs(rv)<=0.05, cl=okb?'FF0E7A4B':(rv<0?'FFB3261E':'FF9A6A1C'), lb=okb?'Balanced':(rv<0?'Shortage':'Excess');
+    const start=rr3;
+    const put=(vals,opt)=>{ const row=rs.getRow(rr3++); vals.forEach((v,i)=>{ const c=row.getCell(i+1); if(v!==null){c.value=v;} if(i>=3){c.numFmt='0.000';c.alignment={horizontal:'right'};} if(opt&&opt.font)c.font=opt.font; if(opt&&opt.fill)c.fill={type:'pattern',pattern:'solid',fgColor:{argb:opt.fill}}; }); return row; };
+    // coil weight rows
+    rd.coilRows.forEach(r=>put([null,'Coil: '+r.b,(r.n||'').trim(),r.iw,r.dl,r.pr,r.t]));
+    put([null,'Coil weight (A)','',null,null,null,+g.coilWt.toFixed(3)],{font:{bold:true},fill:'FFEFF3F7'});
+    // children
+    if(rd.kids.length) rd.kids.forEach(r=>put([null,(catL2[r.cat]||r.cat)+': '+r.b,(r.n||'').trim(),r.iw,r.dl,r.pr,r.t]));
+    else put([null,'(no production booked against this coil)','',null,null,null,0],{font:{italic:true,color:{argb:'FFB3261E'}}});
+    put([null,'Coil still as coil (In-Whs+Delivered)','',null,null,null,+rd.coilResid.toFixed(3)]);
+    put([null,'Output booked (B)','',null,null,null,+g.output.toFixed(3)],{font:{bold:true},fill:'FFEFF3F7'});
+    const dr=put([null,'Difference  (B - A)  = '+lb,'',null,null,null,+rv.toFixed(3)],{font:{bold:true,color:{argb:cl}},fill:'FFF7F3F3'});
+    // source coil label merged down the block
+    rs.mergeCells(start,1,rr3-1,1); const sc2=rs.getRow(start).getCell(1); sc2.value=g.coil; sc2.font={bold:true}; sc2.alignment={vertical:'top'};
+    // blank spacer row
+    rr3++;
+  });
+  rs.getRow(1).height=18;
+
   const buf=await wb.xlsx.writeBuffer();
   dlBlob(buf,'wheels_coil_traceability_'+stamp+'.xlsx','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
 }
