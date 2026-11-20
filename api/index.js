@@ -1407,9 +1407,8 @@ async function renderWheelsHtml(baseUrl, wipSet, note){
   const noteHtml = note && note.trim() ? `<div style="padding:14px 22px 0;font-size:13px;color:#222;line-height:1.6">${esc2(note).replace(/\n/g,"<br>")}</div>` : "";
   const html=`<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>@media only screen and (max-width:600px){.wk-tbl{font-size:10px !important}.wk-tbl th,.wk-tbl td{padding:2px 3px !important}.wk-pad{padding:12px 8px 4px !important}.wk-hd{padding:12px 12px !important}}</style></head><body style="margin:0;padding:0;background:#fff;-webkit-text-size-adjust:100%">`+
     `<div style="font-family:Arial,Helvetica,sans-serif;color:#1a1a1a;max-width:920px;width:100%;margin:auto;border:1px solid #d0d7dd;box-sizing:border-box">
-    <div style="background:#0e2a47;color:#fff;padding:16px 22px"><div style="font-size:18px;font-weight:700">Job Work Stock Statement &mdash; Wheels India Limited</div></div>
-    ${noteHtml}
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;padding:11px 22px;background:#f7f9fb;border-bottom:1px solid #e3e8ec;font-size:13px"><div>Customer: <b>Wheels India Limited</b></div><div style="background:#0e2a47;color:#fff;padding:4px 12px;border-radius:5px;font-weight:600;white-space:nowrap">As on: ${asof}</div><div>Warehouse: <b>Job Work (WH 45)</b></div></div>
+    <div style="background:#0e2a47;color:#fff;padding:16px 22px;text-align:center"><div style="font-size:18px;font-weight:700">Job Work Stock Statement</div></div>
+    <div style="text-align:center;padding:14px 22px;background:#f7f9fb;border-bottom:1px solid #e3e8ec"><span style="display:inline-block;background:#0e2a47;color:#fff;padding:8px 24px;border-radius:5px;font-weight:700;font-size:19px">As on: ${asof}</span></div>
     <div class="wk-pad" style="padding:14px 22px 4px;overflow-x:auto;-webkit-overflow-scrolling:touch"><table class="wk-tbl" style="width:100%;border-collapse:collapse;font-size:12px">${body}</table></div>
     <div style="margin:14px 22px;padding:12px 16px;background:#0e2a47;color:#fff;border-radius:5px;display:flex;justify-content:space-between;font-size:15px;font-weight:700"><span>TOTAL MATERIAL HELD</span><span>${gb} items &middot; ${gq.toFixed(3)} MT</span></div>
     <div style="margin:0 22px 14px;padding:9px 13px;background:#fff8e1;border:1px solid #f0dc9a;color:#6b5200;font-size:11px;border-radius:5px">Plates currently under process (awaiting shearing) are excluded from this statement.</div>
@@ -1422,8 +1421,8 @@ async function buildWheelsXlsx(rows){
   try { XLSX = await import("xlsx"); } catch(e){ throw new Error("xlsx module not available on server: "+e.message); }
   const SEC=[["PLATE","Plate Stock"],["ENDBIT","Plate-End Bit"],["STRIP","Strip Stock"],["COIL","Coil Stock"]]; // plate, end-bit, strip, coil
   const aoa=[["BHARAT STEEL (CHENNAI) PRIVATE LIMITED"],
-             ["Job Work Stock Statement — Wheels India Limited"],
-             ["As on: "+new Date().toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})+"   |   Customer: Wheels India Limited   |   Warehouse: Job Work (WH 45)"],
+             ["Job Work Stock Statement"],
+             ["As on: "+new Date().toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})],
              []];
   const hdr=["#","Mill","Grade","Thk","Width","Length","Coil / Batch No","Mother Coil","Qty (MT)","Aging (d)"];
   let gGrand=0, secRanges=[];
@@ -1506,12 +1505,10 @@ async function buildWheelsPdf(){
   function drawBrandHeader(pageTitle){
     y=28;
     doc.rect(L,y,W,30).fill("#0e2a47");
-    doc.fillColor("#fff").font("Helvetica-Bold").fontSize(14).text("Job Work Stock Statement — Wheels India Limited", L+10, y+8, {width:W-20});
+    doc.fillColor("#fff").font("Helvetica-Bold").fontSize(14).text("Job Work Stock Statement", L, y+8, {width:W, align:"center"});
     y+=38;
-    doc.font("Helvetica").fontSize(8.5).fillColor("#333").text("Customer: Wheels India Limited        ", L, y, {continued:true})
-       .font("Helvetica-Bold").fillColor("#0e7a4b").text("As on: "+asof, {continued:true})
-       .font("Helvetica").fillColor("#333").text("        Warehouse: Job Work (WH 45)");
-    y+=16;
+    doc.font("Helvetica-Bold").fontSize(13).fillColor("#0e7a4b").text("As on: "+asof, L, y, {width:W, align:"center"});
+    y+=24;
     doc.rect(L,y,W,20).fill("#0e2a47");
     doc.fillColor("#fff").font("Helvetica-Bold").fontSize(11).text(pageTitle, L+8, y+5, {lineBreak:false});
     y+=26;
@@ -1592,10 +1589,10 @@ function wheelsStockSvg(rows, asof){
   const put=(c,y,s,o)=>{ if(c.a==="r") txt(c.x+c.w-5,y,s,{...o,anchor:"end"}); else if(c.a==="c") txt(c.x+c.w/2,y,s,{...o,anchor:"middle"}); else txt(c.x+5,y,s,{...o,anchor:"start"}); };
   let y=0;
   rect(0,0,W,44,"#0e2a47");
-  txt(L,28,"Job Work Stock Statement - Wheels India Limited",{size:18,bold:true,fill:"#fff"});
+  txt(W/2,28,"Job Work Stock Statement",{size:18,bold:true,fill:"#fff",anchor:"middle"});
   y=44;
-  els.push(`<text x="${L}" y="${y+16}" font-family="DejaVu Sans" font-size="10" fill="#445">Customer: Wheels India Limited    As on: <tspan font-weight="bold" fill="#0e7a4b">${esc2(asof)}</tspan>    Warehouse: Job Work (WH 45)</text>`);
-  y+=28;
+  els.push(`<text x="${W/2}" y="${y+20}" font-family="DejaVu Sans" font-size="15" font-weight="bold" fill="#0e7a4b" text-anchor="middle">As on: ${esc2(asof)}</text>`);
+  y+=34;
   const GC="#c4d0da"; const colXs=cols.map(c=>c.x).concat(R);
   function grid(rowYs){ const lft=colXs[0],rgt=colXs[colXs.length-1],top=rowYs[0],bot=rowYs[rowYs.length-1];
     rowYs.forEach(yy=>rect(lft,yy,rgt-lft,1,GC)); colXs.forEach(xx=>rect(xx,top,1,bot-top,GC)); }
