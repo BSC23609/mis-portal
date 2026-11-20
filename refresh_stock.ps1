@@ -282,7 +282,8 @@ ORDER BY WI.ItemName
 
 # ---- Wheels India coil traceability (every WH45 WIR batch, with lifecycle status) ----
 # One row per batch ever in WH45: current on-hand (In Whs), plus how much of it was
-# Delivered (job-work delivery, IBT1 BaseType 15 out) or Processed/cut (goods issue,
+# Delivered (IBT1 BaseType 15 = Delivery note, OR 13 = A/R Invoice billed directly
+# with no delivery note - both post the goods movement) or Processed/cut (goods issue,
 # IBT1 BaseType 60 out). Source coil = U_CoilNo (SAP keeps it identical on the coil and
 # every derivative). The portal classifies Coil/Plate/Plate-Scrap/Strip/Strip-Scrap by
 # item name and picks the status from these three quantities.
@@ -304,7 +305,7 @@ FROM OIBT B
 INNER JOIN OITM I ON I.ItemCode = B.ItemCode
 LEFT JOIN (
   SELECT ItemCode, BatchNum,
-    SUM(CASE WHEN BaseType=15 AND Direction=1 THEN Quantity ELSE 0 END) AS DelQty,
+    SUM(CASE WHEN BaseType IN (13,15) AND Direction=1 THEN Quantity ELSE 0 END) AS DelQty,
     SUM(CASE WHEN BaseType=60 AND Direction=1 THEN Quantity ELSE 0 END) AS IssQty
   FROM IBT1 WHERE WhsCode='45' GROUP BY ItemCode, BatchNum
 ) M ON M.ItemCode = B.ItemCode AND M.BatchNum = B.BatchNum
