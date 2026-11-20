@@ -254,19 +254,15 @@ ORDER BY B.Quantity DESC
 
 # ---- Wheels India job-work stock (WH45, this customer only) ----
 $wheelsSql = @"
-;WITH WIRItems AS (
-    SELECT W.ItemCode, I.ItemName, I.ItmsGrpCod, I.U_Grade, I.U_Thick, I.U_Width, I.U_Length1, W.OnHand
-    FROM OITW W INNER JOIN OITM I ON I.ItemCode = W.ItemCode
-    WHERE W.WhsCode = '45' AND W.OnHand > 0
-      AND (I.ItemName LIKE '%WIR0%' OR I.ItemName LIKE '%WIR %' OR I.ItemName LIKE '%WIR')
-),
-Batch AS (  -- one representative batch per item (the largest), for coil/mother/age reference
-    SELECT B.ItemCode, B.BatchNum, B.U_CoilNo, B.U_Mothercoil, B.InDate,
-           ROW_NUMBER() OVER (PARTITION BY B.ItemCode ORDER BY B.Quantity DESC) AS rn,
-           COUNT(*) OVER (PARTITION BY B.ItemCode) AS BatchCount
-    FROM OIBT B WHERE B.WhsCode='45' AND B.Quantity <> 0
+;WITH Batch AS (  -- representative batch per item+warehouse (the largest), for coil/mother/age reference
+    SELECT B.WhsCode, B.ItemCode, B.BatchNum, B.U_CoilNo, B.U_Mothercoil, B.InDate,
+           ROW_NUMBER() OVER (PARTITION BY B.WhsCode, B.ItemCode ORDER BY B.Quantity DESC) AS rn,
+           COUNT(*) OVER (PARTITION BY B.WhsCode, B.ItemCode) AS BatchCount
+    FROM OIBT B WHERE B.WhsCode IN ('45','51') AND B.Quantity <> 0
 )
+-- WH45: Wheels India job-work stock (with packing slip)
 SELECT
+    '45' AS WhsCode,
     WI.ItemCode, WI.ItemName, G.ItmsGrpNam AS ItemGroup,
     '' AS OwnerCode, '' AS OwnerName,
     ISNULL(BX.BatchNum,'') AS BatchNum, ISNULL(BX.U_CoilNo,'') AS CoilNo, ISNULL(BX.U_Mothercoil,'') AS Mothercoil,
@@ -274,10 +270,33 @@ SELECT
     WI.OnHand AS Quantity,          -- authoritative on-hand (reconciles to SAP)
     ISNULL(BX.BatchCount,0) AS BatchCount,
     DATEDIFF(day, BX.InDate, GETDATE()) AS AgeDays
-FROM WIRItems WI
-LEFT JOIN Batch BX ON BX.ItemCode = WI.ItemCode AND BX.rn = 1
+FROM (
+    SELECT W.ItemCode, I.ItemName, I.ItmsGrpCod, I.U_Grade, I.U_Thick, I.U_Width, I.U_Length1, W.OnHand
+    FROM OITW W INNER JOIN OITM I ON I.ItemCode = W.ItemCode
+    WHERE W.WhsCode = '45' AND W.OnHand > 0
+      AND (I.ItemName LIKE '%WIR0%' OR I.ItemName LIKE '%WIR %' OR I.ItemName LIKE '%WIR')
+) WI
+LEFT JOIN Batch BX ON BX.ItemCode = WI.ItemCode AND BX.WhsCode = '45' AND BX.rn = 1
 LEFT JOIN OITB G ON G.ItmsGrpCod = WI.ItmsGrpCod
-ORDER BY WI.ItemName
+
+UNION ALL
+
+-- WH51: coil stock WITHOUT packing slip (all coils in WH51)
+SELECT
+    '51' AS WhsCode,
+    W.ItemCode, I.ItemName, G.ItmsGrpNam AS ItemGroup,
+    '' AS OwnerCode, '' AS OwnerName,
+    ISNULL(BX.BatchNum,'') AS BatchNum, ISNULL(BX.U_CoilNo,'') AS CoilNo, ISNULL(BX.U_Mothercoil,'') AS Mothercoil,
+    ISNULL(I.U_Grade,'') AS Grade, I.U_Thick AS Thick, I.U_Width AS Width, I.U_Length1 AS Length,
+    W.OnHand AS Quantity,
+    ISNULL(BX.BatchCount,0) AS BatchCount,
+    DATEDIFF(day, BX.InDate, GETDATE()) AS AgeDays
+FROM OITW W
+INNER JOIN OITM I ON I.ItemCode = W.ItemCode
+LEFT JOIN Batch BX ON BX.ItemCode = W.ItemCode AND BX.WhsCode = '51' AND BX.rn = 1
+LEFT JOIN OITB G ON G.ItmsGrpCod = I.ItmsGrpCod
+WHERE W.WhsCode = '51' AND W.OnHand > 0 AND I.ItemName LIKE '%COIL%'
+ORDER BY ItemName
 "@
 
 # ---- Wheels India coil traceability (every WH45 WIR batch, with lifecycle status) ----

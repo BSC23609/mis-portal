@@ -1376,7 +1376,7 @@ function lenS(v){ const n=parseFloat(v); return (n&&n>0)?(""+ +n.toFixed(0)):"â€
 function esc2(s){ return String(s??"").replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
 // Row sort per section. Coil Stock â†’ Aging (days) desc, tie-break by Thickness desc.
 // Other sections (Plate/Strip) keep quantity-desc.
-function ageThresh(form){ return form==="STRIP"?3 : form==="COIL"?45 : form==="ENDBIT"?10 : 5; }  // red when Aging >= : Strip 3, Coil 45, Plate-End Bit 10, Plate 5
+function ageThresh(form){ return form==="STRIP"?3 : (form==="COIL"||form==="COIL_NP")?45 : form==="ENDBIT"?10 : 5; }  // red when Aging >= : Strip 3, Coil 45, Plate-End Bit 10, Plate 5
 function wheelsSortCmp(formKey){
   const num=v=>{const n=parseFloat(v);return isNaN(n)?0:n;};
   // Every section: oldest material first (Aging descending), then thicker, then larger qty.
@@ -1386,10 +1386,10 @@ function wheelsSortCmp(formKey){
 async function renderWheelsHtml(baseUrl, wipSet, note){
   const DATA_BASE = process.env.DATA_BASE || "https://raw.githubusercontent.com/BSC23609/bsc-stock-data/main";
   const csvRes = await fetch(DATA_BASE + "/wheels_stock.csv?t=" + Date.now());
-  const rows = parseCsvSrv(csvRes.ok ? await csvRes.text() : "").map(r=>((()=>{const o={...r, Quantity:parseFloat(r.Quantity)||0, form:wheelsFormOf(r.ItemName)}; if(o.form==="PLATE"&&!(parseFloat(o.Length)>0))o.form="ENDBIT"; return o;})()))
+  const rows = parseCsvSrv(csvRes.ok ? await csvRes.text() : "").map(r=>((()=>{const o={...r, Quantity:parseFloat(r.Quantity)||0, form:wheelsFormOf(r.ItemName)}; if(o.form==="PLATE"&&!(parseFloat(o.Length)>0))o.form="ENDBIT"; if((r.WhsCode||"")==="51")o.form="COIL_NP"; return o;})()))
     .filter(r=>!wipSet.has(String(r.BatchNum)))
     .filter(r=>!(((r.form==="PLATE"||r.form==="ENDBIT")&&r.Quantity<0.1)||(r.form==="STRIP"&&r.Quantity<0.011))); // plate <0.1 MT, strip <0.011 MT not listed
-  const SEC=[["PLATE","Plate Stock","#0e7a4b"],["ENDBIT","Plate-End Bit","#5b6670"],["STRIP","Strip Stock","#b5651d"],["SCRAP","Scrap Stock","#8a1c1c"],["COIL","Coil Stock","#1367a6"]]; // plate, end-bit, strip, coil
+  const SEC=[["PLATE","Plate Stock","#0e7a4b"],["ENDBIT","Plate-End Bit","#5b6670"],["STRIP","Strip Stock","#b5651d"],["SCRAP","Scrap Stock","#8a1c1c"],["COIL","Coil Stock","#1367a6"],["COIL_NP","Coil Stock (without Packing Slip)","#7a4f1c"]]; // plate, end-bit, strip, coil
   let body="", gb=0, gq=0;
   for(const [k,t,c] of SEC){
     const rs=rows.filter(r=>r.form===k).sort(wheelsSortCmp(k)); if(!rs.length)continue;
@@ -1419,7 +1419,7 @@ async function renderWheelsHtml(baseUrl, wipSet, note){
 async function buildWheelsXlsx(rows){
   let XLSX;
   try { XLSX = await import("xlsx"); } catch(e){ throw new Error("xlsx module not available on server: "+e.message); }
-  const SEC=[["PLATE","Plate Stock"],["ENDBIT","Plate-End Bit"],["STRIP","Strip Stock"],["SCRAP","Scrap Stock"],["COIL","Coil Stock"]]; // plate, end-bit, strip, scrap, coil
+  const SEC=[["PLATE","Plate Stock"],["ENDBIT","Plate-End Bit"],["STRIP","Strip Stock"],["SCRAP","Scrap Stock"],["COIL","Coil Stock"],["COIL_NP","Coil Stock (without Packing Slip)"]]; // plate, end-bit, strip, scrap, coil, coil-no-packing
   const aoa=[["BHARAT STEEL (CHENNAI) PRIVATE LIMITED"],
              ["Job Work Stock Statement"],
              ["As on: "+new Date().toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})],
@@ -1449,7 +1449,7 @@ async function buildWheelsXlsx(rows){
 async function wheelsRows(){
   const DATA_BASE = process.env.DATA_BASE || "https://raw.githubusercontent.com/BSC23609/bsc-stock-data/main";
   const csvRes = await fetch(DATA_BASE + "/wheels_stock.csv?t=" + Date.now());
-  return parseCsvSrv(csvRes.ok ? await csvRes.text() : "").map(r=>((()=>{const o={...r, Quantity:parseFloat(r.Quantity)||0, form:wheelsFormOf(r.ItemName)}; if(o.form==="PLATE"&&!(parseFloat(o.Length)>0))o.form="ENDBIT"; return o;})()))
+  return parseCsvSrv(csvRes.ok ? await csvRes.text() : "").map(r=>((()=>{const o={...r, Quantity:parseFloat(r.Quantity)||0, form:wheelsFormOf(r.ItemName)}; if(o.form==="PLATE"&&!(parseFloat(o.Length)>0))o.form="ENDBIT"; if((r.WhsCode||"")==="51")o.form="COIL_NP"; return o;})()))
     .filter(r=>!(((r.form==="PLATE"||r.form==="ENDBIT")&&r.Quantity<0.1)||(r.form==="STRIP"&&r.Quantity<0.011))); // plate <0.1 MT, strip <0.011 MT not listed
 }
 // Build the statement as a PDF (same sections/columns as the email). Pure pdfkit,
@@ -1460,15 +1460,16 @@ async function buildWheelsPdf(){
   const rows = await wheelsRows();
   const SECDEF = {
     COIL:  ["Coil Stock","#1367a6"],
+    COIL_NP:["Coil Stock (without Packing Slip)","#7a4f1c"],
     PLATE: ["Plate Stock","#0e7a4b"],
     ENDBIT:["Plate-End Bit","#5b6670"],
     STRIP: ["Strip Stock","#b5651d"],
     SCRAP: ["Scrap Stock","#8a1c1c"]
   };
-  // Page 1 = WIP / FG (plate + strip + scrap) ; Page 2 = Coil Stock
+  // Page 1 = WIP / FG (plate + strip + scrap) ; Page 2 = Coil Stock (WH45 + WH51 no-packing)
   const PAGES = [
     { title:"WIP / FG Stock", forms:["PLATE","ENDBIT","STRIP","SCRAP"] },
-    { title:"Coil Stock",     forms:["COIL"] }
+    { title:"Coil Stock",     forms:["COIL","COIL_NP"] }
   ];
 
   const doc = new PDFDocument({ size:"A4", margin:28 });
@@ -1578,7 +1579,7 @@ async function buildWheelsPdf(){
 // Stock statement as a PNG (for the WhatsApp image header). Same sections/columns as the PDF/email.
 function wheelsStockSvg(rows, asof){
   const L=16;
-  const SEC=[["PLATE","Plate Stock","#0e7a4b"],["ENDBIT","Plate-End Bit","#5b6670"],["STRIP","Strip Stock","#b5651d"],["SCRAP","Scrap Stock","#8a1c1c"],["COIL","Coil Stock","#1367a6"]];
+  const SEC=[["PLATE","Plate Stock","#0e7a4b"],["ENDBIT","Plate-End Bit","#5b6670"],["STRIP","Strip Stock","#b5651d"],["SCRAP","Scrap Stock","#8a1c1c"],["COIL","Coil Stock","#1367a6"],["COIL_NP","Coil Stock (without Packing Slip)","#7a4f1c"]];
   // content-sized columns (no stretch-to-fill) so the image stays compact on a phone
   const cols=[{k:"n",t:"#",w:22,a:"c"},{k:"mill",t:"Mill",w:52,a:"c"},{k:"grade",t:"Grade",w:54,a:"l"},{k:"thk",t:"Thk",w:40,a:"c"},{k:"wid",t:"Width",w:44,a:"c"},{k:"len",t:"Length",w:46,a:"c"},{k:"coil",t:"Coil / Batch No",w:142,a:"l"},{k:"qty",t:"Qty (MT)",w:64,a:"r"},{k:"age",t:"Aging",w:38,a:"c"}];
   let cx=L; cols.forEach(c=>{ c.x=cx; cx+=c.w; });
