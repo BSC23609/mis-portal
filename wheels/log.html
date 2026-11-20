@@ -23,6 +23,18 @@
   td.det{color:#5b6b78;font-size:12px;max-width:380px;word-break:break-word}
   .daterow td{background:#eef3f8 !important;font-weight:700;color:#0e2a47;font-size:12px}
   .muted{color:var(--gray);font-size:12px}
+  .killcard{border:1px solid var(--line);border-radius:12px;padding:14px 16px;background:#fff;display:flex;align-items:center;gap:14px;margin-bottom:14px}
+  .killcard.on{background:#fdecea;border-color:#f5c6c0}
+  .sw{position:relative;width:52px;height:28px;flex:0 0 auto;cursor:pointer}
+  .sw input{opacity:0;width:0;height:0;position:absolute}
+  .sw .tr{position:absolute;inset:0;background:#c7d0d8;border-radius:999px;transition:.2s}
+  .sw .kb{position:absolute;top:3px;left:3px;width:22px;height:22px;background:#fff;border-radius:50%;transition:.2s;box-shadow:0 1px 3px rgba(0,0,0,.3)}
+  .sw input:checked + .tr{background:#c0392b}
+  .sw input:checked + .tr + .kb{transform:translateX(24px)}
+  .killcard h4{margin:0 0 2px;font-size:14px;color:#0e2a47}
+  .killtxt .muted{font-size:12px}
+  .killstate{margin-left:auto;font-weight:700;font-size:13px}
+  .killstate.on{color:#c0392b}.killstate.off{color:#1a7f4b}
 </style>
 </head><body>
 <div class="pw">
@@ -37,6 +49,16 @@
       <span class="muted" id="lastupd"></span>
       <button class="pbtn" style="background:var(--blue);border-color:var(--blue)" onclick="load()">Refresh</button>
     </div>
+  </div>
+
+  <!-- global kill switch -->
+  <div class="killcard" id="killcard">
+    <label class="sw"><input type="checkbox" id="killbox" onchange="setPause(this.checked)"><span class="tr"></span><span class="kb"></span></label>
+    <div class="killtxt">
+      <h4>Pause all sending</h4>
+      <div class="muted">Master switch. When ON, the portal stops <b>every</b> WhatsApp and email it sends — daily stock, production plan, management and NMDC. Turn OFF to resume.</div>
+    </div>
+    <div class="killstate off" id="killstate">SENDING ON</div>
   </div>
 
   <!-- today's matrix -->
@@ -75,10 +97,25 @@
     try{
       const r=await fetch('/api/wheels?fmt=sendlog',{credentials:'same-origin'});
       const d=await r.json(); const rows=(d.rows)||[];
+      setKill(!!d.send_paused);
       renderMatrix(rows); renderTable(rows);
       $('lastupd').textContent='Updated '+new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:true});
       $('foot').textContent=rows.length+' log entries';
     }catch(e){ $('errbox').innerHTML='<div class="err">Couldn\'t load the send log.</div>'; }
+  }
+
+  function setKill(on){
+    $('killbox').checked=on;
+    $('killcard').classList.toggle('on',on);
+    const st=$('killstate'); st.textContent=on?'SENDING PAUSED':'SENDING ON'; st.className='killstate '+(on?'on':'off');
+  }
+  async function setPause(on){
+    if(on && !confirm('Pause ALL sending from the MIS portal?\n\nNo WhatsApp or email (daily stock, production plan, management, NMDC) will go out until you switch this back ON.')){ $('killbox').checked=false; return; }
+    setKill(on);
+    try{
+      const r=await fetch('/api/wheels',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({set_send_paused:on})});
+      const d=await r.json(); if(!d.ok) throw 0; setKill(!!d.send_paused);
+    }catch(e){ alert('Could not change the setting. Please try again.'); setKill(!on); }
   }
 
   function renderMatrix(rows){

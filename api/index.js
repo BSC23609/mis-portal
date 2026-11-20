@@ -176,7 +176,18 @@ var fromSerial = (v) => typeof v === "number" && v > 2e4 ? new Date(Math.round((
 // lib/wati.js
 function watiBase(){ return process.env.WATI_API_URL || process.env.WATI_ENDPOINT || process.env.WATI_BASE_URL || ""; }
 function watiKey(){ return (process.env.WATI_API_KEY || process.env.WATI_ACCESS_TOKEN || process.env.WATI_TOKEN || "").replace(/^Bearer\s+/i, ""); }
+// Global send kill switch (checkbox on the Send Log page). Cached ~8s so a blast of
+// sends doesn't hammer the DB; the toggle handler busts the cache for instant effect.
+let _pauseCache = { v:false, t:0 };
+async function isSendPaused(){
+  if (Date.now() - _pauseCache.t < 8000) return _pauseCache.v;
+  try { const r = await sql`select send_paused from wheels_settings where id=1`; _pauseCache.v = !!(r[0] && r[0].send_paused); }
+  catch(e){ /* keep last known value on a read error */ }
+  _pauseCache.t = Date.now();
+  return _pauseCache.v;
+}
 async function send(mobile, template, parameters) {
+  if (await isSendPaused()) { const e = new Error("blocked: sending is paused (global stop is ON)"); e.noRetry = true; e.paused = true; throw e; }
   const base = watiBase(), key = watiKey();
   if (!base || !key) return { skipped: "WATI not configured" };
   const num = String(mobile).replace(/\D/g, "").replace(/^0+/, "");
@@ -599,6 +610,8 @@ async function ensureWheelsTable(){
   await sql`alter table wheels_settings add column if not exists mgmt_mail_to text[] default '{}'`;
   await sql`alter table wheels_settings add column if not exists mgmt_wa_to text[] default '{}'`;
   await sql`alter table wheels_settings add column if not exists mgmt_enabled boolean default true`;
+  // Global kill switch: when true, the portal sends NOTHING (all WhatsApp + all portal email).
+  await sql`alter table wheels_settings add column if not exists send_paused boolean default false`;
   await sql`create table if not exists wheels_send_log (
     id bigserial primary key,
     ts timestamptz default now(),
@@ -715,6 +728,7 @@ async function planAlreadyDone(channel){
   }catch(e){ return false; }
 }
 async function planSendEmail(req, once){
+  if(await isSendPaused()){ await logSend({report:'plan',channel:'email',status:'skipped',detail:'global send pause is ON'}); return { skipped:'paused' }; }
   if(once && await planAlreadyDone('email')) return { skipped:'already sent today' };
   const recips = await wheelsRecipients();
   const to = recipientEmails(recips, "pp_email");
@@ -730,6 +744,7 @@ async function planSendEmail(req, once){
   }
 }
 async function planSendWhatsapp(req, once){
+  if(await isSendPaused()){ await logSend({report:'plan',channel:'whatsapp',status:'skipped',detail:'global send pause is ON'}); return { skipped:'paused' }; }
   if(once && await planAlreadyDone('whatsapp')) return { skipped:'already sent today' };
   const tmpl = process.env.WHEELS_WA_PLAN_TEMPLATE;
   if(!tmpl){ await logSend({report:'plan',channel:'whatsapp',status:'skipped',detail:'WHEELS_WA_PLAN_TEMPLATE not set'}); return { skipped:'WHEELS_WA_PLAN_TEMPLATE not set' }; }
@@ -908,7 +923,9 @@ async function handlerWheels(req, res){
       try { rows = await sql`select ts, run_date, report, channel, status, total, ok_count, fail_count, detail
                              from wheels_send_log order by id desc limit 300`; }
       catch(e){ return json(res, 200, { rows: [], error: String(e.message||e) }); }
-      return json(res, 200, { rows });
+      let paused = false;
+      try { const p = await sql`select send_paused from wheels_settings where id=1`; paused = !!(p[0] && p[0].send_paused); } catch(e){}
+      return json(res, 200, { rows, send_paused: paused });
     }
     // Diagnostic: which WhatsApp env vars does this deployment actually see? (names/booleans only, no secrets)
     if (req.method === "GET" && fmt === "wadiag"){
@@ -972,6 +989,13 @@ async function handlerWheels(req, res){
         await sql`delete from wheels_recipients where id=${Number(body.recip_delete)}`;
         return json(res, 200, { ok: true });
       }
+      // Global send kill switch (Send Log page checkbox). When ON, the portal sends nothing.
+      if (typeof body.set_send_paused === "boolean") {
+        await sql`update wheels_settings set send_paused=${body.set_send_paused} where id=1`;
+        _pauseCache = { v: body.set_send_paused, t: Date.now() };   // instant effect, no 8s wait
+        await logSend({ report:'all', channel:'system', status: body.set_send_paused?'skipped':'ok', detail: body.set_send_paused ? 'Global send pause turned ON — all WhatsApp & portal email blocked' : 'Global send pause turned OFF — sending resumed' });
+        return json(res, 200, { ok:true, send_paused: body.set_send_paused });
+      }
       // WhatsApp send trigger (fired by the daily script after the email). Guarded by CRON_SECRET.
       // Creds + template come from Vercel env (WATI_API_URL, WATI_API_KEY, WHEELS_WA_TEMPLATE);
       // recipient numbers come from the in-app settings (wa_to). PDF is served at /api/wheels?fmt=pdf.
@@ -979,6 +1003,7 @@ async function handlerWheels(req, res){
         const auth = req.headers.authorization || "";
         if (!process.env.CRON_SECRET) return json(res, 503, { error: "CRON_SECRET not set" });
         if (auth !== "Bearer " + process.env.CRON_SECRET) return json(res, 401, { error: "unauthorized" });
+        if (await isSendPaused()) { await logSend({report:'wheels_stock',channel:'whatsapp',status:'skipped',detail:'global send pause is ON'}); return json(res, 200, { ok:true, skipped:"global send pause is ON" }); }
         const tmpl = process.env.WHEELS_WA_TEMPLATE;
         if (!tmpl) return json(res, 400, { error: "WHEELS_WA_TEMPLATE not set" });
         // Job Work Stock on WhatsApp → everyone who ticked its WhatsApp box in Recipients.
@@ -1020,6 +1045,7 @@ async function handlerWheels(req, res){
       if (body.send_now) {
         const rep = String(body.report || "");
         if (!["jw","ds","dp","pp"].includes(rep)) return json(res, 400, { error: "unknown report" });
+        if (await isSendPaused()) { await logSend({report:rep,channel:'system',status:'skipped',detail:'global send pause is ON — nothing sent'}); return json(res, 200, { ok:true, paused:true, skipped:"global send pause is ON" }); }
         const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
         const nowIST = new Date().toLocaleString("en-IN",{ timeZone:"Asia/Kolkata", day:"2-digit", month:"short", year:"numeric", hour:"2-digit", minute:"2-digit", hour12:true });
         const stamp = new Date().toISOString().slice(0,10).replace(/-/g,"");
@@ -2143,6 +2169,7 @@ async function buildDailyStockPng(){
   return Buffer.from(r.render().asPng());
 }
 async function sendWheelsMail(to, cc, html, subject, attach){
+  if (await isSendPaused()) throw new Error("blocked: sending is paused (global stop is ON)");
   const tenant=process.env.TENANT_ID, cid=process.env.CLIENT_ID, sec=process.env.CLIENT_SECRET;
   const sender=process.env.WHEELS_SENDER || "pdqc@bharatsteels.in";
   const tok = await fetch(`https://login.microsoftonline.com/${tenant}/oauth2/v2.0/token`, {
