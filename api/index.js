@@ -1417,7 +1417,7 @@ async function renderWheelsHtml(baseUrl, wipSet, note){
   const noteHtml = note && note.trim() ? `<div style="padding:14px 22px 0;font-size:13px;color:#222;line-height:1.6">${esc2(note).replace(/\n/g,"<br>")}</div>` : "";
   const html=`<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>@media only screen and (max-width:600px){.wk-tbl{font-size:10px !important}.wk-tbl th,.wk-tbl td{padding:2px 3px !important}.wk-pad{padding:12px 8px 4px !important}.wk-hd{padding:12px 12px !important}}</style></head><body style="margin:0;padding:0;background:#fff;-webkit-text-size-adjust:100%">`+
     `<div style="font-family:Arial,Helvetica,sans-serif;color:#1a1a1a;max-width:920px;width:100%;margin:auto;border:1px solid #d0d7dd;box-sizing:border-box">
-    <div style="background:#0e2a47;color:#fff;padding:16px 22px;text-align:center"><div style="font-size:18px;font-weight:700">Job Work Stock Statement</div></div>
+    <div style="background:#0e2a47;color:#fff;padding:16px 22px;text-align:center"><div style="font-size:18px;font-weight:700">Job Work Stock Statement - Wheels India</div></div>
     <div style="text-align:center;padding:14px 22px;background:#f7f9fb;border-bottom:1px solid #e3e8ec"><span style="display:inline-block;background:#0e2a47;color:#fff;padding:8px 24px;border-radius:5px;font-weight:700;font-size:19px">As on: ${asof}</span></div>
     <div class="wk-pad" style="padding:14px 22px 4px;overflow-x:auto;-webkit-overflow-scrolling:touch"><table class="wk-tbl" style="width:100%;border-collapse:collapse;font-size:12px">${body}</table></div>
     <div style="margin:14px 22px;padding:12px 16px;background:#0e2a47;color:#fff;border-radius:5px;display:flex;justify-content:space-between;font-size:15px;font-weight:700"><span>TOTAL MATERIAL HELD</span><span>${gb} items &middot; ${gq.toFixed(3)} MT</span></div>
@@ -1432,7 +1432,7 @@ async function buildWheelsXlsx(rows){
   try { XLSX = await import("xlsx"); } catch(e){ throw new Error("xlsx module not available on server: "+e.message); }
   const SEC=[["PLATE","Plate Stock"],["ENDBIT","Plate-End Bit"],["STRIP","Strip Stock"],["SCRAP","Strip-End Bit"],["COIL","Coil Stock"],["COIL_NP","Coil Stock (without Packing Slip)"]]; // plate, end-bit, strip, strip-end-bit, coil, coil-no-packing
   const aoa=[["BHARAT STEEL (CHENNAI) PRIVATE LIMITED"],
-             ["Job Work Stock Statement"],
+             ["Job Work Stock Statement - Wheels India"],
              ["As on: "+new Date().toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})],
              []];
   const hdr=["#","Mill","Grade","Thk","Width","Length","Coil / Batch No","Mother Coil","Qty (MT)","No. of pcs","Aging (d)"];
@@ -1521,7 +1521,7 @@ async function buildWheelsPdf(){
   function drawBrandHeader(pageTitle){
     y=28;
     doc.rect(L,y,W,30).fill("#0e2a47");
-    doc.fillColor("#fff").font("Helvetica-Bold").fontSize(14).text("Job Work Stock Statement", L, y+8, {width:W, align:"center"});
+    doc.fillColor("#fff").font("Helvetica-Bold").fontSize(14).text("Job Work Stock Statement - Wheels India", L, y+8, {width:W, align:"center"});
     y+=38;
     doc.font("Helvetica-Bold").fontSize(13).fillColor("#0e7a4b").text("As on: "+asof, L, y, {width:W, align:"center"});
     y+=24;
@@ -1606,7 +1606,7 @@ function wheelsStockSvg(rows, asof){
   const put=(c,y,s,o)=>{ if(c.a==="r") txt(c.x+c.w-5,y,s,{...o,anchor:"end"}); else if(c.a==="c") txt(c.x+c.w/2,y,s,{...o,anchor:"middle"}); else txt(c.x+5,y,s,{...o,anchor:"start"}); };
   let y=0;
   rect(0,0,W,44,"#0e2a47");
-  txt(W/2,28,"Job Work Stock Statement",{size:18,bold:true,fill:"#fff",anchor:"middle"});
+  txt(W/2,28,"Job Work Stock Statement - Wheels India",{size:18,bold:true,fill:"#fff",anchor:"middle"});
   y=44;
   els.push(`<text x="${W/2}" y="${y+20}" font-family="DejaVu Sans" font-size="15" font-weight="bold" fill="#0e7a4b" text-anchor="middle">As on: ${esc2(asof)}</text>`);
   y+=34;
@@ -1895,9 +1895,12 @@ async function planModel(){
   return { plan, pending, tomorrow:target, planDate:pFmtD(target), asof:pFmtD(new Date()), total: plan.length+pending.length };
 }
 // --- plan image (tomorrow's plan table) for WhatsApp ---
-function planSvg(M){
-  const L=16, W=534; const els=[]; let y=0;
+function planSvg(M, targetW){
+  const L=16; let W=534; const els=[]; let y=0;
   const C={recv:66,plan:66,coil:150,size:106,qty:56,pcs:58};
+  // When stacked above the (wider) stock statement, fill the full width so there is
+  // no white strip on the right. Extra width goes into the two text columns.
+  if(targetW && targetW>W){ const extra=targetW-W, a=Math.round(extra*0.55); C.coil+=a; C.size+=extra-a; W=targetW; }
   const rect=(x,yy,w,h,fill)=>els.push(`<rect x="${x}" y="${yy}" width="${w}" height="${h}" fill="${fill}"/>`);
   const txt=(x,yy,s,o)=>{ o=o||{}; els.push(`<text x="${x}" y="${yy}" font-family="DejaVu Sans" font-size="${o.size||11}"${o.bold?' font-weight="bold"':''} fill="${o.fill||'#222'}" text-anchor="${o.anchor||'start'}">${esc2(s)}</text>`); };
   const wrap=(s,maxC)=>{ const w=String(s).split(/\s+/); const lines=[]; let cur=""; for(const t of w){ if((cur+" "+t).trim().length>maxC){ if(cur)lines.push(cur); cur=t; } else cur=(cur+" "+t).trim(); } if(cur)lines.push(cur); return lines.length?lines:[""]; };
@@ -1932,11 +1935,12 @@ function planSvg(M){
 }
 // --- Production Plan (top) + Job Work Stock Statement (below), stacked into one image ---
 function wheelsPlanStockSvg(M, rows, asof){
-  const planS  = planSvg(M);
-  const stockS = wheelsStockSvg(rows, asof);
   const gw=s=>(+((/width="(\d+)"/.exec(s))||[])[1])||0;
   const gh=s=>(+((/height="(\d+)"/.exec(s))||[])[1])||0;
-  const Wp=gw(planS), Hp=gh(planS), Ws=gw(stockS), Hs=gh(stockS);
+  const stockS = wheelsStockSvg(rows, asof);
+  const Ws=gw(stockS), Hs=gh(stockS);
+  const planS  = planSvg(M, Ws);   // widen the plan to the stock width -> no right-side white strip
+  const Wp=gw(planS), Hp=gh(planS);
   const gap=20, W=Math.max(Wp,Ws), H=Hp+gap+Hs;
   const inner=s=>s.replace(/^<svg[^>]*>/,"").replace(/<\/svg>\s*$/,"");
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><rect width="${W}" height="${H}" fill="#ffffff"/>`+
