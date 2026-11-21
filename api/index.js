@@ -807,13 +807,59 @@ async function planSendUpdatedWhatsapp(req, M){
   await logSend({ report:'plan_update', channel:'whatsapp', ...waSummary(sent, nameByMobile(recips)) });
   return { ok:true, url, template:tmpl, sent };
 }
+// ===== Job Work Stock senders — the evening 6:30pm auto-send (combined Plan+Stock) =====
+// Idempotent per channel: true if a non-failed Job Work Stock send for this channel is logged today (IST).
+async function jwAlreadyDone(channel){
+  try{
+    const r = await sql`select 1 from wheels_send_log
+      where report='wheels_stock' and channel=${channel}
+        and run_date=(now() at time zone 'Asia/Kolkata')::date
+        and status in ('ok','partial','skipped') limit 1`;
+    return r.length>0;
+  }catch(e){ return false; }
+}
+async function jwSendEmail(req, once){
+  if(await isSendPaused()){ await logSend({report:'wheels_stock',channel:'email',status:'skipped',detail:'global send pause is ON'}); return { skipped:'paused' }; }
+  if(once && await jwAlreadyDone('email')) return { skipped:'already sent today' };
+  const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
+  const stamp = new Date().toISOString().slice(0,10).replace(/-/g,"");
+  let s2={}; try{ const r=await sql`select mail_to, mail_cc, mail_body from wheels_settings where id=1`; s2=r[0]||{}; }catch(e){}
+  const to=(s2.mail_to||[]);
+  if(!to.length){ await logSend({report:'wheels_stock',channel:'email',status:'skipped',detail:'no email recipients saved'}); return { skipped:'no email recipients' }; }
+  try{
+    const { html, rows:wrows } = await renderWheelsHtml(base, new Set(), s2.mail_body||"");
+    let attach=null; try{ attach={ name:"WheelsIndia_Stock_"+stamp+".xlsx", b64: await buildWheelsXlsx(wrows) }; }catch(e){}
+    await sendWheelsMail(to, (s2.mail_cc||[]), html, "Wheels India Job Work Stock Statement — "+new Date().toLocaleDateString("en-IN"), attach);
+    await logSend({report:'wheels_stock',channel:'email',status:'ok',total:to.length,ok:to.length,fail:0,detail:'Evening 6:30pm: '+to.length+' recipient(s): '+to.join(', ')});
+    return { ok:true, sent_to:to };
+  }catch(e){
+    await logSend({report:'wheels_stock',channel:'email',status:'fail',total:to.length,ok:0,fail:to.length,detail:String(e.message||e)});
+    return { error:String(e.message||e) };
+  }
+}
+async function jwSendWhatsapp(req, once){
+  if(await isSendPaused()){ await logSend({report:'wheels_stock',channel:'whatsapp',status:'skipped',detail:'global send pause is ON'}); return { skipped:'paused' }; }
+  if(once && await jwAlreadyDone('whatsapp')) return { skipped:'already sent today' };
+  const tmpl = process.env.WHEELS_WA_TEMPLATE;
+  if(!tmpl){ await logSend({report:'wheels_stock',channel:'whatsapp',status:'skipped',detail:'WHEELS_WA_TEMPLATE not set'}); return { skipped:'WHEELS_WA_TEMPLATE not set' }; }
+  const recips = await wheelsRecipients();
+  const nums = recipientMobiles(recips, "jw_wa");
+  if(!nums.length){ await logSend({report:'wheels_stock',channel:'whatsapp',status:'skipped',detail:'no recipients ticked for Job Work Stock WhatsApp'}); return { skipped:'no whatsapp recipients' }; }
+  const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
+  const img = base + "/wheels.png?d=" + imgStamp();             // combined Production Plan + Stock image
+  await renderAndCachePng("stock").catch(()=>{});               // pre-build so Meta's image fetch is instant
+  const sent=[];
+  for(const num of nums){ try{ const r=await sendRetry(num,tmpl,[{name:"report",value:img},{name:"1",value:waToday()}]); sent.push({ num, ...(r||{ok:true}) }); }catch(e){ sent.push({ num, error:String(e.message||e) }); } }
+  await logSend({ report:'wheels_stock', channel:'whatsapp', ...waSummary(sent, nameByMobile(recips)) });
+  return { ok:true, image:img, template:tmpl, sent };
+}
 async function handlerWheels(req, res){
   if (cors(req, res)) return;
   try{
     await ensureWheelsTable();
     // GET /api/wheels?fmt=pdf  ->  the statement as a PDF (same data/structure as the email).
     // Public, no-auth: this is the URL WATI fetches for the WhatsApp document template.
-    const fmt = (req.query && req.query.fmt) || ((/[?&]fmt=(pdf|xlsx|stockpng|prodpdf|prodpng|dailypng|planpng|planpdf|plancron|planupdate|wadiag|sendlog)\b/.exec(req.url || "")) || [])[1] || "";
+    const fmt = (req.query && req.query.fmt) || ((/[?&]fmt=(pdf|xlsx|stockpng|prodpdf|prodpng|dailypng|planpng|planpdf|plancron|jwcron|planupdate|wadiag|sendlog)\b/.exec(req.url || "")) || [])[1] || "";
     if (req.method === "GET" && fmt === "pdf"){
       const pdf = await buildWheelsPdf();
       res.setHeader("Content-Type", "application/pdf");
@@ -887,6 +933,25 @@ async function handlerWheels(req, res){
       const email = await planSendEmail(req, true);
       const whatsapp = await planSendWhatsapp(req, true);
       try { await setPlanSig(planSignature(await planModel())); } catch(e){} // baseline so later changes trigger an Updated send
+      return json(res, 200, { ok: true, date: todayIso, email, whatsapp });
+    }
+    // Job Work Stock AUTO-SEND at 6:30 PM IST — combined Production Plan + Stock image on WhatsApp +
+    // the stock-statement email (with the Excel) to the Job Work recipients. Idempotent + time-guarded:
+    // sends once per working day only after 18:30 IST, so it is safe to ping as often as you like (extra
+    // calls are no-ops; a failed channel retries next call). Guarded by CRON_SECRET. Driven by an external
+    // pinger (cron-job.org) every 15-30 min — Vercel Hobby allows only one cron/day (the morning plan).
+    if (req.method === "GET" && fmt === "jwcron"){
+      const auth = req.headers.authorization || "";
+      if (!process.env.CRON_SECRET) return json(res, 503, { error: "CRON_SECRET not set" });
+      if (auth !== "Bearer " + process.env.CRON_SECRET) return json(res, 401, { error: "unauthorized" });
+      const ist = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+      const todayIso = ist.getFullYear() + "-" + String(ist.getMonth()+1).padStart(2,"0") + "-" + String(ist.getDate()).padStart(2,"0");
+      if (ist.getDay() === 0) return json(res, 200, { ok: true, skipped: "Sunday" });
+      let hol = []; try { const s = await sql`select holidays from wheels_settings where id=1`; hol = (s[0]?.holidays) || []; } catch(e){}
+      if (hol.includes(todayIso)) return json(res, 200, { ok: true, skipped: "holiday " + todayIso });
+      if (ist.getHours()*60 + ist.getMinutes() < 18*60+30) return json(res, 200, { ok: true, waiting: "before 18:30 IST", ist_time: ist.getHours()+":"+String(ist.getMinutes()).padStart(2,"0") });
+      const email = await jwSendEmail(req, true);
+      const whatsapp = await jwSendWhatsapp(req, true);
       return json(res, 200, { ok: true, date: todayIso, email, whatsapp });
     }
     // Updated Production Plan — re-send when today's cutting program changes after the morning send.
