@@ -165,7 +165,7 @@
 </div>
 <script src="../_portal.js"></script>
 <script>
-const SEC=[['COIL','Coil Stock','#1367a6'],['COIL_NP','Coil Stock (without Packing Slip)','#7a4f1c'],['PLATE','Plate Stock (WIP / FG)','#0e7a4b'],['ENDBITP','Plate-End Bit','#5b6670'],['STRIP','Strip / Blank Stock','#b5651d'],['ENDBITS','Strip-End Bit','#7a4e24'],['SCRAP','Scrap','#8a1c1c']];
+const SEC=[['COIL','Coil Stock','#1367a6'],['COIL_NP','Coil Stock (without Packing Slip)','#7a4f1c'],['PLATE','Plate Stock (WIP / FG)','#0e7a4b'],['ENDBITP','Plate-End Bit','#5b6670'],['STRIP','Strip / Blank Stock','#b5651d'],[['ENDBITS','SCRAP'],'Strip-End Bit','#7a4e24']];
 const SMALL_PLATE=0.1, SMALL_STRIP=0.011;   // plate below 0.1 MT & strip below 0.011 MT hidden when the filter is on
 let ROWS=[], META={}, WORKED=[], PRODDAILY=[], HOLIDAYS=[], TRACE=[], MOVES=[];
 function showTab(t){
@@ -234,9 +234,10 @@ async function load(){
 function sectionTable(rows){
   let html='<div class="swrap"><table class="x">', gb=0, gq=0;
   for(const [key,title,col] of SEC){
+    const keys=Array.isArray(key)?key:[key];   // a section may merge several forms (e.g. Strip-End Bit = end-bits + scrap)
     const _n=v=>{const n=parseFloat(v);return isNaN(n)?0:n;};
     const _cmp=(a,b)=>(_n(b.AgeDays)-_n(a.AgeDays))||(_n(b.Thick)-_n(a.Thick))||(b.Quantity-a.Quantity); // every section: oldest (Aging) first
-    const rs=rows.filter(r=>r.form===key).sort(_cmp);
+    const rs=rows.filter(r=>keys.includes(r.form)).sort(_cmp);
     if(!rs.length) continue;
     const tq=rs.reduce((a,r)=>a+r.Quantity,0); gb+=rs.length; gq+=tq;
     const pcs=rs.reduce((a,r)=>a+pcsOf(r),0);
@@ -244,11 +245,11 @@ function sectionTable(rows){
       <tr><th style="width:24px">#</th><th class="l">Mill</th><th class="l">Grade</th><th>Thk</th><th>Width</th><th>Length</th><th class="l">Coil / Batch No</th><th class="l">Mother Coil</th><th>Qty (MT)</th><th>No. of pcs</th><th>Age (d)</th></tr>`;
     rs.forEach((x,i)=>{
       const mill=(x.ItemName||'').split(' ')[0];
-      const thr=key==="PLATE"?5:(key==="ENDBITP"||key==="ENDBITS")?10:null;   // Plate >=5; Plate-End Bit & Strip-End Bit >=10 -> red AGING CELL only
+      const thr=keys.includes("PLATE")?5:(keys.includes("ENDBITP")||keys.includes("ENDBITS")||keys.includes("SCRAP"))?10:null;   // Plate >=5; Plate-End Bit & Strip-End Bit >=10 -> red AGING CELL only
       const old=thr!==null && (parseInt(x.AgeDays)||0)>=thr;
       const ageS=old?'color:#c0392b;font-weight:700;background:#fdecea':'color:#888';
       html+=`<tr><td class="r" style="color:#888">${i+1}</td><td>${esc(mill)}</td><td>${esc(x.Grade)}</td>
-        <td class="r">${fdim(x.Thick)}</td><td class="r">${fdim(x.Width)}</td><td class="r">${(key==='ENDBITP'||key==='ENDBITS')?'<b>EB</b>':flen(x.Length)}</td>
+        <td class="r">${fdim(x.Thick)}</td><td class="r">${fdim(x.Width)}</td><td class="r">${((keys.includes('ENDBITP')||keys.includes('ENDBITS')||keys.includes('SCRAP'))&&flen(x.Length)==='—')?'<b>EB</b>':flen(x.Length)}</td>
         <td class="mono">${esc(x.CoilNo||x.BatchNum)}${(+x.BatchCount>1)?` <span style=\"color:#999\">(${x.BatchCount} batches)</span>`:''}</td><td class="mono" style="color:#999">${esc(x.Mothercoil||'—')}</td>
         <td class="r" style="font-weight:600">${x.Quantity.toFixed(3)}</td><td class="r">${pcsOf(x)}</td><td class="r" style="${ageS}">${esc(x.AgeDays)}</td></tr>`;
     });
@@ -268,7 +269,7 @@ function renderByBrand(){
   const brands=Object.keys(b).sort((x,y)=>b[y].tot-b[x].tot);
   const gt=brands.reduce((a,k)=>a+b[k].tot,0);
   $('byBrandSub').textContent=`${brands.length} brands · ${gt.toFixed(3)} MT`;
-  $('byBrand').innerHTML=brands.length?`<table class="x" style="width:100%;border-collapse:collapse"><thead><tr><th style="text-align:left;padding:6px 10px">Brand</th><th style="text-align:right;padding:6px 10px">Coil</th><th style="text-align:right;padding:6px 10px">Plate</th><th style="text-align:right;padding:6px 10px">Strip</th><th style="text-align:right;padding:6px 10px">Scrap</th><th style="text-align:right;padding:6px 10px">Total (MT)</th></tr></thead><tbody>
+  $('byBrand').innerHTML=brands.length?`<table class="x" style="width:100%;border-collapse:collapse"><thead><tr><th style="text-align:left;padding:6px 10px">Brand</th><th style="text-align:right;padding:6px 10px">Coil</th><th style="text-align:right;padding:6px 10px">Plate</th><th style="text-align:right;padding:6px 10px">Strip</th><th style="text-align:right;padding:6px 10px">Strip-End Bit</th><th style="text-align:right;padding:6px 10px">Total (MT)</th></tr></thead><tbody>
     ${brands.map(k=>`<tr><td style="padding:5px 10px;border-top:1px solid #eef1f3"><b>${esc(k)}</b></td>${forms.map(f=>`<td style="padding:5px 10px;text-align:right;border-top:1px solid #eef1f3">${b[k][f]?b[k][f].toFixed(3):''}</td>`).join('')}<td style="padding:5px 10px;text-align:right;font-weight:700;border-top:1px solid #eef1f3">${b[k].tot.toFixed(3)}</td></tr>`).join('')}
     <tr><td style="padding:6px 10px;border-top:2px solid #333;font-weight:700">Total</td>${forms.map(f=>`<td style="padding:6px 10px;text-align:right;border-top:2px solid #333;font-weight:700">${brands.reduce((a,k)=>a+b[k][f],0).toFixed(3)}</td>`).join('')}<td style="padding:6px 10px;text-align:right;border-top:2px solid #333;font-weight:700">${gt.toFixed(3)}</td></tr>
     </tbody></table>`:'<div class="empty">No stock.</div>';
