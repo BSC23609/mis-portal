@@ -2430,7 +2430,12 @@ async function handlerGroupSso(req, res){
     const next = qs.get("next") || "";
     res.statusCode = 303;
     res.setHeader("Set-Cookie", authCookie(tok, AUTH_DAYS*86400));
-    res.setHeader("Location", next.startsWith("/") && !next.startsWith("//") ? next : "/");
+    // Opened from the group hub: land on Stock; people without Stock go to Wheels India, then their first module.
+    const LANDING = { stock: "/stock/daily.html", wheels: "/wheels/index.html", dispatch: "/dispatch/index.html", nmdc: "/nmdc/index.html", fleet: "/fleet/index.html" };
+    const firstMod = ["stock", "wheels", "dispatch", "nmdc", "fleet"].find(m => modules.includes(m));
+    const home = firstMod ? LANDING[firstMod] : "/";
+    const wanted = next.startsWith("/") && !next.startsWith("//") && next !== "/" ? next : home;
+    res.setHeader("Location", wanted);
     res.setHeader("Referrer-Policy", "no-referrer");
     res.setHeader("Cache-Control", "no-store");
     return res.end();
