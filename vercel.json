@@ -67,5 +67,16 @@
       "path": "/api/plan-cron",
       "schedule": "0 4 * * *"
     }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "Content-Security-Policy",
+          "value": "frame-ancestors 'self' https://app.thebharatsteelgroup.com https://bsg-hub-one.vercel.app"
+        }
+      ]
+    }
   ]
 }

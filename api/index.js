@@ -2429,7 +2429,12 @@ async function handlerGroupSso(req, res){
     if (!tok) return _ssoPage(res, "AUTH_SECRET is not set on this app.");
     const next = qs.get("next") || "";
     res.statusCode = 303;
-    res.setHeader("Set-Cookie", authCookie(tok, AUTH_DAYS*86400));
+    // In a tab inside the group hub the browser only keeps a SameSite=None + Partitioned cookie
+    // (sent only while the hub is the page around MIS, so no other site can use it).
+    const embedded = qs.get("embed") === "1";
+    res.setHeader("Set-Cookie", embedded
+      ? authCookie(tok, AUTH_DAYS*86400).replace("SameSite=Lax", "SameSite=None; Partitioned")
+      : authCookie(tok, AUTH_DAYS*86400));
     // Opened from the group hub: land on Stock; people without Stock go to Wheels India, then their first module.
     const LANDING = { stock: "/stock/daily.html", wheels: "/wheels/index.html", dispatch: "/dispatch/index.html", nmdc: "/nmdc/index.html", fleet: "/fleet/index.html" };
     const firstMod = ["stock", "wheels", "dispatch", "nmdc", "fleet"].find(m => modules.includes(m));
