@@ -952,10 +952,13 @@ async function handlerWheels(req, res){
       if (ist.getDay() === 0) return json(res, 200, { ok: true, skipped: "Sunday" });
       let hol = []; try { const s = await sql`select holidays from wheels_settings where id=1`; hol = (s[0]?.holidays) || []; } catch(e){}
       if (hol.includes(todayIso)) return json(res, 200, { ok: true, skipped: "holiday " + todayIso });
-      if (ist.getHours()*60 + ist.getMinutes() < 18*60+30) return json(res, 200, { ok: true, waiting: "before 18:30 IST", ist_time: ist.getHours()+":"+String(ist.getMinutes()).padStart(2,"0") });
+      // ?force=1 is a manual test switch: bypasses only the 18:30 gate (still CRON_SECRET-guarded,
+      // still idempotent). Lets you confirm the send works before 6:30 PM.
+      const force = /[?&]force=1\b/.test(req.url||"") || (req.query && req.query.force==="1");
+      if (!force && ist.getHours()*60 + ist.getMinutes() < 18*60+30) return json(res, 200, { ok: true, waiting: "before 18:30 IST", ist_time: ist.getHours()+":"+String(ist.getMinutes()).padStart(2,"0") });
       const email = await jwSendEmail(req, true);
       const whatsapp = await jwSendWhatsapp(req, true);
-      return json(res, 200, { ok: true, date: todayIso, email, whatsapp });
+      return json(res, 200, { ok: true, date: todayIso, forced: force, email, whatsapp });
     }
     // Updated Production Plan — re-send when today's cutting program changes after the morning send.
     // Called by the SAP-side plan_watch trigger the moment a new program is raised. Guarded by CRON_SECRET.
