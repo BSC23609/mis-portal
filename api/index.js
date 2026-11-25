@@ -809,48 +809,51 @@ async function planSendUpdatedWhatsapp(req, M){
 }
 // ===== Job Work Stock senders — the evening 6:30pm auto-send (combined Plan+Stock) =====
 // Idempotent per channel: true if a non-failed Job Work Stock send for this channel is logged today (IST).
+// The evening send tracks itself under 'wheels_stock_eve' so the 10am Job Work mail
+// (logged as 'wheels_stock') never makes it think it already ran. Still idempotent:
+// a second call after 18:30 finds today's 'wheels_stock_eve' row and skips.
 async function jwAlreadyDone(channel){
   try{
     const r = await sql`select 1 from wheels_send_log
-      where report='wheels_stock' and channel=${channel}
+      where report='wheels_stock_eve' and channel=${channel}
         and run_date=(now() at time zone 'Asia/Kolkata')::date
         and status in ('ok','partial','skipped') limit 1`;
     return r.length>0;
   }catch(e){ return false; }
 }
 async function jwSendEmail(req, once){
-  if(await isSendPaused()){ await logSend({report:'wheels_stock',channel:'email',status:'skipped',detail:'global send pause is ON'}); return { skipped:'paused' }; }
+  if(await isSendPaused()){ await logSend({report:'wheels_stock_eve',channel:'email',status:'skipped',detail:'global send pause is ON'}); return { skipped:'paused' }; }
   if(once && await jwAlreadyDone('email')) return { skipped:'already sent today' };
   const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
   const stamp = new Date().toISOString().slice(0,10).replace(/-/g,"");
   let s2={}; try{ const r=await sql`select mail_to, mail_cc, mail_body from wheels_settings where id=1`; s2=r[0]||{}; }catch(e){}
   const to=(s2.mail_to||[]);
-  if(!to.length){ await logSend({report:'wheels_stock',channel:'email',status:'skipped',detail:'no email recipients saved'}); return { skipped:'no email recipients' }; }
+  if(!to.length){ await logSend({report:'wheels_stock_eve',channel:'email',status:'skipped',detail:'no email recipients saved'}); return { skipped:'no email recipients' }; }
   try{
     const { html, rows:wrows } = await renderWheelsHtml(base, new Set(), s2.mail_body||"");
     let attach=null; try{ attach={ name:"WheelsIndia_Stock_"+stamp+".xlsx", b64: await buildWheelsXlsx(wrows) }; }catch(e){}
     await sendWheelsMail(to, (s2.mail_cc||[]), html, "Wheels India Job Work Stock Statement — "+new Date().toLocaleDateString("en-IN"), attach);
-    await logSend({report:'wheels_stock',channel:'email',status:'ok',total:to.length,ok:to.length,fail:0,detail:'Evening 6:30pm: '+to.length+' recipient(s): '+to.join(', ')});
+    await logSend({report:'wheels_stock_eve',channel:'email',status:'ok',total:to.length,ok:to.length,fail:0,detail:'Evening 6:30pm: '+to.length+' recipient(s): '+to.join(', ')});
     return { ok:true, sent_to:to };
   }catch(e){
-    await logSend({report:'wheels_stock',channel:'email',status:'fail',total:to.length,ok:0,fail:to.length,detail:String(e.message||e)});
+    await logSend({report:'wheels_stock_eve',channel:'email',status:'fail',total:to.length,ok:0,fail:to.length,detail:String(e.message||e)});
     return { error:String(e.message||e) };
   }
 }
 async function jwSendWhatsapp(req, once){
-  if(await isSendPaused()){ await logSend({report:'wheels_stock',channel:'whatsapp',status:'skipped',detail:'global send pause is ON'}); return { skipped:'paused' }; }
+  if(await isSendPaused()){ await logSend({report:'wheels_stock_eve',channel:'whatsapp',status:'skipped',detail:'global send pause is ON'}); return { skipped:'paused' }; }
   if(once && await jwAlreadyDone('whatsapp')) return { skipped:'already sent today' };
   const tmpl = process.env.WHEELS_WA_TEMPLATE;
-  if(!tmpl){ await logSend({report:'wheels_stock',channel:'whatsapp',status:'skipped',detail:'WHEELS_WA_TEMPLATE not set'}); return { skipped:'WHEELS_WA_TEMPLATE not set' }; }
+  if(!tmpl){ await logSend({report:'wheels_stock_eve',channel:'whatsapp',status:'skipped',detail:'WHEELS_WA_TEMPLATE not set'}); return { skipped:'WHEELS_WA_TEMPLATE not set' }; }
   const recips = await wheelsRecipients();
   const nums = recipientMobiles(recips, "jw_wa");
-  if(!nums.length){ await logSend({report:'wheels_stock',channel:'whatsapp',status:'skipped',detail:'no recipients ticked for Job Work Stock WhatsApp'}); return { skipped:'no whatsapp recipients' }; }
+  if(!nums.length){ await logSend({report:'wheels_stock_eve',channel:'whatsapp',status:'skipped',detail:'no recipients ticked for Job Work Stock WhatsApp'}); return { skipped:'no whatsapp recipients' }; }
   const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
   const img = base + "/wheels.png?d=" + imgStamp();             // combined Production Plan + Stock image
   await renderAndCachePng("stock").catch(()=>{});               // pre-build so Meta's image fetch is instant
   const sent=[];
   for(const num of nums){ try{ const r=await sendRetry(num,tmpl,[{name:"report",value:img},{name:"1",value:waToday()}]); sent.push({ num, ...(r||{ok:true}) }); }catch(e){ sent.push({ num, error:String(e.message||e) }); } }
-  await logSend({ report:'wheels_stock', channel:'whatsapp', ...waSummary(sent, nameByMobile(recips)) });
+  await logSend({ report:'wheels_stock_eve', channel:'whatsapp', ...waSummary(sent, nameByMobile(recips)) });
   return { ok:true, image:img, template:tmpl, sent };
 }
 async function handlerWheels(req, res){
