@@ -636,11 +636,15 @@ async function ensureWheelsTable(){
     ds_email boolean default false, ds_wa boolean default false,
     dp_email boolean default false, dp_wa boolean default false,
     pp_email boolean default false, pp_wa boolean default false,
+    jw_eve_email boolean default false, jw_eve_wa boolean default false,
     created_at timestamptz default now()
   )`;
   // Production Plan columns were added after the table shipped; migrate existing tables.
   await sql`alter table wheels_recipients add column if not exists pp_email boolean default false`;
   await sql`alter table wheels_recipients add column if not exists pp_wa boolean default false`;
+  // Job Work Evening (6:30pm) columns — separate recipient list from the 10am Job Work send.
+  await sql`alter table wheels_recipients add column if not exists jw_eve_email boolean default false`;
+  await sql`alter table wheels_recipients add column if not exists jw_eve_wa boolean default false`;
   // Short-lived cache of the rendered report PNGs, so WhatsApp/Meta fetches an already-built image
   // instead of waiting on a slow live render (which caused silently-dropped sends that still logged "ok").
   await sql`create table if not exists wheels_img_cache ( name text primary key, png_b64 text, ts timestamptz default now() )`;
@@ -649,7 +653,7 @@ async function ensureWheelsTable(){
 }
 // All recipients as plain objects (for the settings UI, the scripts, and the WhatsApp routes).
 async function wheelsRecipients(){
-  try { return (await sql`select id,name,grp,email,mobile,jw_email,jw_wa,ds_email,ds_wa,dp_email,dp_wa,pp_email,pp_wa from wheels_recipients order by id`).map(r=>({...r})); }
+  try { return (await sql`select id,name,grp,email,mobile,jw_email,jw_wa,ds_email,ds_wa,dp_email,dp_wa,pp_email,pp_wa,jw_eve_email,jw_eve_wa from wheels_recipients order by id`).map(r=>({...r})); }
   catch(e){ return []; }
 }
 // Distinct WhatsApp numbers of everyone subscribed to a report's WhatsApp channel. flag: 'jw_wa'|'ds_wa'|'dp_wa'
@@ -826,8 +830,9 @@ async function jwSendEmail(req, once){
   if(once && await jwAlreadyDone('email')) return { skipped:'already sent today' };
   const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
   const stamp = new Date().toISOString().slice(0,10).replace(/-/g,"");
-  let s2={}; try{ const r=await sql`select mail_to, mail_cc, mail_body from wheels_settings where id=1`; s2=r[0]||{}; }catch(e){}
-  const to=(s2.mail_to||[]);
+  let s2={}; try{ const r=await sql`select mail_cc, mail_body from wheels_settings where id=1`; s2=r[0]||{}; }catch(e){}
+  const recips = await wheelsRecipients();
+  const to = recipientEmails(recips, "jw_eve_email");   // evening email recipients, marked on the app (Job Work Evening)
   if(!to.length){ await logSend({report:'wheels_stock_eve',channel:'email',status:'skipped',detail:'no email recipients saved'}); return { skipped:'no email recipients' }; }
   try{
     const { html, rows:wrows } = await renderWheelsHtml(base, new Set(), s2.mail_body||"");
@@ -846,8 +851,8 @@ async function jwSendWhatsapp(req, once){
   const tmpl = process.env.WHEELS_WA_TEMPLATE;
   if(!tmpl){ await logSend({report:'wheels_stock_eve',channel:'whatsapp',status:'skipped',detail:'WHEELS_WA_TEMPLATE not set'}); return { skipped:'WHEELS_WA_TEMPLATE not set' }; }
   const recips = await wheelsRecipients();
-  const nums = recipientMobiles(recips, "jw_wa");
-  if(!nums.length){ await logSend({report:'wheels_stock_eve',channel:'whatsapp',status:'skipped',detail:'no recipients ticked for Job Work Stock WhatsApp'}); return { skipped:'no whatsapp recipients' }; }
+  const nums = recipientMobiles(recips, "jw_eve_wa");
+  if(!nums.length){ await logSend({report:'wheels_stock_eve',channel:'whatsapp',status:'skipped',detail:'no recipients ticked for Job Work Evening WhatsApp'}); return { skipped:'no whatsapp recipients' }; }
   const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
   const img = base + "/wheels.png?d=" + imgStamp();             // combined Production Plan + Stock image
   await renderAndCachePng("stock").catch(()=>{});               // pre-build so Meta's image fetch is instant
@@ -1045,15 +1050,15 @@ async function handlerWheels(req, res){
         const nm = String(r.name||"").slice(0,120), gp = String(r.grp||"").slice(0,60);
         const em = String(r.email||"").trim().slice(0,160), mo = String(r.mobile||"").trim().slice(0,30);
         const b = k => r[k] === true || r[k] === "true" || r[k] === 1;
-        const flags = [b("jw_email"), b("jw_wa"), b("ds_email"), b("ds_wa"), b("dp_email"), b("dp_wa"), b("pp_email"), b("pp_wa")];
+        const flags = [b("jw_email"), b("jw_wa"), b("ds_email"), b("ds_wa"), b("dp_email"), b("dp_wa"), b("pp_email"), b("pp_wa"), b("jw_eve_email"), b("jw_eve_wa")];
         if (r.id) {
           await sql`update wheels_recipients set name=${nm},grp=${gp},email=${em},mobile=${mo},
-            jw_email=${flags[0]},jw_wa=${flags[1]},ds_email=${flags[2]},ds_wa=${flags[3]},dp_email=${flags[4]},dp_wa=${flags[5]},pp_email=${flags[6]},pp_wa=${flags[7]}
+            jw_email=${flags[0]},jw_wa=${flags[1]},ds_email=${flags[2]},ds_wa=${flags[3]},dp_email=${flags[4]},dp_wa=${flags[5]},pp_email=${flags[6]},pp_wa=${flags[7]},jw_eve_email=${flags[8]},jw_eve_wa=${flags[9]}
             where id=${Number(r.id)}`;
           return json(res, 200, { ok: true, id: Number(r.id) });
         }
-        const ins = await sql`insert into wheels_recipients (name,grp,email,mobile,jw_email,jw_wa,ds_email,ds_wa,dp_email,dp_wa,pp_email,pp_wa)
-          values (${nm},${gp},${em},${mo},${flags[0]},${flags[1]},${flags[2]},${flags[3]},${flags[4]},${flags[5]},${flags[6]},${flags[7]}) returning id`;
+        const ins = await sql`insert into wheels_recipients (name,grp,email,mobile,jw_email,jw_wa,ds_email,ds_wa,dp_email,dp_wa,pp_email,pp_wa,jw_eve_email,jw_eve_wa)
+          values (${nm},${gp},${em},${mo},${flags[0]},${flags[1]},${flags[2]},${flags[3]},${flags[4]},${flags[5]},${flags[6]},${flags[7]},${flags[8]},${flags[9]}) returning id`;
         return json(res, 200, { ok: true, id: ins[0].id });
       }
       if (body.recip_delete) {

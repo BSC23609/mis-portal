@@ -35,7 +35,7 @@
       <table class="rc">
         <thead><tr>
           <th>Name</th><th>Email</th><th>Group</th><th>Number</th>
-          <th class="ck">Job Work<br>Stock<br><button type="button" onclick="sendNow('jw',this)" style="margin-top:5px;font-size:10px;padding:3px 7px;background:#128c7e;color:#fff;border:none;border-radius:4px;cursor:pointer;white-space:nowrap">Send now</button></th><th class="ck">Daily<br>Stock<br><button type="button" onclick="sendNow('ds',this)" style="margin-top:5px;font-size:10px;padding:3px 7px;background:#128c7e;color:#fff;border:none;border-radius:4px;cursor:pointer;white-space:nowrap">Send now</button></th><th class="ck">Daily<br>Production<br><button type="button" onclick="sendNow('dp',this)" style="margin-top:5px;font-size:10px;padding:3px 7px;background:#128c7e;color:#fff;border:none;border-radius:4px;cursor:pointer;white-space:nowrap">Send now</button></th><th class="ck">Production<br>Plan<br><button type="button" onclick="sendNow('pp',this)" style="margin-top:5px;font-size:10px;padding:3px 7px;background:#8a1c1c;color:#fff;border:none;border-radius:4px;cursor:pointer;white-space:nowrap">Send Updated</button></th><th></th>
+          <th class="ck">Job Work<br>Stock<br><button type="button" onclick="sendNow('jw',this)" style="margin-top:5px;font-size:10px;padding:3px 7px;background:#128c7e;color:#fff;border:none;border-radius:4px;cursor:pointer;white-space:nowrap">Send now</button></th><th class="ck">Daily<br>Stock<br><button type="button" onclick="sendNow('ds',this)" style="margin-top:5px;font-size:10px;padding:3px 7px;background:#128c7e;color:#fff;border:none;border-radius:4px;cursor:pointer;white-space:nowrap">Send now</button></th><th class="ck">Daily<br>Production<br><button type="button" onclick="sendNow('dp',this)" style="margin-top:5px;font-size:10px;padding:3px 7px;background:#128c7e;color:#fff;border:none;border-radius:4px;cursor:pointer;white-space:nowrap">Send now</button></th><th class="ck">Production<br>Plan<br><button type="button" onclick="sendNow('pp',this)" style="margin-top:5px;font-size:10px;padding:3px 7px;background:#8a1c1c;color:#fff;border:none;border-radius:4px;cursor:pointer;white-space:nowrap">Send Updated</button></th><th class="ck">Job Work<br>Evening<br><span style="font-size:10px;color:#777;font-weight:400">6:30 PM</span></th><th></th>
         </tr></thead>
         <tbody id="rcRows"></tbody>
         <tfoot><tr id="rcAdd">
@@ -47,6 +47,7 @@
           <td class="ck"><input type="checkbox" id="aDs"/></td>
           <td class="ck"><input type="checkbox" id="aDp"/></td>
           <td class="ck"><input type="checkbox" id="aPp"/></td>
+          <td class="ck"><input type="checkbox" id="aJwe"/></td>
           <td><button class="addbtn" id="addBtn" onclick="addRecip()">Add</button></td>
         </tr></tfoot>
       </table>
@@ -171,9 +172,9 @@ async function load(){
 
 function renderRecips(){
   const tb=$('rcRows');
-  if(!RECIPS.length){ tb.innerHTML='<tr><td colspan="9" class="hint" style="padding:14px">No recipients yet. Fill the bottom row and press <b>Add</b>.</td></tr>'; return; }
+  if(!RECIPS.length){ tb.innerHTML='<tr><td colspan="10" class="hint" style="padding:14px">No recipients yet. Fill the bottom row and press <b>Add</b>.</td></tr>'; return; }
   tb.innerHTML=RECIPS.map(r=>{
-    const jw=!!(r.jw_email||r.jw_wa), ds=!!(r.ds_email||r.ds_wa), dp=!!(r.dp_email||r.dp_wa), pp=!!(r.pp_email||r.pp_wa);
+    const jw=!!(r.jw_email||r.jw_wa), ds=!!(r.ds_email||r.ds_wa), dp=!!(r.dp_email||r.dp_wa), pp=!!(r.pp_email||r.pp_wa), jwe=!!(r.jw_eve_email||r.jw_eve_wa);
     return `<tr data-id="${r.id}">
       <td><input type="text" class="r-name" value="${esc(r.name)}"/></td>
       <td><input type="email" class="r-email" value="${esc(r.email)}"/></td>
@@ -183,6 +184,7 @@ function renderRecips(){
       <td class="ck"><input type="checkbox" class="r-ds"${ds?' checked':''}/></td>
       <td class="ck"><input type="checkbox" class="r-dp"${dp?' checked':''}/></td>
       <td class="ck"><input type="checkbox" class="r-pp"${pp?' checked':''}/></td>
+      <td class="ck"><input type="checkbox" class="r-jwe"${jwe?' checked':''}/></td>
       <td><a class="rcbtn" onclick="saveRow(${r.id},this);return false">Save</a><a class="rcbtn del" onclick="delRecip(${r.id});return false">Delete</a></td>
     </tr>`;
   }).join('');
@@ -191,11 +193,11 @@ function renderRecips(){
 function rowPayload(tr,id){
   const g=s=>tr.querySelector(s);
   const ck=s=>g(s).checked;
-  const jw=ck('.r-jw'), ds=ck('.r-ds'), dp=ck('.r-dp'), pp=ck('.r-pp');
+  const jw=ck('.r-jw'), ds=ck('.r-ds'), dp=ck('.r-dp'), pp=ck('.r-pp'), jwe=ck('.r-jwe');
   // one tick per report → set both channels (email + whatsapp) the same
   return { id:id||undefined, name:g('.r-name').value.trim(), email:g('.r-email').value.trim(),
     grp:g('.r-grp').value, mobile:g('.r-mobile').value.trim(),
-    jw_email:jw, jw_wa:jw, ds_email:ds, ds_wa:ds, dp_email:dp, dp_wa:dp, pp_email:pp, pp_wa:pp };
+    jw_email:jw, jw_wa:jw, ds_email:ds, ds_wa:ds, dp_email:dp, dp_wa:dp, pp_email:pp, pp_wa:pp, jw_eve_email:jwe, jw_eve_wa:jwe };
 }
 async function saveRow(id,el){
   const tr=el.closest('tr'); const old=el.textContent; el.textContent='Saving…';
@@ -205,9 +207,9 @@ async function saveRow(id,el){
 async function addRecip(){
   const b=$('addBtn');
   const g=s=>$(s).checked;
-  const jw=g('aJw'), ds=g('aDs'), dp=g('aDp'), pp=g('aPp');
+  const jw=g('aJw'), ds=g('aDs'), dp=g('aDp'), pp=g('aPp'), jwe=g('aJwe');
   const r={ name:$('aName').value.trim(), email:$('aEmail').value.trim(), grp:$('aGrp').value, mobile:$('aMobile').value.trim(),
-    jw_email:jw, jw_wa:jw, ds_email:ds, ds_wa:ds, dp_email:dp, dp_wa:dp, pp_email:pp, pp_wa:pp };
+    jw_email:jw, jw_wa:jw, ds_email:ds, ds_wa:ds, dp_email:dp, dp_wa:dp, pp_email:pp, pp_wa:pp, jw_eve_email:jwe, jw_eve_wa:jwe };
   if(!r.name && !r.email && !r.mobile){ alert('Enter at least a name, email or number'); return; }
   b.disabled=true; b.textContent='Adding…';
   try{
