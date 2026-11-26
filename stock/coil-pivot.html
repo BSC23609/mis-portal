@@ -84,13 +84,28 @@ function draw(){
   document.querySelectorAll('#blocks td.cell[data-t]').forEach(td=>td.onclick=()=>drill(td.dataset.g,+td.dataset.t,+td.dataset.w));
   if(sel)drill(sel.g,sel.t,sel.w);
 }
+// GRPO date (coil-in date) as DD-MMM-YY; '—' when missing
+function fdate(s){if(!s)return '—';const m=String(s).slice(0,10).match(/^(\d{4})-(\d{2})-(\d{2})/);if(!m)return esc(String(s));const M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];return `${m[3]}-${M[+m[2]-1]}-${m[1].slice(2)}`;}
 function drill(g,t,w){
   sel={g,t,w};
   document.querySelectorAll('#blocks td.cell').forEach(td=>td.classList.toggle('sel',td.dataset.g===g&&+td.dataset.t===t&&+td.dataset.w===w));
-  const meas=$('measure').value, rs=scope().filter(r=>!excl(r.Grade)&&bucket(r.Grade)===g&&r.T===t&&r.W===w&&(r[meas]||0)>0).sort((a,b)=>b[meas]-a[meas]);
-  $('drillCard').style.display=''; $('drillSub').textContent=`${g} · ${t} × ${w} · ${rs.length} items · ${f1(rs.reduce((a,r)=>a+(r[meas]||0),0))} MT`;
-  $('drill').innerHTML=`<table><thead><tr><th>Item</th><th>Brand</th><th>Grade</th><th>Whs</th><th class="num">On hand</th><th class="num">Booked</th><th class="num">Available</th></tr></thead><tbody>
-    ${rs.map(r=>`<tr><td>${esc(r.ItemName)}<div class="muted">${esc(r.ItemCode)}</div></td><td><span class="tag">${esc(r.Brand)}</span></td><td class="muted">${esc(r.Grade)}</td><td class="num">${r.WhsCode}</td><td class="num"><b>${f3(r.OnHand)}</b></td><td class="num">${r.Committed?f3(r.Committed):''}</td><td class="num">${f3(r.Available)}</td></tr>`).join('')}</tbody></table>`;
+  const meas=$('measure').value;
+  const items=scope().filter(r=>!excl(r.Grade)&&bucket(r.Grade)===g&&r.T===t&&r.W===w&&(r[meas]||0)>0).sort((a,b)=>b[meas]-a[meas]);
+  // physical coils (batch no + GRPO date) for this size/grade — coils.csv covers the coil warehouses (38, 22)
+  const inLoc=wh=>{const l=$('loc').value;return l==='chennai'?LOC[wh]==='Chennai':l==='salem'?LOC[wh]==='Salem':true;};
+  const byKey={}; (S.COILS||[]).filter(c=>inLoc(c.WhsCode)&&!excl(c.Grade)&&bucket(c.Grade)===g&&c.T===t&&c.W===w&&c.Quantity>0)
+    .forEach(c=>(byKey[c.ItemCode+'|'+c.WhsCode]??=[]).push(c));
+  // expand each item×warehouse into its individual coils; keep one row where no batch data exists (e.g. WH 07/11/52)
+  const rows2=[];
+  items.forEach(r=>{
+    const batches=(byKey[r.ItemCode+'|'+r.WhsCode]||[]).slice().sort((a,b)=>String(a.GRPODate||'').localeCompare(String(b.GRPODate||'')));
+    if(batches.length) batches.forEach((c,i)=>rows2.push({r,first:i===0,mt:c.Quantity,batch:c.BatchNum,grpo:c.GRPODate}));
+    else rows2.push({r,first:true,mt:r.OnHand,batch:'',grpo:''});
+  });
+  const totMT=rows2.reduce((a,x)=>a+(x.mt||0),0);
+  $('drillCard').style.display=''; $('drillSub').textContent=`${g} · ${t} × ${w} · ${rows2.length} coils · ${f1(totMT)} MT`;
+  $('drill').innerHTML=`<table><thead><tr><th>Item</th><th>Brand</th><th>Grade</th><th>Whs</th><th class="num">On hand</th><th class="num">Booked</th><th class="num">Available</th><th>Batch No</th><th class="num">GRPO Date</th></tr></thead><tbody>
+    ${rows2.map(x=>{const r=x.r;return `<tr><td>${esc(r.ItemName)}<div class="muted">${esc(r.ItemCode)}</div></td><td><span class="tag">${esc(r.Brand)}</span></td><td class="muted">${esc(r.Grade)}</td><td class="num">${r.WhsCode}</td><td class="num"><b>${f3(x.mt)}</b></td><td class="num">${x.first&&r.Committed?f3(r.Committed):''}</td><td class="num">${x.first?f3(r.Available):''}</td><td>${esc(x.batch||'—')}</td><td class="num">${fdate(x.grpo)}</td></tr>`;}).join('')}</tbody></table>`;
 }
 (async function(){
   try{S=await loadStock();}catch(e){$('errbox').innerHTML='<div class="err">Couldn\'t load stock data.</div>';return;}

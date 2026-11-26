@@ -103,9 +103,9 @@ async function renderProduction(){
   // --- HR COIL STOCK (WH 38, item-wise, all grades) ---
   const w38={}; S.STOCK.filter(r=>r.WhsCode==='38').forEach(r=>w38[r.ItemName]=(w38[r.ItemName]||0)+r.OnHand);
   const arr=Object.entries(w38).sort((a,b)=>b[1]-a[1]); const t38=arr.reduce((s,[,q])=>s+q,0);
-  $('coilStock').innerHTML=`<table class="x"><thead><tr><th style="text-align:left">Row Labels</th><th>38</th><th>Grand Total</th></tr></thead><tbody>
-    ${arr.map(([n,q])=>`<tr><td>${esc(n)}</td><td class="n">${f3(q)}</td><td class="n">${f3(q)}</td></tr>`).join('')}
-    <tr class="gt"><td>Grand Total</td><td class="n">${f3(t38)}</td><td class="n">${f3(t38)}</td></tr></tbody></table>`;
+  $('coilStock').innerHTML=`<table class="x"><thead><tr><th style="text-align:left">Row Labels</th><th>Grand Total</th></tr></thead><tbody>
+    ${arr.map(([n,q])=>`<tr><td>${esc(n)}</td><td class="n">${f3(q)}</td></tr>`).join('')}
+    <tr class="gt"><td>Grand Total</td><td class="n">${f3(t38)}</td></tr></tbody></table>`;
 
   // --- SALES / PURCHASE (month × category, current FY) ---
   const now=new Date(), fy=(now.getMonth()+1)>=4?now.getFullYear():now.getFullYear()-1;
