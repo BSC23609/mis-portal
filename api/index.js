@@ -861,13 +861,122 @@ async function jwSendWhatsapp(req, once){
   await logSend({ report:'wheels_stock_eve', channel:'whatsapp', ...waSummary(sent, nameByMobile(recips)) });
   return { ok:true, image:img, template:tmpl, sent };
 }
+// ===== Morning Job Work auto-send (10:00 IST) — Job Work Stock + Daily Stock + Production, each on
+// email + WhatsApp, to the recipients configured for them. Mirrors the evening jw-cron pattern:
+// idempotent per report+channel per IST day, so pinging repeatedly (or a retry window) is safe. Each
+// sender reuses the exact same recipients/templates/renderers as the manual "Send now" and test sends. =====
+async function amDone(report, channel){
+  try{
+    const r = await sql`select 1 from wheels_send_log
+      where report=${report} and channel=${channel}
+        and run_date=(now() at time zone 'Asia/Kolkata')::date
+        and status in ('ok','partial','skipped') limit 1`;
+    return r.length>0;
+  }catch(e){ return false; }
+}
+async function amJwEmail(req){
+  if(await isSendPaused()){ await logSend({report:'wheels_stock',channel:'email',status:'skipped',detail:'global send pause is ON'}); return {skipped:'paused'}; }
+  if(await amDone('wheels_stock','email')) return {skipped:'already sent today'};
+  const base=(process.env.PUBLIC_URL||`https://${req.headers.host}`).replace(/\/$/,"");
+  const stamp=new Date().toISOString().slice(0,10).replace(/-/g,"");
+  let s2={}; try{ const r=await sql`select mail_to, mail_cc, mail_body, mail_subject from wheels_settings where id=1`; s2=r[0]||{}; }catch(e){}
+  const to=(s2.mail_to||[]);
+  if(!to.length){ await logSend({report:'wheels_stock',channel:'email',status:'skipped',detail:'no email recipients saved'}); return {skipped:'no email recipients'}; }
+  try{
+    const { html, rows:wrows } = await renderWheelsHtml(base, new Set(), s2.mail_body||"");
+    let attach=null; try{ attach={ name:"WheelsIndia_Stock_"+stamp+".xlsx", b64: await buildWheelsXlsx(wrows) }; }catch(e){}
+    const subj = s2.mail_subject || ("BSC — Wheels India Job Work Stock Statement — "+new Date().toLocaleDateString("en-IN"));
+    await sendWheelsMail(to, (s2.mail_cc||[]), html, subj, attach);
+    await logSend({report:'wheels_stock',channel:'email',status:'ok',total:to.length,ok:to.length,fail:0,detail:'Morning 10am: '+to.length+' recipient(s): '+to.join(', ')});
+    return { ok:true, sent_to:to };
+  }catch(e){ await logSend({report:'wheels_stock',channel:'email',status:'fail',total:to.length,ok:0,fail:to.length,detail:String(e.message||e)}); return {error:String(e.message||e)}; }
+}
+async function amJwWa(req){
+  if(await isSendPaused()){ await logSend({report:'wheels_stock',channel:'whatsapp',status:'skipped',detail:'global send pause is ON'}); return {skipped:'paused'}; }
+  if(await amDone('wheels_stock','whatsapp')) return {skipped:'already sent today'};
+  const tmpl=process.env.WHEELS_WA_TEMPLATE;
+  if(!tmpl){ await logSend({report:'wheels_stock',channel:'whatsapp',status:'skipped',detail:'WHEELS_WA_TEMPLATE not set'}); return {skipped:'WHEELS_WA_TEMPLATE not set'}; }
+  const recips=await wheelsRecipients();
+  const nums=recipientMobiles(recips,"jw_wa");
+  if(!nums.length){ await logSend({report:'wheels_stock',channel:'whatsapp',status:'skipped',detail:'no recipients ticked for Job Work Stock WhatsApp'}); return {skipped:'no whatsapp recipients'}; }
+  const base=(process.env.PUBLIC_URL||`https://${req.headers.host}`).replace(/\/$/,"");
+  const img=base+"/wheels.png?d="+imgStamp();
+  await renderAndCachePng("stock").catch(()=>{});
+  const sent=[];
+  for(const num of nums){ try{ const r=await sendRetry(num,tmpl,[{name:"report",value:img},{name:"1",value:waToday()}]); sent.push({num,...(r||{ok:true})}); }catch(e){ sent.push({num,error:String(e.message||e)}); } }
+  await logSend({ report:'wheels_stock', channel:'whatsapp', ...waSummary(sent, nameByMobile(recips)) });
+  return { ok:true, sent };
+}
+async function amDsEmail(req){
+  if(await isSendPaused()){ await logSend({report:'daily_stock',channel:'email',status:'skipped',detail:'global send pause is ON'}); return {skipped:'paused'}; }
+  if(await amDone('daily_stock','email')) return {skipped:'already sent today'};
+  let to=[]; try{ const r=await sql`select mgmt_mail_to from wheels_settings where id=1`; to=(r[0]?.mgmt_mail_to)||[]; }catch(e){}
+  if(!to.length){ await logSend({report:'daily_stock',channel:'email',status:'skipped',detail:'no email recipients saved'}); return {skipped:'no email recipients'}; }
+  try{
+    const stamp=new Date().toISOString().slice(0,10).replace(/-/g,"");
+    const png=(await buildDailyStockPng()).toString("base64");
+    const html=`<p>Dear Team,</p><p>Company-wide Daily Stock report:</p><img src="cid:dailyimg" style="max-width:100%;border:1px solid #d0d7dd"/><p>Bharat Steel (Chennai) Pvt. Ltd.</p>`;
+    await sendWheelsMail(to, [], html, "BSC — Daily Stock Report — "+new Date().toLocaleDateString("en-IN"), { name:"BSC_DailyStock_"+stamp+".png", b64:png, contentType:"image/png", cid:"dailyimg" });
+    await logSend({report:'daily_stock',channel:'email',status:'ok',total:to.length,ok:to.length,fail:0,detail:'Morning 10am: '+to.length+' recipient(s): '+to.join(', ')});
+    return { ok:true, sent_to:to };
+  }catch(e){ await logSend({report:'daily_stock',channel:'email',status:'fail',total:to.length,ok:0,fail:to.length,detail:String(e.message||e)}); return {error:String(e.message||e)}; }
+}
+async function amDsWa(req){
+  if(await isSendPaused()){ await logSend({report:'daily_stock',channel:'whatsapp',status:'skipped',detail:'global send pause is ON'}); return {skipped:'paused'}; }
+  if(await amDone('daily_stock','whatsapp')) return {skipped:'already sent today'};
+  const tmpl=process.env.WHEELS_WA_DAILY_TEMPLATE || process.env.WHEELS_WA_PROD_TEMPLATE;
+  if(!tmpl){ await logSend({report:'daily_stock',channel:'whatsapp',status:'skipped',detail:'WHEELS_WA_DAILY_TEMPLATE not set'}); return {skipped:'WHEELS_WA_DAILY_TEMPLATE not set'}; }
+  const recips=await wheelsRecipients();
+  const nums=recipientMobiles(recips,"ds_wa");
+  if(!nums.length){ await logSend({report:'daily_stock',channel:'whatsapp',status:'skipped',detail:'no recipients ticked for Daily Stock WhatsApp'}); return {skipped:'no whatsapp recipients'}; }
+  const base=(process.env.PUBLIC_URL||`https://${req.headers.host}`).replace(/\/$/,"");
+  const url=base+"/daily-stock.png?d="+imgStamp();
+  await renderAndCachePng("daily").catch(()=>{});
+  const sent=[];
+  for(const num of nums){ try{ const r=await sendRetry(num,tmpl,[{name:"report",value:url},{name:"1",value:waToday()}]); sent.push({num,...(r||{ok:true})}); }catch(e){ sent.push({num,error:String(e.message||e)}); } }
+  await logSend({ report:'daily_stock', channel:'whatsapp', ...waSummary(sent, nameByMobile(recips)) });
+  return { ok:true, sent };
+}
+async function amDpEmail(req){
+  if(await isSendPaused()){ await logSend({report:'production',channel:'email',status:'skipped',detail:'global send pause is ON'}); return {skipped:'paused'}; }
+  if(await amDone('production','email')) return {skipped:'already sent today'};
+  let s7={}; try{ const r=await sql`select prod_mail_to, prod_format from wheels_settings where id=1`; s7=r[0]||{}; }catch(e){}
+  const to=(s7.prod_mail_to||[]);
+  if(!to.length){ await logSend({report:'production',channel:'email',status:'skipped',detail:'no email recipients saved'}); return {skipped:'no email recipients'}; }
+  try{
+    const fmtv=(s7.prod_format)||"image";
+    const stamp=new Date().toISOString().slice(0,10).replace(/-/g,"");
+    let attach, html;
+    if(fmtv==="pdf"){ attach={ name:"WheelsIndia_Production_"+stamp+".pdf", b64:(await buildWheelsProdPdf()).toString("base64"), contentType:"application/pdf" }; html="<p>Dear Team,</p><p>Please find attached the Wheels India Production Report (PDF).</p><p>Bharat Steel (Chennai) Pvt. Ltd.</p>"; }
+    else { attach={ name:"WheelsIndia_Production_"+stamp+".png", b64:(await buildWheelsProdPng()).toString("base64"), contentType:"image/png", cid:"prodimg" }; html=`<p>Dear Team,</p><p>Wheels India Production Report:</p><img src="cid:prodimg" style="max-width:100%;border:1px solid #d0d7dd"/><p>Bharat Steel (Chennai) Pvt. Ltd.</p>`; }
+    await sendWheelsMail(to, [], html, "Wheels India — Production Report — "+new Date().toLocaleDateString("en-IN"), attach);
+    await logSend({report:'production',channel:'email',status:'ok',total:to.length,ok:to.length,fail:0,detail:'Morning 10am: '+to.length+' recipient(s): '+to.join(', ')});
+    return { ok:true, sent_to:to };
+  }catch(e){ await logSend({report:'production',channel:'email',status:'fail',total:to.length,ok:0,fail:to.length,detail:String(e.message||e)}); return {error:String(e.message||e)}; }
+}
+async function amDpWa(req){
+  if(await isSendPaused()){ await logSend({report:'production',channel:'whatsapp',status:'skipped',detail:'global send pause is ON'}); return {skipped:'paused'}; }
+  if(await amDone('production','whatsapp')) return {skipped:'already sent today'};
+  const tmpl=process.env.WHEELS_WA_PROD_TEMPLATE;
+  if(!tmpl){ await logSend({report:'production',channel:'whatsapp',status:'skipped',detail:'WHEELS_WA_PROD_TEMPLATE not set'}); return {skipped:'WHEELS_WA_PROD_TEMPLATE not set'}; }
+  const recips=await wheelsRecipients();
+  const nums=recipientMobiles(recips,"dp_wa");
+  if(!nums.length){ await logSend({report:'production',channel:'whatsapp',status:'skipped',detail:'no recipients ticked for Daily Production WhatsApp'}); return {skipped:'no whatsapp recipients'}; }
+  const base=(process.env.PUBLIC_URL||`https://${req.headers.host}`).replace(/\/$/,"");
+  const url=base+"/wheels-production.png?d="+imgStamp();
+  await renderAndCachePng("production").catch(()=>{});
+  const sent=[];
+  for(const num of nums){ try{ const r=await sendRetry(num,tmpl,[{name:"report",value:url}]); sent.push({num,...(r||{ok:true})}); }catch(e){ sent.push({num,error:String(e.message||e)}); } }
+  await logSend({ report:'production', channel:'whatsapp', ...waSummary(sent, nameByMobile(recips)) });
+  return { ok:true, sent };
+}
 async function handlerWheels(req, res){
   if (cors(req, res)) return;
   try{
     await ensureWheelsTable();
     // GET /api/wheels?fmt=pdf  ->  the statement as a PDF (same data/structure as the email).
     // Public, no-auth: this is the URL WATI fetches for the WhatsApp document template.
-    const fmt = (req.query && req.query.fmt) || ((/[?&]fmt=(pdf|xlsx|stockpng|prodpdf|prodpng|dailypng|planpng|planpdf|plancron|jwcron|planupdate|wadiag|sendlog)\b/.exec(req.url || "")) || [])[1] || "";
+    const fmt = (req.query && req.query.fmt) || ((/[?&]fmt=(pdf|xlsx|stockpng|prodpdf|prodpng|dailypng|planpng|planpdf|plancron|jwcron|planupdate|wadiag|sendlog|amcron)\b/.exec(req.url || "")) || [])[1] || "";
     if (req.method === "GET" && fmt === "pdf"){
       const pdf = await buildWheelsPdf();
       res.setHeader("Content-Type", "application/pdf");
@@ -964,6 +1073,31 @@ async function handlerWheels(req, res){
       const email = await jwSendEmail(req, true);
       const whatsapp = await jwSendWhatsapp(req, true);
       return json(res, 200, { ok: true, date: todayIso, forced: force, email, whatsapp });
+    }
+    // Morning Job Work AUTO-SEND at 10:00 IST — Job Work Stock + Daily Stock + Production, each on email +
+    // WhatsApp, to the recipients configured for them. Idempotent (per report+channel per IST day) + time-
+    // guarded (only after 10:00) + CRON_SECRET-guarded, so the VM task can ping it once or repeatedly and
+    // extra calls are no-ops (a failed channel retries next call). Replaces the old send_wheels_report.ps1
+    // orchestration with server-side logic so it cannot go missing in a migration. ?force=1 bypasses the gate.
+    if (req.method === "GET" && fmt === "amcron"){
+      const auth = req.headers.authorization || "";
+      if (!process.env.CRON_SECRET) return json(res, 503, { error: "CRON_SECRET not set" });
+      if (auth !== "Bearer " + process.env.CRON_SECRET) return json(res, 401, { error: "unauthorized" });
+      const ist = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+      const todayIso = ist.getFullYear() + "-" + String(ist.getMonth()+1).padStart(2,"0") + "-" + String(ist.getDate()).padStart(2,"0");
+      if (ist.getDay() === 0) return json(res, 200, { ok: true, skipped: "Sunday" });
+      let hol = []; try { const s = await sql`select holidays from wheels_settings where id=1`; hol = (s[0]?.holidays) || []; } catch(e){}
+      if (hol.includes(todayIso)) return json(res, 200, { ok: true, skipped: "holiday " + todayIso });
+      const force = /[?&]force=1\b/.test(req.url||"") || (req.query && req.query.force==="1");
+      if (!force && ist.getHours()*60 + ist.getMinutes() < 10*60) return json(res, 200, { ok: true, waiting: "before 10:00 IST", ist_time: ist.getHours()+":"+String(ist.getMinutes()).padStart(2,"0") });
+      const out = { date: todayIso, forced: force };
+      out.jw_email    = await amJwEmail(req).catch(e=>({error:String(e.message||e)}));
+      out.jw_whatsapp = await amJwWa(req).catch(e=>({error:String(e.message||e)}));
+      out.ds_email    = await amDsEmail(req).catch(e=>({error:String(e.message||e)}));
+      out.ds_whatsapp = await amDsWa(req).catch(e=>({error:String(e.message||e)}));
+      out.dp_email    = await amDpEmail(req).catch(e=>({error:String(e.message||e)}));
+      out.dp_whatsapp = await amDpWa(req).catch(e=>({error:String(e.message||e)}));
+      return json(res, 200, { ok: true, ...out });
     }
     // Updated Production Plan — re-send when today's cutting program changes after the morning send.
     // Called by the SAP-side plan_watch trigger the moment a new program is raised. Guarded by CRON_SECRET.

@@ -46,6 +46,10 @@
       "destination": "/api/index?route=wheels&fmt=jwcron"
     },
     {
+      "source": "/api/am-cron",
+      "destination": "/api/index?route=wheels&fmt=amcron"
+    },
+    {
       "source": "/api/plan-update",
       "destination": "/api/index?route=wheels&fmt=planupdate"
     },
