@@ -3,7 +3,7 @@
    Each page sets  window.PORTAL = { module:'stock', screen:'daily' }  before including this. */
 (function(){
   const P = window.PORTAL || {};
-  const BASE = location.pathname.includes('/stock/')||location.pathname.includes('/dispatch/')||location.pathname.includes('/nmdc/')||location.pathname.includes('/wheels/')||location.pathname.includes('/fleet/') ? '..' : '.';
+  const BASE = location.pathname.includes('/stock/')||location.pathname.includes('/dispatch/')||location.pathname.includes('/nmdc/')||location.pathname.includes('/wheels/')||location.pathname.includes('/fleet/')||location.pathname.includes('/ar/') ? '..' : '.';
 
   // ---- client-side auth gate (opt-in: the server returns gate:true only when AUTH_SECRET is set) ----
   // Fail-open: on any network/parse error the page is shown, so auth can never hard-break the portal.
@@ -49,6 +49,7 @@
         {id:'sendlog',  label:'Send Log', href:BASE+'/wheels/log.html'},
     ]},
     { id:'fleet', label:'Fleet', href:BASE+'/fleet/index.html', screens:[] },
+    { id:'ar', label:'Accounts Receivables', href:BASE+'/ar/index.html', screens:[] },
   ];
 
 

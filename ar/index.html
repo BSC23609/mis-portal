@@ -1,0 +1,93 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Accounts Receivables — Bharat Steel MIS</title>
+<link rel="icon" type="image/png" href="../stock/BSC.png"/>
+<script>window.PORTAL={module:'ar'}</script>
+</head><body>
+<div class="pw">
+  <div id="errbox"></div>
+  <div class="kpis" id="kpis"></div>
+  <div class="filters">
+    <input type="search" id="q" placeholder="Search customer, code, mobile, email…" oninput="draw()"/>
+    <select id="branch" onchange="draw()"><option value="">All branches</option></select>
+    <select id="exec" onchange="draw()"><option value="">All executives</option></select>
+    <label><input type="checkbox" id="overdueOnly" checked onchange="draw()"/> Overdue only</label>
+    <select id="sort" onchange="draw()">
+      <option value="amt">Sort: Outstanding ↓</option>
+      <option value="delay">Sort: Days overdue ↓</option>
+      <option value="name">Sort: Customer A–Z</option>
+    </select>
+    <span class="fcount" id="fcount"></span>
+  </div>
+  <div class="card"><div class="tblwrap scroll" id="tbl"></div></div>
+  <footer id="foot"></footer>
+</div>
+<script src="../_portal.js"></script>
+<script>
+let ROWS=[];
+const EXPANDED=new Set();
+const fINR=n=>'₹'+f0(n||0);
+function fdate(s){if(!s)return '';const m=String(s).slice(0,10).match(/^(\d{4})-(\d{2})-(\d{2})/);if(!m)return esc(String(s));const M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];return `${m[3]}-${M[+m[2]-1]}-${m[1].slice(2)}`;}
+
+async function load(){
+  let txt='';
+  try{ const r=await fetch(DATA_BASE+'/receivables.csv?t='+Date.now()); if(!r.ok) throw 0; txt=await r.text(); }
+  catch(e){ $('errbox').innerHTML='<div class="err">No <b>receivables.csv</b> published yet. Run <code>refresh_receivables.ps1</code> on the SAP box to generate it, then reload.</div>'; setStamp(); return; }
+  ROWS=parseCSV(txt).map(r=>({...r, DelayDays:parseInt(r.DelayDays)||0, Outstanding:num(r.Outstanding)}));
+  const brs=[...new Set(ROWS.map(r=>r.Branch).filter(Boolean))].sort();
+  const exs=[...new Set(ROWS.map(r=>r.Executive).filter(Boolean))].sort();
+  $('branch').innerHTML='<option value="">All branches</option>'+brs.map(b=>`<option>${esc(b)}</option>`).join('');
+  $('exec').innerHTML='<option value="">All executives</option>'+exs.map(e=>`<option>${esc(e)}</option>`).join('');
+  setStamp();
+  draw();
+}
+
+function filtered(){
+  const q=$('q').value.trim().toLowerCase(), br=$('branch').value, ex=$('exec').value, od=$('overdueOnly').checked;
+  return ROWS.filter(r=>{
+    if(od && r.DelayDays<=0) return false;
+    if(br && r.Branch!==br) return false;
+    if(ex && r.Executive!==ex) return false;
+    if(q && ![r.CardName,r.CardCode,r.Mobile,r.Phone,r.Email].some(v=>(v||'').toLowerCase().includes(q))) return false;
+    return true;
+  });
+}
+
+function draw(){
+  const rs=filtered();
+  const byC={};
+  rs.forEach(r=>{ const o=byC[r.CardCode]??={CardCode:r.CardCode,CardName:r.CardName,Branch:r.Branch,Executive:r.Executive,Mobile:r.Mobile,Phone:r.Phone,Email:r.Email,amt:0,maxDelay:0,oldest:null,inv:[]};
+    o.amt+=r.Outstanding; o.maxDelay=Math.max(o.maxDelay,r.DelayDays);
+    if(!o.oldest||r.DueDate<o.oldest)o.oldest=r.DueDate; o.inv.push(r); });
+  let cust=Object.values(byC);
+  const sort=$('sort').value;
+  cust.sort((a,b)=> sort==='name'?a.CardName.localeCompare(b.CardName): sort==='delay'? b.maxDelay-a.maxDelay : b.amt-a.amt);
+
+  const totAmt=cust.reduce((a,c)=>a+c.amt,0);
+  const maxD=cust.reduce((m,c)=>Math.max(m,c.maxDelay),0);
+  $('kpis').innerHTML=`
+    <div class="kpi"><div class="lab">Customers</div><div class="val">${cust.length}</div></div>
+    <div class="kpi"><div class="lab">Outstanding</div><div class="val">${fINR(totAmt)}</div></div>
+    <div class="kpi"><div class="lab">Open invoices</div><div class="val">${rs.length}</div></div>
+    <div class="kpi"><div class="lab">Max days overdue</div><div class="val">${maxD||0}</div></div>`;
+
+  let h=`<table><thead><tr><th>Customer</th><th>Branch</th><th>Executive</th><th>Mobile</th><th>Email</th><th class="num">Outstanding</th><th class="num">Oldest due</th><th class="num">Days</th><th class="num">#Inv</th></tr></thead><tbody>`;
+  cust.forEach(c=>{
+    const open=EXPANDED.has(c.CardCode);
+    const dcol=c.maxDelay>=60?' style="color:var(--red);font-weight:700"':(c.maxDelay>=30?' style="color:var(--amber);font-weight:700"':'');
+    h+=`<tr class="grp" onclick="toggle('${c.CardCode.replace(/'/g,"\\'")}')"><td><span class="tw">${open?'▾':'▸'}</span>${esc(c.CardName)}<div class="muted">${esc(c.CardCode)}</div></td><td>${esc(c.Branch)}</td><td class="muted">${esc(c.Executive)}</td><td>${esc(c.Mobile||'—')}</td><td class="muted">${esc(c.Email||'—')}</td><td class="num"><b>${fINR(c.amt)}</b></td><td class="num">${fdate(c.oldest)}</td><td class="num"${dcol}>${c.maxDelay>0?c.maxDelay:''}</td><td class="num">${c.inv.length}</td></tr>`;
+    if(open){
+      c.inv.slice().sort((a,b)=>String(a.DueDate).localeCompare(String(b.DueDate))).forEach(r=>{
+        h+=`<tr class="itm"><td>${esc(r.BillNo)}<div class="muted">bill ${fdate(r.BillDate)}</div></td><td colspan="4" class="muted">due ${fdate(r.DueDate)}</td><td class="num">${fINR(r.Outstanding)}</td><td class="num">${fdate(r.DueDate)}</td><td class="num">${r.DelayDays>0?r.DelayDays:''}</td><td></td></tr>`;
+      });
+    }
+  });
+  h+=`</tbody></table>`;
+  $('tbl').innerHTML=cust.length?h:'<div class="empty">No receivables match this filter.</div>';
+  $('fcount').textContent=`${cust.length} customers · ${fINR(totAmt)} · ${rs.length} invoices`;
+  $('foot').textContent='Overdue A/R from SAP — open invoices past their due date. Contacts from the customer master (OCRD).';
+}
+function toggle(k){ if(EXPANDED.has(k))EXPANDED.delete(k); else EXPANDED.add(k); draw(); }
+load();
+</script>
+</body></html>
