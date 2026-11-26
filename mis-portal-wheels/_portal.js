@@ -44,7 +44,6 @@
         {id:'settings', label:'Settings', href:BASE+'/wheels/settings.html'},
         {id:'sendlog',  label:'Send Log', href:BASE+'/wheels/log.html'},
     ]},
-    { id:'worktracker', label:'Work Tracker', href:'https://tasks.bharatsteels.in', external:true, screens:[] },
   ];
 
 
