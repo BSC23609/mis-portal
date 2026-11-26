@@ -1074,8 +1074,10 @@ async function handlerWheels(req, res){
       const whatsapp = await jwSendWhatsapp(req, true);
       return json(res, 200, { ok: true, date: todayIso, forced: force, email, whatsapp });
     }
-    // Morning Job Work AUTO-SEND at 10:00 IST — Job Work Stock + Daily Stock + Production, each on email +
-    // WhatsApp, to the recipients configured for them. Idempotent (per report+channel per IST day) + time-
+    // Morning Job Work AUTO-SEND at 10:00 IST — Job Work Stock + Daily Stock, each on email +
+    // WhatsApp, to the recipients configured for them. (Daily Production is no longer sent separately —
+    // it is now part of the Job Work statement; its manual "Send now" button still works on demand.)
+    // Idempotent (per report+channel per IST day) + time-
     // guarded (only after 10:00) + CRON_SECRET-guarded, so the VM task can ping it once or repeatedly and
     // extra calls are no-ops (a failed channel retries next call). Replaces the old send_wheels_report.ps1
     // orchestration with server-side logic so it cannot go missing in a migration. ?force=1 bypasses the gate.
@@ -1095,8 +1097,6 @@ async function handlerWheels(req, res){
       out.jw_whatsapp = await amJwWa(req).catch(e=>({error:String(e.message||e)}));
       out.ds_email    = await amDsEmail(req).catch(e=>({error:String(e.message||e)}));
       out.ds_whatsapp = await amDsWa(req).catch(e=>({error:String(e.message||e)}));
-      out.dp_email    = await amDpEmail(req).catch(e=>({error:String(e.message||e)}));
-      out.dp_whatsapp = await amDpWa(req).catch(e=>({error:String(e.message||e)}));
       return json(res, 200, { ok: true, ...out });
     }
     // Updated Production Plan — re-send when today's cutting program changes after the morning send.
