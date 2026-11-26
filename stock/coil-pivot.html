@@ -99,7 +99,7 @@ function drill(g,t,w){
   const rows2=[];
   items.forEach(r=>{
     const batches=(byKey[r.ItemCode+'|'+r.WhsCode]||[]).slice().sort((a,b)=>String(a.GRPODate||'').localeCompare(String(b.GRPODate||'')));
-    if(batches.length) batches.forEach((c,i)=>rows2.push({r,first:i===0,mt:c.Quantity,batch:c.BatchNum,grpo:c.GRPODate}));
+    if(batches.length) batches.forEach((c,i)=>rows2.push({r,first:i===0,mt:c.Quantity,batch:(c.CoilNo||c.BatchNum),grpo:c.GRPODate}));
     else rows2.push({r,first:true,mt:r.OnHand,batch:'',grpo:''});
   });
   const totMT=rows2.reduce((a,x)=>a+(x.mt||0),0);
