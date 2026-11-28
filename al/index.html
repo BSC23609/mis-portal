@@ -4,17 +4,21 @@
 <link rel="icon" type="image/png" href="../stock/BSC.png"/>
 <script>window.PORTAL={module:'al'}</script>
 <style>
-  #tbl table{table-layout:fixed}
-  #tbl col.c-item{width:26%}
-  #tbl col.c-whs{width:6%}
-  #tbl col.c-grd{width:15%}
-  #tbl col.c-thk{width:8%}
-  #tbl col.c-wid{width:9%}
-  #tbl col.c-mt{width:14%}
-  #tbl col.c-coil{width:8%}
-  #tbl col.c-old{width:14%}
-  #tbl th.whs,#tbl td.whs{text-align:left;font-family:var(--mono)}
-  #tbl td:first-child,#tbl td .muted{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .altbl{table-layout:fixed}
+  .altbl col.c-item{width:28%}
+  .altbl col.c-whs{width:6%}
+  .altbl col.c-grd{width:15%}
+  .altbl col.c-thk{width:8%}
+  .altbl col.c-wid{width:9%}
+  .altbl col.c-mt{width:13%}
+  .altbl col.c-coil{width:9%}
+  .altbl col.c-old{width:12%}
+  .altbl th.whs,.altbl td.whs{text-align:left;font-family:var(--mono)}
+  .altbl td:first-child,.altbl td .muted{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .sechead{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:18px 2px 8px}
+  .sechead h2{font-size:15px;font-weight:800;color:var(--ink);margin:0;letter-spacing:.01em}
+  .sechead .sub{font-size:12px;color:var(--gray);font-family:var(--mono)}
+  .src{color:var(--ink)}
 </style>
 </head><body>
 <div class="pw">
@@ -33,7 +37,7 @@
     </select>
     <span class="fcount" id="fcount"></span>
   </div>
-  <div class="card"><div class="tblwrap scroll" id="tbl"></div></div>
+  <div id="sections"></div>
   <footer id="foot"></footer>
 </div>
 <script src="../_portal.js"></script>
@@ -42,6 +46,7 @@ let STOCK=[], COILS={};
 const EXPANDED=new Set();
 const fMT=n=>f3(n||0);
 const key=r=>r.ItemCode+'|'+r.WhsCode;
+const isCoil=n=>/COIL/i.test(n||'');
 function fdate(s){if(!s)return '';const m=String(s).slice(0,10).match(/^(\d{4})-(\d{2})-(\d{2})/);if(!m)return esc(String(s));const M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];return `${m[3]}-${M[+m[2]-1]}-${m[1].slice(2)}`;}
 
 async function load(){
@@ -87,37 +92,59 @@ function filtered(){
     return true;
   });
 }
-
-function draw(){
-  let rows=filtered();
+function sortRows(rows){
   const sort=$('sort').value;
-  rows.sort((a,b)=> sort==='name'?a.ItemName.localeCompare(b.ItemName)
+  return rows.sort((a,b)=> sort==='name'?a.ItemName.localeCompare(b.ItemName)
     : sort==='age'? String(oldestOf(key(a))||'9').localeCompare(String(oldestOf(key(b))||'9'))
     : b.OnHand-a.OnHand);
-  const totMT=rows.reduce((a,r)=>a+r.OnHand,0);
-  const totCoils=rows.reduce((a,r)=>a+((COILS[key(r)]||[]).length),0);
-  let oldest=null; rows.forEach(r=>{const o=oldestOf(key(r)); if(o&&(!oldest||o<oldest))oldest=o;});
-  $('kpis').innerHTML=`
-    <div class="kpi"><div class="lab">Item · warehouse rows</div><div class="val">${rows.length}</div></div>
-    <div class="kpi"><div class="lab">On-hand (MT)</div><div class="val">${fMT(totMT)}</div></div>
-    <div class="kpi"><div class="lab">Coils</div><div class="val">${totCoils}</div></div>
-    <div class="kpi"><div class="lab">Oldest coil</div><div class="val">${oldest?fdate(oldest):'—'}</div></div>`;
+}
 
-  let h=`<table><colgroup><col class="c-item"><col class="c-whs"><col class="c-grd"><col class="c-thk"><col class="c-wid"><col class="c-mt"><col class="c-coil"><col class="c-old"></colgroup><thead><tr><th>Item</th><th class="whs">Whs</th><th>Grade</th><th class="num">Thick</th><th class="num">Width</th><th class="num">On-hand (MT)</th><th class="num">Coils</th><th class="num">Oldest in</th></tr></thead><tbody>`;
+// cut: false => coils section (drill = coil no); true => sheets & plates (drill = source coil)
+function sectionHtml(rows, cut){
+  rows=sortRows(rows.slice());
+  const unit = cut ? 'Pieces' : 'Coils';
+  let h=`<div class="card"><div class="tblwrap scroll"><table class="altbl"><colgroup><col class="c-item"><col class="c-whs"><col class="c-grd"><col class="c-thk"><col class="c-wid"><col class="c-mt"><col class="c-coil"><col class="c-old"></colgroup><thead><tr><th>Item</th><th class="whs">Whs</th><th>Grade</th><th class="num">Thick</th><th class="num">Width</th><th class="num">On-hand (MT)</th><th class="num">${unit}</th><th class="num">Oldest in</th></tr></thead><tbody>`;
   rows.forEach(r=>{
     const cs=(COILS[key(r)]||[]).slice().sort((a,b)=>String(a.GRPODate||'').localeCompare(String(b.GRPODate||'')));
     const open=EXPANDED.has(key(r));
     h+=`<tr class="grp" onclick="toggle('${key(r).replace(/'/g,"\\'")}')"><td><span class="tw">${cs.length?(open?'▾':'▸'):'&nbsp;'}</span>${esc(r.ItemName)}<div class="muted">${esc(r.ItemCode)}</div></td><td class="whs">${esc(r.WhsCode)}</td><td class="muted">${esc(r.Grade)}</td><td class="num">${r.T||''}</td><td class="num">${r.W||''}</td><td class="num"><b>${fMT(r.OnHand)}</b></td><td class="num">${cs.length||''}</td><td class="num">${fdate(oldestOf(key(r)))}</td></tr>`;
     if(open && cs.length){
       cs.forEach(c=>{
-        h+=`<tr class="itm"><td>Coil <b>${esc(c.CoilNo||'—')}</b>${c.BatchNum?`<div class="muted">batch ${esc(c.BatchNum)}</div>`:''}</td><td class="whs muted">${esc(c.WhsCode)}</td><td class="muted" colspan="2">GRPO ${esc(c.GRPONo||'')}</td><td></td><td class="num">${fMT(c.Quantity)}</td><td></td><td class="num">${fdate(c.GRPODate)}</td></tr>`;
+        if(cut){
+          h+=`<tr class="itm"><td>Source coil <b class="src">${esc(c.CoilNo||'—')}</b>${c.BatchNum?`<div class="muted">cut batch ${esc(c.BatchNum)}</div>`:''}</td><td class="whs muted">${esc(c.WhsCode)}</td><td class="muted" colspan="2">GRPO ${esc(c.GRPONo||'')}</td><td></td><td class="num">${fMT(c.Quantity)}</td><td></td><td class="num">${fdate(c.GRPODate)}</td></tr>`;
+        } else {
+          h+=`<tr class="itm"><td>Coil <b>${esc(c.CoilNo||'—')}</b>${c.BatchNum?`<div class="muted">batch ${esc(c.BatchNum)}</div>`:''}</td><td class="whs muted">${esc(c.WhsCode)}</td><td class="muted" colspan="2">GRPO ${esc(c.GRPONo||'')}</td><td></td><td class="num">${fMT(c.Quantity)}</td><td></td><td class="num">${fdate(c.GRPODate)}</td></tr>`;
+        }
       });
     }
   });
-  h+=`</tbody></table>`;
-  $('tbl').innerHTML=rows.length?h:'<div class="empty">No Ashok Leyland stock for this filter.</div>';
-  $('fcount').textContent=`${rows.length} rows · ${fMT(totMT)} MT · ${totCoils} coils`;
-  $('foot').textContent='Ashok Leyland stock — the AL item list wherever held (all warehouses). Coil number + received (GRPO) date from the batch records.';
+  h+=`</tbody></table></div></div>`;
+  return h;
+}
+
+function draw(){
+  const rows=filtered();
+  const coilRows=rows.filter(r=>isCoil(r.ItemName));
+  const cutRows =rows.filter(r=>!isCoil(r.ItemName));
+  const sum=rs=>rs.reduce((a,r)=>a+r.OnHand,0);
+  const cnt=rs=>rs.reduce((a,r)=>a+((COILS[key(r)]||[]).length),0);
+  let oldest=null; rows.forEach(r=>{const o=oldestOf(key(r)); if(o&&(!oldest||o<oldest))oldest=o;});
+
+  $('kpis').innerHTML=`
+    <div class="kpi"><div class="lab">Coil stock (MT)</div><div class="val">${fMT(sum(coilRows))}</div></div>
+    <div class="kpi"><div class="lab">Sheet + plate stock (MT)</div><div class="val">${fMT(sum(cutRows))}</div></div>
+    <div class="kpi"><div class="lab">Total on-hand (MT)</div><div class="val">${fMT(sum(rows))}</div></div>
+    <div class="kpi"><div class="lab">Oldest in</div><div class="val">${oldest?fdate(oldest):'—'}</div></div>`;
+
+  let html='';
+  html+=`<div class="sechead"><h2>Coils</h2><span class="sub">${coilRows.length} items · ${fMT(sum(coilRows))} MT · ${cnt(coilRows)} coils</span></div>`;
+  html+= coilRows.length ? sectionHtml(coilRows,false) : '<div class="card"><div class="empty">No coil stock for this filter.</div></div>';
+  html+=`<div class="sechead"><h2>Sheets &amp; Plates <span class="sub" style="font-weight:600">— showing source coil</span></h2><span class="sub">${cutRows.length} items · ${fMT(sum(cutRows))} MT · ${cnt(cutRows)} pieces</span></div>`;
+  html+= cutRows.length ? sectionHtml(cutRows,true) : '<div class="card"><div class="empty">No sheet / plate stock for this filter.</div></div>';
+  $('sections').innerHTML=html;
+
+  $('fcount').textContent=`${rows.length} rows · ${fMT(sum(rows))} MT`;
+  $('foot').textContent='Ashok Leyland stock — the AL item list across all warehouses. Coils show the mill coil number; sheets & plates show the source coil they were cut from (SAP batch records).';
 }
 function toggle(k){ if(EXPANDED.has(k))EXPANDED.delete(k); else EXPANDED.add(k); draw(); }
 load();
