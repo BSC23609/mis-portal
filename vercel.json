@@ -70,6 +70,14 @@
     {
       "path": "/api/plan-cron",
       "schedule": "0 4 * * *"
+    },
+    {
+      "path": "/api/am-cron",
+      "schedule": "31 4 * * *"
+    },
+    {
+      "path": "/api/jw-cron",
+      "schedule": "1 13 * * *"
     }
   ],
   "headers": [
