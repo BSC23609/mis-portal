@@ -2503,24 +2503,25 @@ async function alStockModel(){
   const [stockTxt, coilsTxt] = await Promise.all([g("al_stock.csv"), g("al_coils.csv")]);
   const stock = parseCsvSrv(stockTxt), coils = parseCsvSrv(coilsTxt);
   const num = v => parseFloat(v)||0;
-  const isCoil = n => /COIL/i.test(n||"");
+  const catOf = n => /COIL/i.test(n||"") ? "coil" : (/PLATE/i.test(n||"") ? "plate" : "sheet");
   const pieceCount = {}; coils.forEach(c=>{ const k=c.ItemName||""; pieceCount[k]=(pieceCount[k]||0)+1; });
-  function group(filterFn){
+  function group(cat){
     const gg = {};
-    stock.filter(r=>filterFn(r.ItemName)).forEach(r=>{
+    stock.filter(r=>catOf(r.ItemName)===cat).forEach(r=>{
       const k = r.ItemName||"";
       const o = gg[k] ??= { name:k, grade:r.Grade||"", thk:num(r.Thickness), wid:num(r.Width), mt:0 };
       o.mt += num(r.OnHand);
     });
-    return Object.values(gg).map(o=>({ ...o, n: pieceCount[o.name]||0 })).sort((a,b)=>b.mt-a.mt);
+    // ascending: thickness → width → qty
+    return Object.values(gg).map(o=>({ ...o, n: pieceCount[o.name]||0 }))
+      .sort((a,b)=> (a.thk-b.thk) || (a.wid-b.wid) || (a.mt-b.mt));
   }
-  const coilItems = group(isCoil);
-  const cutItems  = group(n=>!isCoil(n));
-  const coilMt = coilItems.reduce((a,r)=>a+r.mt,0), cutMt = cutItems.reduce((a,r)=>a+r.mt,0);
-  const coilN  = coilItems.reduce((a,r)=>a+r.n,0),  cutN  = cutItems.reduce((a,r)=>a+r.n,0);
+  const coilItems = group("coil"), plateItems = group("plate"), sheetItems = group("sheet");
+  const tot = arr => ({ mt: arr.reduce((a,r)=>a+r.mt,0), n: arr.reduce((a,r)=>a+r.n,0) });
+  const coilT = tot(coilItems), plateT = tot(plateItems), sheetT = tot(sheetItems);
   const asof = new Date().toLocaleString("en-IN",{day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit",timeZone:"Asia/Kolkata"});
   const dateDMY = new Date().toLocaleDateString("en-GB",{day:"2-digit",month:"2-digit",year:"numeric",timeZone:"Asia/Kolkata"});
-  return { coilItems, cutItems, coilMt, cutMt, coilN, cutN, asof, dateDMY };
+  return { coilItems, plateItems, sheetItems, coilT, plateT, sheetT, totalMt: coilT.mt+plateT.mt+sheetT.mt, asof, dateDMY };
 }
 function alStockSvg(M){
   const els=[];
@@ -2556,16 +2557,17 @@ function alStockSvg(M){
   rect(0,0,W,36,"#2f9fe0"); txt(W/2,24,"ASHOK LEYLAND — STOCK AT BHARAT STEEL (CHENNAI)",{size:18,bold:true,fill:"#ffffff",anchor:"middle"});
   let y=50;
   rect(L,y,210,27,"#ffe08a"); txt(L+105,y+18,"As on "+M.dateDMY,{size:14,bold:true,fill:"#5a4500",anchor:"middle"});
-  txt(W-L, y+18, "Total "+f3IN(M.coilMt+M.cutMt)+" MT", {size:14,bold:true,fill:"#0e2a47",anchor:"end"}); y+=40;
-  // Coils
-  const coilRows = M.coilItems.map(r=>({v:[r.name, r.grade, dimT(r.thk), dimW(r.wid), f3IN(r.mt), r.n||""]}))
-    .concat([{v:["Grand Total","","","",f3IN(M.coilMt),M.coilN||""],gt:true}]);
-  y = drawTable(L, y, "COILS  ("+M.coilItems.length+" items · "+f3IN(M.coilMt)+" MT · "+M.coilN+" coils)", cols("Coils"), coilRows.length?coilRows:[{v:["No coil stock.","","","","",""]}]);
-  y += 18;
-  // Sheets & Plates
-  const cutRows = M.cutItems.map(r=>({v:[r.name, r.grade, dimT(r.thk), dimW(r.wid), f3IN(r.mt), r.n||""]}))
-    .concat([{v:["Grand Total","","","",f3IN(M.cutMt),M.cutN||""],gt:true}]);
-  y = drawTable(L, y, "SHEETS & PLATES  ("+M.cutItems.length+" items · "+f3IN(M.cutMt)+" MT · "+M.cutN+" pieces)", cols("Pieces"), cutRows.length?cutRows:[{v:["No sheet / plate stock.","","","","",""]}]);
+  txt(W-L, y+18, "Total "+f3IN(M.totalMt)+" MT", {size:14,bold:true,fill:"#0e2a47",anchor:"end"}); y+=40;
+  function section(title, items, T, cntLabel, unitWord, emptyMsg){
+    const rows = items.map(r=>({v:[r.name, r.grade, dimT(r.thk), dimW(r.wid), f3IN(r.mt), r.n||""]}))
+      .concat([{v:["Grand Total","","","",f3IN(T.mt),T.n||""],gt:true}]);
+    return drawTable(L, y, title+"  ("+items.length+" items · "+f3IN(T.mt)+" MT · "+T.n+" "+unitWord+")",
+      cols(cntLabel), items.length?rows:[{v:[emptyMsg,"","","","",""]}]);
+  }
+  // 1. Coils  2. Plates  3. Sheets  (each ascending thk → width → qty)
+  y = section("COILS",  M.coilItems,  M.coilT,  "Coils",  "coils",  "No coil stock.");  y += 18;
+  y = section("PLATES", M.plateItems, M.plateT, "Pieces", "pieces", "No plate stock."); y += 18;
+  y = section("SHEETS", M.sheetItems, M.sheetT, "Pieces", "pieces", "No sheet stock.");
   const H = y+28;
   txt(L, H-10, "Computer-generated report - may contain mistakes.  Bharat Steel (Chennai) Pvt. Ltd. · info@bharatsteels.in  ·  As on "+M.asof, {size:9,fill:"#999"});
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><rect width="${W}" height="${H}" fill="#ffffff"/>${els.join("")}</svg>`;

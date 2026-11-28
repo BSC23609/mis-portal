@@ -42,6 +42,7 @@
     <select id="wid" onchange="draw()"><option value="">All width</option></select>
     <select id="grd" onchange="draw()"><option value="">All grade</option></select>
     <select id="sort" onchange="draw()">
+      <option value="dim">Sort: Thickness → Width → Qty ↑</option>
       <option value="mt">Sort: On-hand ↓</option>
       <option value="age">Sort: Oldest coil ↓</option>
       <option value="name">Sort: Item A–Z</option>
@@ -58,6 +59,9 @@ const EXPANDED=new Set();
 const fMT=n=>f3(n||0);
 const key=r=>r.ItemCode+'|'+r.WhsCode;
 const isCoil=n=>/COIL/i.test(n||'');
+const isPlate=n=>/PLATE/i.test(n||'');
+// category: 'coil' | 'plate' | 'sheet' (sheet = everything that is neither coil nor plate: SHEET, CTL, FLAT…)
+const catOf=n=>isCoil(n)?'coil':(isPlate(n)?'plate':'sheet');
 function fdate(s){if(!s)return '';const m=String(s).slice(0,10).match(/^(\d{4})-(\d{2})-(\d{2})/);if(!m)return esc(String(s));const M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];return `${m[3]}-${M[+m[2]-1]}-${m[1].slice(2)}`;}
 
 async function load(){
@@ -125,7 +129,8 @@ function flatSectionHtml(rows, coilLabel, emptyMsg){
   const sort=$('sort').value;
   pieces.sort((a,b)=> sort==='name'? (a.ItemName.localeCompare(b.ItemName) || String(a.CoilNo).localeCompare(String(b.CoilNo)))
     : sort==='age'? String(a.GRPODate||'9').localeCompare(String(b.GRPODate||'9'))
-    : b.Quantity-a.Quantity);
+    : sort==='mt'? b.Quantity-a.Quantity
+    : /* dim: thickness ↑, then width ↑, then qty ↑ */ ((a.T||0)-(b.T||0)) || ((a.W||0)-(b.W||0)) || ((a.Quantity||0)-(b.Quantity||0)));
   let h=`<div class="card"><div class="tblwrap scroll"><table class="altbl cuttbl"><colgroup><col class="c-item"><col class="c-whs"><col class="c-src"><col class="c-grd"><col class="c-thk"><col class="c-wid"><col class="c-mt"><col class="c-old"></colgroup><thead><tr><th>Item</th><th class="whs">Whs</th><th class="src">${coilLabel}</th><th>Grade</th><th class="num">Thick</th><th class="num">Width</th><th class="num">Qty (MT)</th><th class="num">Received</th></tr></thead><tbody>`;
   pieces.forEach(c=>{
     h+=`<tr><td>${esc(c.ItemName)}<div class="muted">${esc(c.ItemCode)}</div></td><td class="whs">${esc(c.WhsCode)}</td><td class="src"><b>${esc(c.CoilNo||'—')}</b>${c.BatchNum?`<div class="muted">batch ${esc(c.BatchNum)}</div>`:''}</td><td class="muted">${esc(c.Grade)}</td><td class="num">${c.T||''}</td><td class="num">${c.W||''}</td><td class="num"><b>${fMT(c.Quantity)}</b></td><td class="num">${fdate(c.GRPODate)}</td></tr>`;
@@ -136,27 +141,32 @@ function flatSectionHtml(rows, coilLabel, emptyMsg){
 
 function draw(){
   const rows=filtered();
-  const coilRows=rows.filter(r=>isCoil(r.ItemName));
-  const cutRows =rows.filter(r=>!isCoil(r.ItemName));
+  const coilRows =rows.filter(r=>catOf(r.ItemName)==='coil');
+  const plateRows=rows.filter(r=>catOf(r.ItemName)==='plate');
+  const sheetRows=rows.filter(r=>catOf(r.ItemName)==='sheet');
   const sum=rs=>rs.reduce((a,r)=>a+r.OnHand,0);
   const cnt=rs=>rs.reduce((a,r)=>a+((COILS[key(r)]||[]).length),0);
-  let oldest=null; rows.forEach(r=>{const o=oldestOf(key(r)); if(o&&(!oldest||o<oldest))oldest=o;});
 
   $('kpis').innerHTML=`
     <div class="kpi"><div class="lab">Coil stock (MT)</div><div class="val">${fMT(sum(coilRows))}</div></div>
-    <div class="kpi"><div class="lab">Sheet + plate stock (MT)</div><div class="val">${fMT(sum(cutRows))}</div></div>
-    <div class="kpi"><div class="lab">Total on-hand (MT)</div><div class="val">${fMT(sum(rows))}</div></div>
-    <div class="kpi"><div class="lab">Oldest in</div><div class="val">${oldest?fdate(oldest):'—'}</div></div>`;
+    <div class="kpi"><div class="lab">Plate stock (MT)</div><div class="val">${fMT(sum(plateRows))}</div></div>
+    <div class="kpi"><div class="lab">Sheet stock (MT)</div><div class="val">${fMT(sum(sheetRows))}</div></div>
+    <div class="kpi"><div class="lab">Total on-hand (MT)</div><div class="val">${fMT(sum(rows))}</div></div>`;
 
   let html='';
+  // 1. Coils
   html+=`<div class="sechead"><h2>Coils</h2><span class="sub">${coilRows.length} items · ${fMT(sum(coilRows))} MT · ${cnt(coilRows)} coils</span></div>`;
   html+= coilRows.length ? flatSectionHtml(coilRows,'Coil No','No coil stock for this filter.') : '<div class="card"><div class="empty">No coil stock for this filter.</div></div>';
-  html+=`<div class="sechead"><h2>Sheets &amp; Plates <span class="sub" style="font-weight:600">— each piece with its source coil</span></h2><span class="sub">${cutRows.length} items · ${fMT(sum(cutRows))} MT · ${cnt(cutRows)} pieces</span></div>`;
-  html+= cutRows.length ? flatSectionHtml(cutRows,'Source coil','No sheet / plate stock for this filter.') : '<div class="card"><div class="empty">No sheet / plate stock for this filter.</div></div>';
+  // 2. Plates
+  html+=`<div class="sechead"><h2>Plates <span class="sub" style="font-weight:600">— each piece with its source coil</span></h2><span class="sub">${plateRows.length} items · ${fMT(sum(plateRows))} MT · ${cnt(plateRows)} pieces</span></div>`;
+  html+= plateRows.length ? flatSectionHtml(plateRows,'Source coil','No plate stock for this filter.') : '<div class="card"><div class="empty">No plate stock for this filter.</div></div>';
+  // 3. Sheets
+  html+=`<div class="sechead"><h2>Sheets <span class="sub" style="font-weight:600">— each piece with its source coil</span></h2><span class="sub">${sheetRows.length} items · ${fMT(sum(sheetRows))} MT · ${cnt(sheetRows)} pieces</span></div>`;
+  html+= sheetRows.length ? flatSectionHtml(sheetRows,'Source coil','No sheet stock for this filter.') : '<div class="card"><div class="empty">No sheet stock for this filter.</div></div>';
   $('sections').innerHTML=html;
 
   $('fcount').textContent=`${rows.length} rows · ${fMT(sum(rows))} MT`;
-  $('foot').textContent='Ashok Leyland stock — the AL item list across all warehouses. Coils show the mill coil number; sheets & plates show the source coil they were cut from (SAP batch records).';
+  $('foot').textContent='Ashok Leyland stock — the AL item list across all warehouses. Coils show the mill coil number; plates & sheets show the source coil they were cut from (SAP batch records).';
 }
 function toggle(k){ if(EXPANDED.has(k))EXPANDED.delete(k); else EXPANDED.add(k); draw(); }
 load();
