@@ -352,24 +352,38 @@ async function loadData() {
       if (!days.length) { lu.textContent = '—'; banner.style.display = 'none'; return; }
       const MN = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
       const fmt = d => `${String(d.getDate()).padStart(2,'0')}-${MN[d.getMonth()]}-${String(d.getFullYear()).slice(-2)}`;
+      const fmtT = d => fmt(d)+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
       const latest = new Date(Math.max.apply(null, days));
       const today  = new Date(now.getFullYear(), now.getMonth(), now.getDate());
       lu.textContent = fmt(latest);
-      // Stale only when a whole PRIOR working day (Mon-Sat) has passed with no data. Today's own
-      // passes arriving later in the day is normal, so we never flag just because today isn't in yet.
+      // last working day before today (skip Sunday)
       let lwd = new Date(today);
-      do { lwd.setDate(lwd.getDate() - 1); } while (lwd.getDay() === 0); // last working day before today (skip Sunday)
-      if (latest < lwd) {
-        const gap = Math.round((today - latest) / 86400000);
-        banner.innerHTML = '⚠ Weighment feed looks stale — the last pass on record is <b>' + fmt(latest) +
-          '</b> (' + gap + ' day' + (gap === 1 ? '' : 's') + ' ago) and nothing newer has come in. ' +
-          'The upload job on the server has most likely stopped — it needs restarting.';
-        banner.style.display = 'block';
-        lu.style.color = '#b42318';
-      } else {
-        banner.style.display = 'none';
-        lu.style.color = '';
-      }
+      do { lwd.setDate(lwd.getDate() - 1); } while (lwd.getDay() === 0);
+      const gap = Math.round((today - latest) / 86400000);
+      const dataOld = latest < lwd;
+      // A stale weighment DATE means one of two very different things: the feed stopped, OR the feed is
+      // fine but no new passes were recorded. Tell them apart with the feed's own heartbeat — mis_meta.json
+      // 'generated', which refresh_stock rewrites every run. Only blame the server when the feed itself
+      // has actually gone quiet; otherwise say plainly that the feed is live and the gap is on the data side.
+      const META_URL = 'https://raw.githubusercontent.com/BSC23609/bsc-stock-data/main/mis_meta.json';
+      const RED={bg:'#fef3f2',bd:'#f5c6c2',fg:'#b42318'}, AMBER={bg:'#fffaeb',bd:'#f5d790',fg:'#a65d00'};
+      const show = (html,c) => { banner.innerHTML=html; banner.style.display='block';
+        banner.style.background=c.bg; banner.style.borderColor=c.bd; banner.style.color=c.fg; lu.style.color=c.fg; };
+      const hide = () => { banner.style.display='none'; lu.style.color=''; };
+      fetch(META_URL+'?t='+Date.now()).then(r=>r.ok?r.json():null).catch(()=>null).then(meta=>{
+        const gen = (meta && meta.generated) ? new Date(meta.generated) : null;
+        const feedMin = gen ? Math.round((Date.now()-gen.getTime())/60000) : null;
+        if (gen && feedMin <= 45) {
+          if (dataOld) show('&#9432; Feed is live (last refresh <b>'+fmtT(gen)+'</b>), but no weighbridge pass has been recorded since <b>'+fmt(latest)+'</b> ('+gap+' day'+(gap===1?'':'s')+'). If trucks have moved since, check that weighments are being entered in SAP &mdash; otherwise it has simply been quiet.', AMBER);
+          else hide();
+        } else if (gen && feedMin > 45) {
+          const hrs = Math.floor(feedMin/60);
+          show('&#9888; The SAP data feed has not refreshed since <b>'+fmtT(gen)+'</b> ('+(hrs?hrs+'h ':'')+(feedMin%60)+'m ago) &mdash; the upload job on the server has most likely stopped and needs restarting.', RED);
+        } else {
+          if (dataOld) show('&#9888; No weighbridge pass on record since <b>'+fmt(latest)+'</b> ('+gap+' day'+(gap===1?'':'s')+' ago). If dispatches have happened since, the upload job on the server may have stalled &mdash; check the feed.', RED);
+          else hide();
+        }
+      });
     })();
 
     statusEl.innerText = `Data loaded · ${rows.length} rows`;
