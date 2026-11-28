@@ -38,6 +38,10 @@
       "destination": "/api/index?route=wheels&fmt=alpng"
     },
     {
+      "source": "/al-stock-:v(\\d+).png",
+      "destination": "/api/index?route=wheels&fmt=alpng"
+    },
+    {
       "source": "/api/al-cron",
       "destination": "/api/index?route=wheels&fmt=alcron"
     },

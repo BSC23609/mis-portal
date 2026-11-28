@@ -998,7 +998,7 @@ async function alSendWa(req){
   const nums=recipientMobiles(recips,'al_wa');
   if(!nums.length){ await logSend({report:'al_stock',channel:'whatsapp',status:'skipped',detail:'no recipients ticked for Ashok Leyland WhatsApp'}); return {skipped:'no whatsapp recipients'}; }
   const base=(process.env.PUBLIC_URL||`https://${req.headers.host}`).replace(/\/$/,"");
-  const url=base+"/al-stock.png?d="+imgStamp();
+  const url=base+"/al-stock-"+Date.now()+".png";   // stamp in the PATH so Meta/WATI can't serve a path-cached old image
   await renderAndCachePng("al").catch(()=>{});
   const sent=[];
   for(const num of nums){ try{ const r=await sendRetry(num,tmpl,[{name:"report",value:url},{name:"1",value:waToday()}]); sent.push({num,...(r||{ok:true})}); }catch(e){ sent.push({num,error:String(e.message||e)}); } }
@@ -1381,7 +1381,7 @@ async function handlerWheels(req, res){
                 await logSend({report:'al_stock',channel:'email',status:'ok',total:to.length,ok:to.length,fail:0,detail:'Send now: '+to.length+' recipient(s): '+to.join(', ')});
                 out.email={ sent_to:to }; }
             } catch(e){ out.email={ error:String(e.message||e) }; }
-            out.whatsapp=await waBlast("AL_WA_TEMPLATE","al_wa","/al-stock.png","al","al_stock","now").catch(e=>({error:String(e.message||e)}));
+            out.whatsapp=await waBlast("AL_WA_TEMPLATE","al_wa","/al-stock-"+Date.now()+".png","al","al_stock","now").catch(e=>({error:String(e.message||e)}));
           } else if (rep==='pp'){
             const M=await planModel();
             out.email=await planSendUpdatedEmail(req, M).catch(e=>({error:String(e.message||e)}));
@@ -1586,7 +1586,7 @@ async function handlerWheels(req, res){
         if (!num) { const recips = await wheelsRecipients(); num = recipientMobiles(recips, "al_wa")[0] || ""; }
         if (!num) return json(res, 200, { ok: true, skipped: "no test number (enter one or tick an Ashok Leyland WhatsApp recipient first)" });
         const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
-        const url = base + "/al-stock.png?d=" + imgStamp();
+        const url = base + "/al-stock-" + Date.now() + ".png";   // path-level cache-buster (Meta/WATI ignores ?query)
         await renderAndCachePng("al").catch(()=>{});
         const sent = [];
         try { const r = await send(num, tmpl, [{ name: "report", value: url }, { name: "1", value: waToday() }]); sent.push({ num, ...(r || { ok: true }) }); } catch (e) { sent.push({ num, error: String(e.message || e) }); }
