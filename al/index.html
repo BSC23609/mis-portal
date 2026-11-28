@@ -11,7 +11,7 @@
     <input type="search" id="q" placeholder="Search item, coil no, grade…" oninput="draw()"/>
     <select id="thk" onchange="draw()"><option value="">All thickness</option></select>
     <select id="wid" onchange="draw()"><option value="">All width</option></select>
-    <select id="grade" onchange="draw()"><option value="">All grades</option></select>
+    <select id="grd" onchange="draw()"><option value="">All grade</option></select>
     <select id="sort" onchange="draw()">
       <option value="mt">Sort: On-hand ↓</option>
       <option value="age">Sort: Oldest coil ↓</option>
@@ -24,47 +24,48 @@
 </div>
 <script src="../_portal.js"></script>
 <script>
-let STOCK=[], COILS=[], byItem={};
+let STOCK=[], COILS={};
 const EXPANDED=new Set();
-const DBASE='https://raw.githubusercontent.com/BSC23609/bsc-stock-data/main';
+const fMT=n=>f3(n||0);
 function fdate(s){if(!s)return '';const m=String(s).slice(0,10).match(/^(\d{4})-(\d{2})-(\d{2})/);if(!m)return esc(String(s));const M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];return `${m[3]}-${M[+m[2]-1]}-${m[1].slice(2)}`;}
-const nz=v=>(v==null?'':v);
+const sz = (t,w) => (t||'?')+' × '+(w||'?');
 
 async function load(){
   let st='', co='';
-  try{ const r=await fetch(DBASE+'/al_stock.csv?t='+Date.now()); if(!r.ok) throw 0; st=await r.text(); }
-  catch(e){ $('errbox').innerHTML='<div class="err">No <b>al_stock.csv</b> published yet. Run <code>refresh_al.ps1</code> on the SAP box to generate it, then reload.</div>'; if(window.setStamp)setStamp(); return; }
-  try{ const r=await fetch(DBASE+'/al_coils.csv?t='+Date.now()); co=r.ok?await r.text():''; }catch(e){ co=''; }
+  try{
+    const [a,b]=await Promise.all([
+      fetch(DATA_BASE+'/al_stock.csv?t='+Date.now()),
+      fetch(DATA_BASE+'/al_coils.csv?t='+Date.now())
+    ]);
+    if(!a.ok) throw 0;
+    st=await a.text(); co=b.ok?await b.text():'';
+  }catch(e){ $('errbox').innerHTML='<div class="err">No <b>al_stock.csv</b> published yet. Run <code>refresh_al.ps1</code> on the SAP box to generate it, then reload.</div>'; setStamp(); return; }
   STOCK=parseCSV(st).map(r=>({...r, OnHand:num(r.OnHand), Committed:num(r.Committed), T:num(r.Thickness), W:num(r.Width)}));
-  COILS=parseCSV(co).map(r=>({...r, Quantity:num(r.Quantity), GRPODate:nz(r.GRPODate)}));
-  byItem={}; COILS.forEach(c=>{ (byItem[c.ItemCode]??=[]).push(c); });
-  const thks=[...new Set(STOCK.map(r=>r.T).filter(v=>v))].sort((a,b)=>a-b);
-  const wids=[...new Set(STOCK.map(r=>r.W).filter(v=>v))].sort((a,b)=>a-b);
-  const grs =[...new Set(STOCK.map(r=>r.Grade).filter(Boolean))].sort();
+  COILS={};
+  parseCSV(co).forEach(r=>{ const c={...r, Quantity:num(r.Quantity)}; (COILS[r.ItemCode]??=[]).push(c); });
+  const thks=[...new Set(STOCK.map(r=>r.T).filter(v=>v||v===0))].sort((a,b)=>a-b);
+  const wids=[...new Set(STOCK.map(r=>r.W).filter(v=>v||v===0))].sort((a,b)=>a-b);
+  const grds=[...new Set(STOCK.map(r=>r.Grade).filter(Boolean))].sort();
   $('thk').innerHTML='<option value="">All thickness</option>'+thks.map(t=>`<option>${t}</option>`).join('');
   $('wid').innerHTML='<option value="">All width</option>'+wids.map(w=>`<option>${w}</option>`).join('');
-  $('grade').innerHTML='<option value="">All grades</option>'+grs.map(g=>`<option>${esc(g)}</option>`).join('');
-  if(window.setStamp)setStamp();
+  $('grd').innerHTML='<option value="">All grade</option>'+grds.map(g=>`<option>${esc(g)}</option>`).join('');
+  setStamp();
   draw();
 }
 
-function coilAgeOldest(code){
-  const cs=byItem[code]||[]; let min=null;
-  cs.forEach(c=>{ if(c.GRPODate){ if(!min||c.GRPODate<min)min=c.GRPODate; } });
-  return min;
+function oldestOf(code){
+  const cs=COILS[code]||[]; let o=null;
+  cs.forEach(c=>{ if(c.GRPODate && (!o || c.GRPODate<o)) o=c.GRPODate; });
+  return o;
 }
-
 function filtered(){
-  const q=$('q').value.trim().toLowerCase(), t=$('thk').value, w=$('wid').value, g=$('grade').value;
+  const q=$('q').value.trim().toLowerCase(), t=$('thk').value, w=$('wid').value, g=$('grd').value;
   return STOCK.filter(r=>{
     if(t && String(r.T)!==t) return false;
     if(w && String(r.W)!==w) return false;
     if(g && r.Grade!==g) return false;
-    if(q){
-      const inItem=[r.ItemName,r.ItemCode,r.Grade].some(v=>(v||'').toLowerCase().includes(q));
-      const inCoil=(byItem[r.ItemCode]||[]).some(c=>(c.CoilNo||'').toLowerCase().includes(q)||(c.BatchNum||'').toLowerCase().includes(q));
-      if(!inItem && !inCoil) return false;
-    }
+    if(q){ const coilHit=(COILS[r.ItemCode]||[]).some(c=>(c.CoilNo||'').toLowerCase().includes(q));
+      if(![r.ItemName,r.ItemCode,r.Grade].some(v=>(v||'').toLowerCase().includes(q)) && !coilHit) return false; }
     return true;
   });
 }
@@ -72,43 +73,35 @@ function filtered(){
 function draw(){
   let rows=filtered();
   const sort=$('sort').value;
-  rows=rows.slice().sort((a,b)=>{
-    if(sort==='name') return a.ItemName.localeCompare(b.ItemName);
-    if(sort==='age'){ const ao=coilAgeOldest(a.ItemCode)||'9999', bo=coilAgeOldest(b.ItemCode)||'9999'; return ao.localeCompare(bo); }
-    return b.OnHand-a.OnHand;
-  });
-  const totMT=rows.reduce((s,r)=>s+r.OnHand,0);
-  const totCoils=rows.reduce((s,r)=>s+((byItem[r.ItemCode]||[]).length),0);
-  let oldest=null; rows.forEach(r=>{ const o=coilAgeOldest(r.ItemCode); if(o&&(!oldest||o<oldest))oldest=o; });
+  rows.sort((a,b)=> sort==='name'?a.ItemName.localeCompare(b.ItemName)
+    : sort==='age'? String(oldestOf(a.ItemCode)||'9').localeCompare(String(oldestOf(b.ItemCode)||'9'))
+    : b.OnHand-a.OnHand);
+  const totMT=rows.reduce((a,r)=>a+r.OnHand,0);
+  const totCoils=rows.reduce((a,r)=>a+((COILS[r.ItemCode]||[]).length),0);
+  let oldest=null; rows.forEach(r=>{const o=oldestOf(r.ItemCode); if(o&&(!oldest||o<oldest))oldest=o;});
   $('kpis').innerHTML=`
     <div class="kpi"><div class="lab">Items in stock</div><div class="val">${rows.length}</div></div>
-    <div class="kpi"><div class="lab">On-hand (MT)</div><div class="val">${f3(totMT)}</div></div>
+    <div class="kpi"><div class="lab">On-hand (MT)</div><div class="val">${fMT(totMT)}</div></div>
     <div class="kpi"><div class="lab">Coils</div><div class="val">${totCoils}</div></div>
-    <div class="kpi"><div class="lab">Oldest coil in</div><div class="val">${oldest?fdate(oldest):'—'}</div></div>`;
+    <div class="kpi"><div class="lab">Oldest coil</div><div class="val">${oldest?fdate(oldest):'—'}</div></div>`;
 
-  let h=`<table><thead><tr><th>Item</th><th>Grade</th><th class="num">Thk</th><th class="num">Width</th><th class="num">On-hand (MT)</th><th class="num">Coils</th><th class="num">Oldest in</th></tr></thead><tbody>`;
+  let h=`<table><thead><tr><th>Item</th><th>Grade</th><th class="num">Thick</th><th class="num">Width</th><th class="num">On-hand (MT)</th><th class="num">Coils</th><th class="num">Oldest in</th></tr></thead><tbody>`;
   rows.forEach(r=>{
-    const cs=(byItem[r.ItemCode]||[]).slice().sort((a,b)=>String(a.GRPODate).localeCompare(String(b.GRPODate)));
+    const cs=(COILS[r.ItemCode]||[]).slice().sort((a,b)=>String(a.GRPODate||'').localeCompare(String(b.GRPODate||'')));
     const open=EXPANDED.has(r.ItemCode);
-    const old=coilAgeOldest(r.ItemCode);
-    h+=`<tr class="grp" onclick="toggle('${r.ItemCode.replace(/'/g,"\\'")}')"><td><span class="tw">${cs.length?(open?'▾':'▸'):'&nbsp;&nbsp;'}</span>${esc(r.ItemName)}<div class="muted">${esc(r.ItemCode)}</div></td><td class="muted">${esc(r.Grade)}</td><td class="num">${r.T||''}</td><td class="num">${r.W||''}</td><td class="num"><b>${f3(r.OnHand)}</b></td><td class="num">${cs.length||''}</td><td class="num">${old?fdate(old):''}</td></tr>`;
+    h+=`<tr class="grp" onclick="toggle('${r.ItemCode.replace(/'/g,"\\'")}')"><td><span class="tw">${cs.length?(open?'▾':'▸'):'&nbsp;'}</span>${esc(r.ItemName)}<div class="muted">${esc(r.ItemCode)}</div></td><td class="muted">${esc(r.Grade)}</td><td class="num">${r.T||''}</td><td class="num">${r.W||''}</td><td class="num"><b>${fMT(r.OnHand)}</b></td><td class="num">${cs.length||''}</td><td class="num">${fdate(oldestOf(r.ItemCode))}</td></tr>`;
     if(open && cs.length){
-      h+=`<tr class="sub"><td colspan="7"><table class="inner"><thead><tr><th>Coil No</th><th>Batch</th><th class="num">Qty (MT)</th><th class="num">Received (GRPO)</th></tr></thead><tbody>`+
-         cs.map(c=>`<tr><td><b>${esc(c.CoilNo||'—')}</b></td><td class="muted">${esc(c.BatchNum||'')}</td><td class="num">${f3(c.Quantity)}</td><td class="num">${fdate(c.GRPODate)||'—'}</td></tr>`).join('')+
-         `</tbody></table></td></tr>`;
+      cs.forEach(c=>{
+        h+=`<tr class="itm"><td>Coil <b>${esc(c.CoilNo||'—')}</b>${c.BatchNum?`<div class="muted">batch ${esc(c.BatchNum)}</div>`:''}</td><td class="muted" colspan="3">GRPO ${esc(c.GRPONo||'')}</td><td class="num">${fMT(c.Quantity)}</td><td></td><td class="num">${fdate(c.GRPODate)}</td></tr>`;
+      });
     }
   });
   h+=`</tbody></table>`;
-  $('tbl').innerHTML=rows.length?h:'<div class="empty">No Ashok Leyland stock matches this filter.</div>';
-  $('fcount').textContent=`${rows.length} items · ${f3(totMT)} MT · ${totCoils} coils`;
-  $('foot').textContent='Ashok Leyland job-work stock (WH 53) from SAP, with per-coil traceability — coil number and received (GRPO) date.';
+  $('tbl').innerHTML=rows.length?h:'<div class="empty">No Ashok Leyland stock in WH 53 for this filter.</div>';
+  $('fcount').textContent=`${rows.length} items · ${fMT(totMT)} MT · ${totCoils} coils`;
+  $('foot').textContent='Ashok Leyland job-work stock — AL item list held in WH 53 (AL-Job work). Coil number + received (GRPO) date from the batch records.';
 }
 function toggle(k){ if(EXPANDED.has(k))EXPANDED.delete(k); else EXPANDED.add(k); draw(); }
-
-/* minimal styles for the expanded inner coil table (portal skin covers the rest) */
-const _st=document.createElement('style');
-_st.textContent='.inner{width:100%;border-collapse:collapse;margin:2px 0 6px 0;background:#fafbfc} .inner th{font-size:11px;color:#667085;text-align:left;padding:4px 10px;border-bottom:1px solid #e4e7ec} .inner td{padding:4px 10px;border-bottom:1px solid #eef0f3;font-size:12px} .inner .num{text-align:right} tr.grp{cursor:pointer} tr.grp:hover{background:#f6f8fa} .tw{display:inline-block;width:14px;color:#98a2b3}';
-document.head.appendChild(_st);
 load();
 </script>
 </body></html>
