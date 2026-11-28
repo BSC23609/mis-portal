@@ -43,9 +43,9 @@
     <select id="wid" onchange="draw()"><option value="">All width</option></select>
     <select id="grd" onchange="draw()"><option value="">All grade</option></select>
     <select id="sort" onchange="draw()">
+      <option value="aging">Sort: Aging ↓ (oldest first)</option>
       <option value="dim">Sort: Thickness → Width → Qty ↑</option>
       <option value="mt">Sort: On-hand ↓</option>
-      <option value="age">Sort: Oldest coil ↓</option>
       <option value="name">Sort: Item A–Z</option>
     </select>
     <span class="fcount" id="fcount"></span>
@@ -130,11 +130,12 @@ function flatSectionHtml(rows, coilLabel, emptyMsg){
     });
   });
   const sort=$('sort').value;
+  const ag=x=>{const n=ageDays(x.GRPODate); return n==null?-1:n;};
   pieces.sort((a,b)=> sort==='name'? (a.ItemName.localeCompare(b.ItemName) || String(a.CoilNo).localeCompare(String(b.CoilNo)))
-    : sort==='age'? String(a.GRPODate||'9').localeCompare(String(b.GRPODate||'9'))
     : sort==='mt'? b.Quantity-a.Quantity
-    : /* dim: thickness ↑, then width ↑, then qty ↑ */ ((a.T||0)-(b.T||0)) || ((a.W||0)-(b.W||0)) || ((a.Quantity||0)-(b.Quantity||0)));
-  let h=`<div class="card"><div class="tblwrap scroll"><table class="altbl cuttbl"><colgroup><col class="c-item"><col class="c-whs"><col class="c-src"><col class="c-grd"><col class="c-thk"><col class="c-wid"><col class="c-mt"><col class="c-old"><col class="c-age"></colgroup><thead><tr><th>Item</th><th class="whs">Whs</th><th class="src">${coilLabel}</th><th>Grade</th><th class="num">Thick</th><th class="num">Width</th><th class="num">Qty (MT)</th><th class="num">Received</th><th class="num">Age</th></tr></thead><tbody>`;
+    : sort==='dim'? (((a.T||0)-(b.T||0)) || ((a.W||0)-(b.W||0)) || ((a.Quantity||0)-(b.Quantity||0)))
+    : /* aging: oldest (highest age) first; unknown dates last */ (ag(b)-ag(a)));
+  let h=`<div class="card"><div class="tblwrap scroll"><table class="altbl cuttbl"><colgroup><col class="c-item"><col class="c-whs"><col class="c-src"><col class="c-grd"><col class="c-thk"><col class="c-wid"><col class="c-mt"><col class="c-old"><col class="c-age"></colgroup><thead><tr><th>Item</th><th class="whs">Whs</th><th class="src">${coilLabel}</th><th>Grade</th><th class="num">Thick</th><th class="num">Width</th><th class="num">Qty (MT)</th><th class="num">Received</th><th class="num">Aging</th></tr></thead><tbody>`;
   pieces.forEach(c=>{
     h+=`<tr><td>${esc(c.ItemName)}<div class="muted">${esc(c.ItemCode)}</div></td><td class="whs">${esc(c.WhsCode)}</td><td class="src"><b>${esc(c.CoilNo||'—')}</b>${c.BatchNum?`<div class="muted">batch ${esc(c.BatchNum)}</div>`:''}</td><td class="muted">${esc(c.Grade)}</td><td class="num">${c.T||''}</td><td class="num">${c.W||''}</td><td class="num"><b>${fMT(c.Quantity)}</b></td><td class="num">${fdate(c.GRPODate)}</td><td class="num">${fage(c.GRPODate)}</td></tr>`;
   });
