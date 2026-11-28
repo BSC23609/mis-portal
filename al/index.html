@@ -14,14 +14,15 @@
   .altbl col.c-coil{width:9%}
   .altbl col.c-old{width:12%}
   /* flat cut (sheets & plates) column widths */
-  .cuttbl col.c-item{width:26%}
-  .cuttbl col.c-whs{width:6%}
-  .cuttbl col.c-src{width:18%}
-  .cuttbl col.c-grd{width:14%}
-  .cuttbl col.c-thk{width:8%}
-  .cuttbl col.c-wid{width:8%}
-  .cuttbl col.c-mt{width:11%}
+  .cuttbl col.c-item{width:24%}
+  .cuttbl col.c-whs{width:5%}
+  .cuttbl col.c-src{width:17%}
+  .cuttbl col.c-grd{width:13%}
+  .cuttbl col.c-thk{width:7%}
+  .cuttbl col.c-wid{width:7%}
+  .cuttbl col.c-mt{width:10%}
   .cuttbl col.c-old{width:9%}
+  .cuttbl col.c-age{width:8%}
   .cuttbl td.src,.cuttbl th.src{text-align:left;font-family:var(--mono)}
   .cuttbl td.src b{color:var(--ink)}
   .altbl th.whs,.altbl td.whs{text-align:left;font-family:var(--mono)}
@@ -63,6 +64,8 @@ const isPlate=n=>/PLATE/i.test(n||'');
 // category: 'coil' | 'plate' | 'sheet' (sheet = everything that is neither coil nor plate: SHEET, CTL, FLAT…)
 const catOf=n=>isCoil(n)?'coil':(isPlate(n)?'plate':'sheet');
 function fdate(s){if(!s)return '';const m=String(s).slice(0,10).match(/^(\d{4})-(\d{2})-(\d{2})/);if(!m)return esc(String(s));const M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];return `${m[3]}-${M[+m[2]-1]}-${m[1].slice(2)}`;}
+function ageDays(s){if(!s)return null;const m=String(s).slice(0,10).match(/^(\d{4})-(\d{2})-(\d{2})/);if(!m)return null;const d=new Date(+m[1],+m[2]-1,+m[3]);const t=new Date();const d0=Date.UTC(t.getFullYear(),t.getMonth(),t.getDate())-Date.UTC(d.getFullYear(),d.getMonth(),d.getDate());const n=Math.round(d0/86400000);return n>=0?n:null;}
+function fage(s){const n=ageDays(s);return n==null?'':n+' d';}
 
 async function load(){
   let st='', co='';
@@ -131,9 +134,9 @@ function flatSectionHtml(rows, coilLabel, emptyMsg){
     : sort==='age'? String(a.GRPODate||'9').localeCompare(String(b.GRPODate||'9'))
     : sort==='mt'? b.Quantity-a.Quantity
     : /* dim: thickness ↑, then width ↑, then qty ↑ */ ((a.T||0)-(b.T||0)) || ((a.W||0)-(b.W||0)) || ((a.Quantity||0)-(b.Quantity||0)));
-  let h=`<div class="card"><div class="tblwrap scroll"><table class="altbl cuttbl"><colgroup><col class="c-item"><col class="c-whs"><col class="c-src"><col class="c-grd"><col class="c-thk"><col class="c-wid"><col class="c-mt"><col class="c-old"></colgroup><thead><tr><th>Item</th><th class="whs">Whs</th><th class="src">${coilLabel}</th><th>Grade</th><th class="num">Thick</th><th class="num">Width</th><th class="num">Qty (MT)</th><th class="num">Received</th></tr></thead><tbody>`;
+  let h=`<div class="card"><div class="tblwrap scroll"><table class="altbl cuttbl"><colgroup><col class="c-item"><col class="c-whs"><col class="c-src"><col class="c-grd"><col class="c-thk"><col class="c-wid"><col class="c-mt"><col class="c-old"><col class="c-age"></colgroup><thead><tr><th>Item</th><th class="whs">Whs</th><th class="src">${coilLabel}</th><th>Grade</th><th class="num">Thick</th><th class="num">Width</th><th class="num">Qty (MT)</th><th class="num">Received</th><th class="num">Age</th></tr></thead><tbody>`;
   pieces.forEach(c=>{
-    h+=`<tr><td>${esc(c.ItemName)}<div class="muted">${esc(c.ItemCode)}</div></td><td class="whs">${esc(c.WhsCode)}</td><td class="src"><b>${esc(c.CoilNo||'—')}</b>${c.BatchNum?`<div class="muted">batch ${esc(c.BatchNum)}</div>`:''}</td><td class="muted">${esc(c.Grade)}</td><td class="num">${c.T||''}</td><td class="num">${c.W||''}</td><td class="num"><b>${fMT(c.Quantity)}</b></td><td class="num">${fdate(c.GRPODate)}</td></tr>`;
+    h+=`<tr><td>${esc(c.ItemName)}<div class="muted">${esc(c.ItemCode)}</div></td><td class="whs">${esc(c.WhsCode)}</td><td class="src"><b>${esc(c.CoilNo||'—')}</b>${c.BatchNum?`<div class="muted">batch ${esc(c.BatchNum)}</div>`:''}</td><td class="muted">${esc(c.Grade)}</td><td class="num">${c.T||''}</td><td class="num">${c.W||''}</td><td class="num"><b>${fMT(c.Quantity)}</b></td><td class="num">${fdate(c.GRPODate)}</td><td class="num">${fage(c.GRPODate)}</td></tr>`;
   });
   h+=`</tbody></table></div></div>`;
   return pieces.length ? h : '<div class="card"><div class="empty">'+emptyMsg+'</div></div>';
