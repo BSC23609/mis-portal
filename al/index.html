@@ -3,6 +3,19 @@
 <title>Ashok Leyland — Bharat Steel MIS</title>
 <link rel="icon" type="image/png" href="../stock/BSC.png"/>
 <script>window.PORTAL={module:'al'}</script>
+<style>
+  #tbl table{table-layout:fixed}
+  #tbl col.c-item{width:26%}
+  #tbl col.c-whs{width:6%}
+  #tbl col.c-grd{width:15%}
+  #tbl col.c-thk{width:8%}
+  #tbl col.c-wid{width:9%}
+  #tbl col.c-mt{width:14%}
+  #tbl col.c-coil{width:8%}
+  #tbl col.c-old{width:14%}
+  #tbl th.whs,#tbl td.whs{text-align:left;font-family:var(--mono)}
+  #tbl td:first-child,#tbl td .muted{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+</style>
 </head><body>
 <div class="pw">
   <div id="errbox"></div>
@@ -90,14 +103,14 @@ function draw(){
     <div class="kpi"><div class="lab">Coils</div><div class="val">${totCoils}</div></div>
     <div class="kpi"><div class="lab">Oldest coil</div><div class="val">${oldest?fdate(oldest):'—'}</div></div>`;
 
-  let h=`<table><thead><tr><th>Item</th><th class="num">Whs</th><th>Grade</th><th class="num">Thick</th><th class="num">Width</th><th class="num">On-hand (MT)</th><th class="num">Coils</th><th class="num">Oldest in</th></tr></thead><tbody>`;
+  let h=`<table><colgroup><col class="c-item"><col class="c-whs"><col class="c-grd"><col class="c-thk"><col class="c-wid"><col class="c-mt"><col class="c-coil"><col class="c-old"></colgroup><thead><tr><th>Item</th><th class="whs">Whs</th><th>Grade</th><th class="num">Thick</th><th class="num">Width</th><th class="num">On-hand (MT)</th><th class="num">Coils</th><th class="num">Oldest in</th></tr></thead><tbody>`;
   rows.forEach(r=>{
     const cs=(COILS[key(r)]||[]).slice().sort((a,b)=>String(a.GRPODate||'').localeCompare(String(b.GRPODate||'')));
     const open=EXPANDED.has(key(r));
-    h+=`<tr class="grp" onclick="toggle('${key(r).replace(/'/g,"\\'")}')"><td><span class="tw">${cs.length?(open?'▾':'▸'):'&nbsp;'}</span>${esc(r.ItemName)}<div class="muted">${esc(r.ItemCode)}</div></td><td class="num">${esc(r.WhsCode)}</td><td class="muted">${esc(r.Grade)}</td><td class="num">${r.T||''}</td><td class="num">${r.W||''}</td><td class="num"><b>${fMT(r.OnHand)}</b></td><td class="num">${cs.length||''}</td><td class="num">${fdate(oldestOf(key(r)))}</td></tr>`;
+    h+=`<tr class="grp" onclick="toggle('${key(r).replace(/'/g,"\\'")}')"><td><span class="tw">${cs.length?(open?'▾':'▸'):'&nbsp;'}</span>${esc(r.ItemName)}<div class="muted">${esc(r.ItemCode)}</div></td><td class="whs">${esc(r.WhsCode)}</td><td class="muted">${esc(r.Grade)}</td><td class="num">${r.T||''}</td><td class="num">${r.W||''}</td><td class="num"><b>${fMT(r.OnHand)}</b></td><td class="num">${cs.length||''}</td><td class="num">${fdate(oldestOf(key(r)))}</td></tr>`;
     if(open && cs.length){
       cs.forEach(c=>{
-        h+=`<tr class="itm"><td>Coil <b>${esc(c.CoilNo||'—')}</b>${c.BatchNum?`<div class="muted">batch ${esc(c.BatchNum)}</div>`:''}</td><td class="num muted">${esc(c.WhsCode)}</td><td class="muted" colspan="2">GRPO ${esc(c.GRPONo||'')}</td><td></td><td class="num">${fMT(c.Quantity)}</td><td></td><td class="num">${fdate(c.GRPODate)}</td></tr>`;
+        h+=`<tr class="itm"><td>Coil <b>${esc(c.CoilNo||'—')}</b>${c.BatchNum?`<div class="muted">batch ${esc(c.BatchNum)}</div>`:''}</td><td class="whs muted">${esc(c.WhsCode)}</td><td class="muted" colspan="2">GRPO ${esc(c.GRPONo||'')}</td><td></td><td class="num">${fMT(c.Quantity)}</td><td></td><td class="num">${fdate(c.GRPODate)}</td></tr>`;
       });
     }
   });
