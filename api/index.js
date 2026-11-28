@@ -2504,7 +2504,9 @@ async function alStockModel(){
   const stock = parseCsvSrv(stockTxt), coils = parseCsvSrv(coilsTxt);
   const num = v => parseFloat(v)||0;
   const catOf = n => /COIL/i.test(n||"") ? "coil" : (/PLATE/i.test(n||"") ? "plate" : "sheet");
-  const pieceCount = {}; coils.forEach(c=>{ const k=c.ItemName||""; pieceCount[k]=(pieceCount[k]||0)+1; });
+  const ageDaysSrv = s => { const m=String(s||"").slice(0,10).match(/^(\d{4})-(\d{2})-(\d{2})/); if(!m) return null; const t=new Date(); const n=Math.round((Date.UTC(t.getFullYear(),t.getMonth(),t.getDate())-Date.UTC(+m[1],+m[2]-1,+m[3]))/86400000); return n>=0?n:null; };
+  const pieceCount = {}, maxAge = {};
+  coils.forEach(c=>{ const k=c.ItemName||""; pieceCount[k]=(pieceCount[k]||0)+1; const a=ageDaysSrv(c.GRPODate); if(a!=null) maxAge[k]=Math.max(maxAge[k]??-1,a); });
   function group(cat){
     const gg = {};
     stock.filter(r=>catOf(r.ItemName)===cat).forEach(r=>{
@@ -2513,7 +2515,7 @@ async function alStockModel(){
       o.mt += num(r.OnHand);
     });
     // ascending: thickness → width → qty
-    return Object.values(gg).map(o=>({ ...o, n: pieceCount[o.name]||0 }))
+    return Object.values(gg).map(o=>({ ...o, n: pieceCount[o.name]||0, aging: (o.name in maxAge ? maxAge[o.name] : null) }))
       .sort((a,b)=> (a.thk-b.thk) || (a.wid-b.wid) || (a.mt-b.mt));
   }
   const coilItems = group("coil"), plateItems = group("plate"), sheetItems = group("sheet");
@@ -2545,24 +2547,25 @@ function alStockSvg(M){
     return y;
   }
   const cols = cntLabel => [
-    {t:"Item", w:330, align:"l"},
-    {t:"Grade", w:150, align:"l"},
-    {t:"Thk", w:60, align:"r"},
-    {t:"Width", w:70, align:"r"},
-    {t:"On-hand (MT)", w:120, align:"r"},
-    {t:cntLabel, w:76, align:"r"},
+    {t:"Item", w:312, align:"l"},
+    {t:"Grade", w:146, align:"l"},
+    {t:"Thk", w:56, align:"r"},
+    {t:"Width", w:66, align:"r"},
+    {t:"On-hand (MT)", w:116, align:"r"},
+    {t:cntLabel, w:72, align:"r"},
+    {t:"Aging", w:72, align:"r"},
   ];
-  const tableW = 330+150+60+70+120+76;
+  const tableW = 312+146+56+66+116+72+72;
   const L=16, W=L+tableW+L;
   rect(0,0,W,36,"#2f9fe0"); txt(W/2,24,"ASHOK LEYLAND — STOCK AT BHARAT STEEL (CHENNAI)",{size:18,bold:true,fill:"#ffffff",anchor:"middle"});
   let y=50;
   rect(L,y,210,27,"#ffe08a"); txt(L+105,y+18,"As on "+M.dateDMY,{size:14,bold:true,fill:"#5a4500",anchor:"middle"});
   txt(W-L, y+18, "Total "+f3IN(M.totalMt)+" MT", {size:14,bold:true,fill:"#0e2a47",anchor:"end"}); y+=40;
   function section(title, items, T, cntLabel, unitWord, emptyMsg){
-    const rows = items.map(r=>({v:[r.name, r.grade, dimT(r.thk), dimW(r.wid), f3IN(r.mt), r.n||""]}))
-      .concat([{v:["Grand Total","","","",f3IN(T.mt),T.n||""],gt:true}]);
+    const rows = items.map(r=>({v:[r.name, r.grade, dimT(r.thk), dimW(r.wid), f3IN(r.mt), r.n||"", (r.aging!=null?String(r.aging):"")]}))
+      .concat([{v:["Grand Total","","","",f3IN(T.mt),T.n||"",""],gt:true}]);
     return drawTable(L, y, title+"  ("+items.length+" items · "+f3IN(T.mt)+" MT · "+T.n+" "+unitWord+")",
-      cols(cntLabel), items.length?rows:[{v:[emptyMsg,"","","","",""]}]);
+      cols(cntLabel), items.length?rows:[{v:[emptyMsg,"","","","","",""]}]);
   }
   // 1. Coils  2. Plates  3. Sheets  (each ascending thk → width → qty)
   y = section("COILS",  M.coilItems,  M.coilT,  "Coils",  "coils",  "No coil stock.");  y += 18;
