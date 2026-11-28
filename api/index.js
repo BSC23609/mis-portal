@@ -645,6 +645,9 @@ async function ensureWheelsTable(){
   // Job Work Evening (6:30pm) columns — separate recipient list from the 10am Job Work send.
   await sql`alter table wheels_recipients add column if not exists jw_eve_email boolean default false`;
   await sql`alter table wheels_recipients add column if not exists jw_eve_wa boolean default false`;
+  // Ashok Leyland daily stock report (10:20am) columns.
+  await sql`alter table wheels_recipients add column if not exists al_email boolean default false`;
+  await sql`alter table wheels_recipients add column if not exists al_wa boolean default false`;
   // Short-lived cache of the rendered report PNGs, so WhatsApp/Meta fetches an already-built image
   // instead of waiting on a slow live render (which caused silently-dropped sends that still logged "ok").
   await sql`create table if not exists wheels_img_cache ( name text primary key, png_b64 text, ts timestamptz default now() )`;
@@ -653,7 +656,7 @@ async function ensureWheelsTable(){
 }
 // All recipients as plain objects (for the settings UI, the scripts, and the WhatsApp routes).
 async function wheelsRecipients(){
-  try { return (await sql`select id,name,grp,email,mobile,jw_email,jw_wa,ds_email,ds_wa,dp_email,dp_wa,pp_email,pp_wa,jw_eve_email,jw_eve_wa from wheels_recipients order by id`).map(r=>({...r})); }
+  try { return (await sql`select id,name,grp,email,mobile,jw_email,jw_wa,ds_email,ds_wa,dp_email,dp_wa,pp_email,pp_wa,jw_eve_email,jw_eve_wa,al_email,al_wa from wheels_recipients order by id`).map(r=>({...r})); }
   catch(e){ return []; }
 }
 // Distinct WhatsApp numbers of everyone subscribed to a report's WhatsApp channel. flag: 'jw_wa'|'ds_wa'|'dp_wa'
@@ -671,7 +674,7 @@ function recipientEmails(recips, flag){
 // Report-image cache. renderAndCachePng() builds the PNG and stores it; cachedPng() serves the stored
 // copy when it is fresh (default 5 min) and otherwise rebuilds. Priming the cache right before a
 // WhatsApp send makes Meta's image fetch instant, so the message is never dropped for a slow render.
-const PNG_BUILDERS = { stock: () => buildWheelsStockPng(), production: () => buildWheelsProdPng(), daily: () => buildDailyStockPng(), plan: () => buildWheelsPlanPng() };
+const PNG_BUILDERS = { stock: () => buildWheelsStockPng(), production: () => buildWheelsProdPng(), daily: () => buildDailyStockPng(), plan: () => buildWheelsPlanPng(), al: () => buildAlStockPng() };
 async function renderAndCachePng(name){
   const png = await PNG_BUILDERS[name]();
   const b64 = png.toString("base64");
@@ -970,13 +973,45 @@ async function amDpWa(req){
   await logSend({ report:'production', channel:'whatsapp', ...waSummary(sent, nameByMobile(recips)) });
   return { ok:true, sent };
 }
+// ===== Ashok Leyland daily stock senders — email (inline image) + WhatsApp (image template) =====
+async function alSendEmail(req){
+  if(await isSendPaused()){ await logSend({report:'al_stock',channel:'email',status:'skipped',detail:'global send pause is ON'}); return {skipped:'paused'}; }
+  if(await amDone('al_stock','email')) return {skipped:'already sent today'};
+  const recips=await wheelsRecipients();
+  const to=recipientEmails(recips,'al_email');
+  if(!to.length){ await logSend({report:'al_stock',channel:'email',status:'skipped',detail:'no recipients ticked for Ashok Leyland email'}); return {skipped:'no email recipients'}; }
+  try{
+    const stamp=new Date().toISOString().slice(0,10).replace(/-/g,"");
+    const png=(await buildAlStockPng()).toString("base64");
+    const html=`<p>Dear Team,</p><p>Ashok Leyland daily stock at Bharat Steel (Chennai):</p><img src="cid:alimg" style="max-width:100%;border:1px solid #d0d7dd"/><p>Bharat Steel (Chennai) Pvt. Ltd.</p>`;
+    await sendWheelsMail(to, [], html, "BSC — Ashok Leyland Stock Report — "+new Date().toLocaleDateString("en-IN"), { name:"BSC_AshokLeyland_Stock_"+stamp+".png", b64:png, contentType:"image/png", cid:"alimg" });
+    await logSend({report:'al_stock',channel:'email',status:'ok',total:to.length,ok:to.length,fail:0,detail:'Morning 10:20am: '+to.length+' recipient(s): '+to.join(', ')});
+    return { ok:true, sent_to:to };
+  }catch(e){ await logSend({report:'al_stock',channel:'email',status:'fail',total:to.length,ok:0,fail:to.length,detail:String(e.message||e)}); return {error:String(e.message||e)}; }
+}
+async function alSendWa(req){
+  if(await isSendPaused()){ await logSend({report:'al_stock',channel:'whatsapp',status:'skipped',detail:'global send pause is ON'}); return {skipped:'paused'}; }
+  if(await amDone('al_stock','whatsapp')) return {skipped:'already sent today'};
+  const tmpl=process.env.AL_WA_TEMPLATE;
+  if(!tmpl){ await logSend({report:'al_stock',channel:'whatsapp',status:'skipped',detail:'AL_WA_TEMPLATE not set'}); return {skipped:'AL_WA_TEMPLATE not set'}; }
+  const recips=await wheelsRecipients();
+  const nums=recipientMobiles(recips,'al_wa');
+  if(!nums.length){ await logSend({report:'al_stock',channel:'whatsapp',status:'skipped',detail:'no recipients ticked for Ashok Leyland WhatsApp'}); return {skipped:'no whatsapp recipients'}; }
+  const base=(process.env.PUBLIC_URL||`https://${req.headers.host}`).replace(/\/$/,"");
+  const url=base+"/al-stock.png?d="+imgStamp();
+  await renderAndCachePng("al").catch(()=>{});
+  const sent=[];
+  for(const num of nums){ try{ const r=await sendRetry(num,tmpl,[{name:"report",value:url},{name:"1",value:waToday()}]); sent.push({num,...(r||{ok:true})}); }catch(e){ sent.push({num,error:String(e.message||e)}); } }
+  await logSend({ report:'al_stock', channel:'whatsapp', ...waSummary(sent, nameByMobile(recips)) });
+  return { ok:true, sent };
+}
 async function handlerWheels(req, res){
   if (cors(req, res)) return;
   try{
     await ensureWheelsTable();
     // GET /api/wheels?fmt=pdf  ->  the statement as a PDF (same data/structure as the email).
     // Public, no-auth: this is the URL WATI fetches for the WhatsApp document template.
-    const fmt = (req.query && req.query.fmt) || ((/[?&]fmt=(pdf|xlsx|stockpng|prodpdf|prodpng|dailypng|planpng|planpdf|plancron|jwcron|planupdate|wadiag|sendlog|amcron)\b/.exec(req.url || "")) || [])[1] || "";
+    const fmt = (req.query && req.query.fmt) || ((/[?&]fmt=(pdf|xlsx|stockpng|prodpdf|prodpng|dailypng|planpng|planpdf|plancron|jwcron|planupdate|wadiag|sendlog|amcron|alpng|alcron)\b/.exec(req.url || "")) || [])[1] || "";
     if (req.method === "GET" && fmt === "pdf"){
       const pdf = await buildWheelsPdf();
       res.setHeader("Content-Type", "application/pdf");
@@ -990,6 +1025,13 @@ async function handlerWheels(req, res){
       res.setHeader("Content-Disposition", 'attachment; filename="WheelsIndia_Stock_' + new Date().toISOString().slice(0,10).replace(/-/g,"") + '.xlsx"');
       res.setHeader("Cache-Control", "no-store");
       return res.status(200).end(Buffer.from(b64, "base64"));
+    }
+    if (req.method === "GET" && fmt === "alpng"){
+      const png = await cachedPng("al", 300);
+      res.setHeader("Content-Type", "image/png");
+      res.setHeader("Content-Disposition", 'inline; filename="BSC_AshokLeyland_Stock_' + new Date().toISOString().slice(0,10).replace(/-/g,"") + '.png"');
+      res.setHeader("Cache-Control", "public, max-age=300");
+      return res.status(200).end(png);
     }
     if (req.method === "GET" && fmt === "stockpng"){
       const png = await cachedPng("stock", 300);
@@ -1099,6 +1141,25 @@ async function handlerWheels(req, res){
       out.ds_whatsapp = await amDsWa(req).catch(e=>({error:String(e.message||e)}));
       return json(res, 200, { ok: true, ...out });
     }
+    // Ashok Leyland daily stock AUTO-SEND at 10:20 IST — email (inline image) + WhatsApp (image template),
+    // to the recipients ticked for Ashok Leyland. Idempotent (report=al_stock per channel per IST day) +
+    // time-guarded (after 10:20) + CRON_SECRET-guarded. ?force=1 bypasses the time gate.
+    if (req.method === "GET" && fmt === "alcron"){
+      const auth = req.headers.authorization || "";
+      if (!process.env.CRON_SECRET) return json(res, 503, { error: "CRON_SECRET not set" });
+      if (auth !== "Bearer " + process.env.CRON_SECRET) return json(res, 401, { error: "unauthorized" });
+      const ist = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+      const todayIso = ist.getFullYear() + "-" + String(ist.getMonth()+1).padStart(2,"0") + "-" + String(ist.getDate()).padStart(2,"0");
+      if (ist.getDay() === 0) return json(res, 200, { ok: true, skipped: "Sunday" });
+      let hol = []; try { const s = await sql`select holidays from wheels_settings where id=1`; hol = (s[0]?.holidays) || []; } catch(e){}
+      if (hol.includes(todayIso)) return json(res, 200, { ok: true, skipped: "holiday " + todayIso });
+      const force = /[?&]force=1\b/.test(req.url||"") || (req.query && req.query.force==="1");
+      if (!force && ist.getHours()*60 + ist.getMinutes() < 10*60+20) return json(res, 200, { ok: true, waiting: "before 10:20 IST", ist_time: ist.getHours()+":"+String(ist.getMinutes()).padStart(2,"0") });
+      const out = { date: todayIso, forced: force };
+      out.al_email    = await alSendEmail(req).catch(e=>({error:String(e.message||e)}));
+      out.al_whatsapp = await alSendWa(req).catch(e=>({error:String(e.message||e)}));
+      return json(res, 200, { ok: true, ...out });
+    }
     // Updated Production Plan — re-send when today's cutting program changes after the morning send.
     // Called by the SAP-side plan_watch trigger the moment a new program is raised. Guarded by CRON_SECRET.
     // Compares today's plan to the last-sent signature; sends only on a real change (no spam on repeat calls).
@@ -1184,15 +1245,15 @@ async function handlerWheels(req, res){
         const nm = String(r.name||"").slice(0,120), gp = String(r.grp||"").slice(0,60);
         const em = String(r.email||"").trim().slice(0,160), mo = String(r.mobile||"").trim().slice(0,30);
         const b = k => r[k] === true || r[k] === "true" || r[k] === 1;
-        const flags = [b("jw_email"), b("jw_wa"), b("ds_email"), b("ds_wa"), b("dp_email"), b("dp_wa"), b("pp_email"), b("pp_wa"), b("jw_eve_email"), b("jw_eve_wa")];
+        const flags = [b("jw_email"), b("jw_wa"), b("ds_email"), b("ds_wa"), b("dp_email"), b("dp_wa"), b("pp_email"), b("pp_wa"), b("jw_eve_email"), b("jw_eve_wa"), b("al_email"), b("al_wa")];
         if (r.id) {
           await sql`update wheels_recipients set name=${nm},grp=${gp},email=${em},mobile=${mo},
-            jw_email=${flags[0]},jw_wa=${flags[1]},ds_email=${flags[2]},ds_wa=${flags[3]},dp_email=${flags[4]},dp_wa=${flags[5]},pp_email=${flags[6]},pp_wa=${flags[7]},jw_eve_email=${flags[8]},jw_eve_wa=${flags[9]}
+            jw_email=${flags[0]},jw_wa=${flags[1]},ds_email=${flags[2]},ds_wa=${flags[3]},dp_email=${flags[4]},dp_wa=${flags[5]},pp_email=${flags[6]},pp_wa=${flags[7]},jw_eve_email=${flags[8]},jw_eve_wa=${flags[9]},al_email=${flags[10]},al_wa=${flags[11]}
             where id=${Number(r.id)}`;
           return json(res, 200, { ok: true, id: Number(r.id) });
         }
-        const ins = await sql`insert into wheels_recipients (name,grp,email,mobile,jw_email,jw_wa,ds_email,ds_wa,dp_email,dp_wa,pp_email,pp_wa,jw_eve_email,jw_eve_wa)
-          values (${nm},${gp},${em},${mo},${flags[0]},${flags[1]},${flags[2]},${flags[3]},${flags[4]},${flags[5]},${flags[6]},${flags[7]},${flags[8]},${flags[9]}) returning id`;
+        const ins = await sql`insert into wheels_recipients (name,grp,email,mobile,jw_email,jw_wa,ds_email,ds_wa,dp_email,dp_wa,pp_email,pp_wa,jw_eve_email,jw_eve_wa,al_email,al_wa)
+          values (${nm},${gp},${em},${mo},${flags[0]},${flags[1]},${flags[2]},${flags[3]},${flags[4]},${flags[5]},${flags[6]},${flags[7]},${flags[8]},${flags[9]},${flags[10]},${flags[11]}) returning id`;
         return json(res, 200, { ok: true, id: ins[0].id });
       }
       if (body.recip_delete) {
@@ -1254,7 +1315,7 @@ async function handlerWheels(req, res){
       // configured for it, stamped with the current date & time ("Updated"). Settings-page authenticated.
       if (body.send_now) {
         const rep = String(body.report || "");
-        if (!["jw","ds","dp","pp"].includes(rep)) return json(res, 400, { error: "unknown report" });
+        if (!["jw","ds","dp","pp","al"].includes(rep)) return json(res, 400, { error: "unknown report" });
         if (await isSendPaused()) { await logSend({report:rep,channel:'system',status:'skipped',detail:'global send pause is ON — nothing sent'}); return json(res, 200, { ok:true, paused:true, skipped:"global send pause is ON" }); }
         const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
         const nowIST = new Date().toLocaleString("en-IN",{ timeZone:"Asia/Kolkata", day:"2-digit", month:"short", year:"numeric", hour:"2-digit", minute:"2-digit", hour12:true });
@@ -1310,6 +1371,17 @@ async function handlerWheels(req, res){
                 out.email={ sent_to:to }; }
             } catch(e){ out.email={ error:String(e.message||e) }; }
             out.whatsapp=await waBlast("WHEELS_WA_PROD_TEMPLATE","dp_wa","/wheels-production.png","production","production","none").catch(e=>({error:String(e.message||e)}));
+          } else if (rep==='al'){
+            try {
+              const recips=await wheelsRecipients(); const to=recipientEmails(recips,'al_email');
+              if(!to.length) out.email={ skipped:"no email recipients saved" };
+              else { const png=(await buildAlStockPng()).toString("base64");
+                const html=`<p>Dear Team,</p><p>Updated Ashok Leyland stock as on <b>${nowIST}</b>:</p><img src="cid:alimg" style="max-width:100%;border:1px solid #d0d7dd"/><p>Bharat Steel (Chennai) Pvt. Ltd.</p>`;
+                await sendWheelsMail(to, [], html, "Updated — BSC Ashok Leyland Stock Report — "+nowIST, { name:"BSC_AshokLeyland_Stock_"+stamp+".png", b64:png, contentType:"image/png", cid:"alimg" });
+                await logSend({report:'al_stock',channel:'email',status:'ok',total:to.length,ok:to.length,fail:0,detail:'Send now: '+to.length+' recipient(s): '+to.join(', ')});
+                out.email={ sent_to:to }; }
+            } catch(e){ out.email={ error:String(e.message||e) }; }
+            out.whatsapp=await waBlast("AL_WA_TEMPLATE","al_wa","/al-stock.png","al","al_stock","now").catch(e=>({error:String(e.message||e)}));
           } else if (rep==='pp'){
             const M=await planModel();
             out.email=await planSendUpdatedEmail(req, M).catch(e=>({error:String(e.message||e)}));
@@ -1503,6 +1575,33 @@ async function handlerWheels(req, res){
         const html = `<p>Dear Team,</p><p>Company-wide Daily Stock report:</p><img src="cid:dailyimg" style="max-width:100%;border:1px solid #d0d7dd"/><p>Bharat Steel (Chennai) Pvt. Ltd.</p>`;
         const attach = { name:"BSC_DailyStock_"+stamp+".png", b64:png, contentType:"image/png", cid:"dailyimg" };
         await sendWheelsMail(to, [], html, (body.test_to?"[TEST] ":"")+"BSC — Daily Stock Report — "+new Date().toLocaleDateString("en-IN"), attach);
+        return json(res, 200, { ok:true, sent_to:to });
+      }
+      // Ashok Leyland WhatsApp — test send from the settings page
+      if (body.al_whatsapp_test) {
+        const tmpl = process.env.AL_WA_TEMPLATE;
+        if (!tmpl) return json(res, 200, { ok: true, skipped: "AL_WA_TEMPLATE not set on server" });
+        if (!watiBase() || !watiKey()) return json(res, 200, { ok: true, skipped: "WATI not configured on server (need WATI_API_URL + token)" });
+        let num = String(body.al_wa_test_to || "").trim();
+        if (!num) { const recips = await wheelsRecipients(); num = recipientMobiles(recips, "al_wa")[0] || ""; }
+        if (!num) return json(res, 200, { ok: true, skipped: "no test number (enter one or tick an Ashok Leyland WhatsApp recipient first)" });
+        const base = (process.env.PUBLIC_URL || `https://${req.headers.host}`).replace(/\/$/, "");
+        const url = base + "/al-stock.png?d=" + imgStamp();
+        await renderAndCachePng("al").catch(()=>{});
+        const sent = [];
+        try { const r = await send(num, tmpl, [{ name: "report", value: url }, { name: "1", value: waToday() }]); sent.push({ num, ...(r || { ok: true }) }); } catch (e) { sent.push({ num, error: String(e.message || e) }); }
+        return json(res, 200, { ok: true, url, template: tmpl, sent });
+      }
+      // Ashok Leyland email — test send from the settings page
+      if (body.al_mail_test) {
+        const recips = await wheelsRecipients();
+        const to = body.test_to ? [String(body.test_to)] : recipientEmails(recips, "al_email");
+        if (!to.length) return json(res, 400, { error: "no recipient (enter one or tick an Ashok Leyland email recipient first)" });
+        const stamp = new Date().toISOString().slice(0,10).replace(/-/g,"");
+        const png = (await buildAlStockPng()).toString("base64");
+        const html = `<p>Dear Team,</p><p>Ashok Leyland daily stock at Bharat Steel (Chennai):</p><img src="cid:alimg" style="max-width:100%;border:1px solid #d0d7dd"/><p>Bharat Steel (Chennai) Pvt. Ltd.</p>`;
+        const attach = { name:"BSC_AshokLeyland_Stock_"+stamp+".png", b64:png, contentType:"image/png", cid:"alimg" };
+        await sendWheelsMail(to, [], html, (body.test_to?"[TEST] ":"")+"BSC — Ashok Leyland Stock Report — "+new Date().toLocaleDateString("en-IN"), attach);
         return json(res, 200, { ok:true, sent_to:to });
       }
       // update only the keys provided (settings save and WIP save are separate posts)
@@ -2394,6 +2493,87 @@ async function buildDailyStockPng(){
   let Resvg; try{ Resvg=(await import("@resvg/resvg-js")).Resvg; }catch(e){ throw new Error("resvg-js not available on server: "+e.message); }
   const ff=prodFontFiles();
   const svg=dailyStockSvg(await dailyStockModel());
+  const r=new Resvg(svg, { fitTo:{ mode:"zoom", value:2.5 }, font:{ fontFiles:ff, loadSystemFonts: ff.length===0, defaultFontFamily:"DejaVu Sans" }, background:"#ffffff" });
+  return Buffer.from(r.render().asPng());
+}
+// ===== Ashok Leyland daily stock report (image) =====
+async function alStockModel(){
+  const DATA_BASE = process.env.DATA_BASE || "https://raw.githubusercontent.com/BSC23609/bsc-stock-data/main";
+  const g = u => fetch(DATA_BASE+"/"+u+"?t="+Date.now()).then(r=>r.ok?r.text():"").catch(()=>"");
+  const [stockTxt, coilsTxt] = await Promise.all([g("al_stock.csv"), g("al_coils.csv")]);
+  const stock = parseCsvSrv(stockTxt), coils = parseCsvSrv(coilsTxt);
+  const num = v => parseFloat(v)||0;
+  const isCoil = n => /COIL/i.test(n||"");
+  const pieceCount = {}; coils.forEach(c=>{ const k=c.ItemName||""; pieceCount[k]=(pieceCount[k]||0)+1; });
+  function group(filterFn){
+    const gg = {};
+    stock.filter(r=>filterFn(r.ItemName)).forEach(r=>{
+      const k = r.ItemName||"";
+      const o = gg[k] ??= { name:k, grade:r.Grade||"", thk:num(r.Thickness), wid:num(r.Width), mt:0 };
+      o.mt += num(r.OnHand);
+    });
+    return Object.values(gg).map(o=>({ ...o, n: pieceCount[o.name]||0 })).sort((a,b)=>b.mt-a.mt);
+  }
+  const coilItems = group(isCoil);
+  const cutItems  = group(n=>!isCoil(n));
+  const coilMt = coilItems.reduce((a,r)=>a+r.mt,0), cutMt = cutItems.reduce((a,r)=>a+r.mt,0);
+  const coilN  = coilItems.reduce((a,r)=>a+r.n,0),  cutN  = cutItems.reduce((a,r)=>a+r.n,0);
+  const asof = new Date().toLocaleString("en-IN",{day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit",timeZone:"Asia/Kolkata"});
+  const dateDMY = new Date().toLocaleDateString("en-GB",{day:"2-digit",month:"2-digit",year:"numeric",timeZone:"Asia/Kolkata"});
+  return { coilItems, cutItems, coilMt, cutMt, coilN, cutN, asof, dateDMY };
+}
+function alStockSvg(M){
+  const els=[];
+  const rect=(x,yy,w,h,f)=>els.push(`<rect x="${x}" y="${yy}" width="${w}" height="${h}" fill="${f}"/>`);
+  const txt=(x,yy,s,o={})=>els.push(`<text x="${x}" y="${yy}" font-family="DejaVu Sans" font-size="${o.size||9}"${o.bold?' font-weight="bold"':''} fill="${o.fill||'#222'}" text-anchor="${o.anchor||'start'}">${esc2(s)}</text>`);
+  const put=(c,yy,s,o)=>{ if(c.align==="r") txt(c.x+c.w-6,yy,s,{...o,anchor:"end"}); else if(c.align==="c") txt(c.x+c.w/2,yy,s,{...o,anchor:"middle"}); else txt(c.x+6,yy,s,{...o,anchor:"start"}); };
+  const GC="#c4d0da";
+  const dimT=x=>x>0?String(Math.round(x*100)/100):"";   // thickness: 2, 3.8, 5.8
+  const dimW=x=>x>0?String(Math.round(x)):"";            // width (mm): 1250
+  function drawTable(ox, oy, title, cols, rows){
+    let x=ox; cols.forEach(c=>{ c.x=x; x+=c.w; }); const tw=x-ox; let y=oy;
+    rect(ox,y,tw,23,"#ffe08a"); txt(ox+8,y+16,title,{size:13.5,bold:true,fill:"#5a4500"}); y+=23;
+    const gridTop=y; const rowYs=[y]; const hH=25; rect(ox,y,tw,hH,"#dbeaf5");
+    cols.forEach(c=>put(c,y+hH/2+4,c.t,{size:11.5,bold:true,fill:"#1a2a3a"}));
+    y+=hH; rowYs.push(y); const rH=23;
+    rows.forEach((r,ri)=>{ if(r.gt) rect(ox,y,tw,rH,"#dbeaf5"); else if(ri%2) rect(ox,y,tw,rH,"#f7fafc");
+      cols.forEach((c,ci)=>put(c,y+16,r.v[ci]==null?"":String(r.v[ci]),{size:11.5,bold:!!r.gt,fill:"#1a2233"})); y+=rH; rowYs.push(y); });
+    rowYs.forEach(yy=>rect(ox,yy,tw,1,GC));
+    cols.forEach(c=>rect(c.x,gridTop,1,y-gridTop,GC)); rect(ox+tw,gridTop,1,y-gridTop,GC);
+    els.push(`<rect x="${ox}" y="${oy}" width="${tw}" height="${y-oy}" fill="none" stroke="#9fb3c4" stroke-width="1"/>`);
+    return y;
+  }
+  const cols = cntLabel => [
+    {t:"Item", w:330, align:"l"},
+    {t:"Grade", w:150, align:"l"},
+    {t:"Thk", w:60, align:"r"},
+    {t:"Width", w:70, align:"r"},
+    {t:"On-hand (MT)", w:120, align:"r"},
+    {t:cntLabel, w:76, align:"r"},
+  ];
+  const tableW = 330+150+60+70+120+76;
+  const L=16, W=L+tableW+L;
+  rect(0,0,W,36,"#2f9fe0"); txt(W/2,24,"ASHOK LEYLAND — STOCK AT BHARAT STEEL (CHENNAI)",{size:18,bold:true,fill:"#ffffff",anchor:"middle"});
+  let y=50;
+  rect(L,y,210,27,"#ffe08a"); txt(L+105,y+18,"As on "+M.dateDMY,{size:14,bold:true,fill:"#5a4500",anchor:"middle"});
+  txt(W-L, y+18, "Total "+f3IN(M.coilMt+M.cutMt)+" MT", {size:14,bold:true,fill:"#0e2a47",anchor:"end"}); y+=40;
+  // Coils
+  const coilRows = M.coilItems.map(r=>({v:[r.name, r.grade, dimT(r.thk), dimW(r.wid), f3IN(r.mt), r.n||""]}))
+    .concat([{v:["Grand Total","","","",f3IN(M.coilMt),M.coilN||""],gt:true}]);
+  y = drawTable(L, y, "COILS  ("+M.coilItems.length+" items · "+f3IN(M.coilMt)+" MT · "+M.coilN+" coils)", cols("Coils"), coilRows.length?coilRows:[{v:["No coil stock.","","","","",""]}]);
+  y += 18;
+  // Sheets & Plates
+  const cutRows = M.cutItems.map(r=>({v:[r.name, r.grade, dimT(r.thk), dimW(r.wid), f3IN(r.mt), r.n||""]}))
+    .concat([{v:["Grand Total","","","",f3IN(M.cutMt),M.cutN||""],gt:true}]);
+  y = drawTable(L, y, "SHEETS & PLATES  ("+M.cutItems.length+" items · "+f3IN(M.cutMt)+" MT · "+M.cutN+" pieces)", cols("Pieces"), cutRows.length?cutRows:[{v:["No sheet / plate stock.","","","","",""]}]);
+  const H = y+28;
+  txt(L, H-10, "Computer-generated report - may contain mistakes.  Bharat Steel (Chennai) Pvt. Ltd. · info@bharatsteels.in  ·  As on "+M.asof, {size:9,fill:"#999"});
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><rect width="${W}" height="${H}" fill="#ffffff"/>${els.join("")}</svg>`;
+}
+async function buildAlStockPng(){
+  let Resvg; try{ Resvg=(await import("@resvg/resvg-js")).Resvg; }catch(e){ throw new Error("resvg-js not available on server: "+e.message); }
+  const ff=prodFontFiles();
+  const svg=alStockSvg(await alStockModel());
   const r=new Resvg(svg, { fitTo:{ mode:"zoom", value:2.5 }, font:{ fontFiles:ff, loadSystemFonts: ff.length===0, defaultFontFamily:"DejaVu Sans" }, background:"#ffffff" });
   return Buffer.from(r.render().asPng());
 }

@@ -34,6 +34,14 @@
       "destination": "/api/index?route=wheels&fmt=dailypng"
     },
     {
+      "source": "/al-stock.png",
+      "destination": "/api/index?route=wheels&fmt=alpng"
+    },
+    {
+      "source": "/api/al-cron",
+      "destination": "/api/index?route=wheels&fmt=alcron"
+    },
+    {
       "source": "/wheels-plan.png",
       "destination": "/api/index?route=wheels&fmt=planpng"
     },
@@ -78,6 +86,10 @@
     {
       "path": "/api/jw-cron",
       "schedule": "1 13 * * *"
+    },
+    {
+      "path": "/api/al-cron",
+      "schedule": "51 4 * * *"
     }
   ],
   "headers": [
