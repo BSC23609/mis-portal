@@ -13,6 +13,17 @@
   .altbl col.c-mt{width:13%}
   .altbl col.c-coil{width:9%}
   .altbl col.c-old{width:12%}
+  /* flat cut (sheets & plates) column widths */
+  .cuttbl col.c-item{width:26%}
+  .cuttbl col.c-whs{width:6%}
+  .cuttbl col.c-src{width:18%}
+  .cuttbl col.c-grd{width:14%}
+  .cuttbl col.c-thk{width:8%}
+  .cuttbl col.c-wid{width:8%}
+  .cuttbl col.c-mt{width:11%}
+  .cuttbl col.c-old{width:9%}
+  .cuttbl td.src,.cuttbl th.src{text-align:left;font-family:var(--mono)}
+  .cuttbl td.src b{color:var(--ink)}
   .altbl th.whs,.altbl td.whs{text-align:left;font-family:var(--mono)}
   .altbl td:first-child,.altbl td .muted{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .sechead{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:18px 2px 8px}
@@ -99,27 +110,45 @@ function sortRows(rows){
     : b.OnHand-a.OnHand);
 }
 
-// cut: false => coils section (drill = coil no); true => sheets & plates (drill = source coil)
-function sectionHtml(rows, cut){
+// Coils section: grouped by item×warehouse, expand to list coil numbers
+function coilSectionHtml(rows){
   rows=sortRows(rows.slice());
-  const unit = cut ? 'Pieces' : 'Coils';
-  let h=`<div class="card"><div class="tblwrap scroll"><table class="altbl"><colgroup><col class="c-item"><col class="c-whs"><col class="c-grd"><col class="c-thk"><col class="c-wid"><col class="c-mt"><col class="c-coil"><col class="c-old"></colgroup><thead><tr><th>Item</th><th class="whs">Whs</th><th>Grade</th><th class="num">Thick</th><th class="num">Width</th><th class="num">On-hand (MT)</th><th class="num">${unit}</th><th class="num">Oldest in</th></tr></thead><tbody>`;
+  let h=`<div class="card"><div class="tblwrap scroll"><table class="altbl"><colgroup><col class="c-item"><col class="c-whs"><col class="c-grd"><col class="c-thk"><col class="c-wid"><col class="c-mt"><col class="c-coil"><col class="c-old"></colgroup><thead><tr><th>Item</th><th class="whs">Whs</th><th>Grade</th><th class="num">Thick</th><th class="num">Width</th><th class="num">On-hand (MT)</th><th class="num">Coils</th><th class="num">Oldest in</th></tr></thead><tbody>`;
   rows.forEach(r=>{
     const cs=(COILS[key(r)]||[]).slice().sort((a,b)=>String(a.GRPODate||'').localeCompare(String(b.GRPODate||'')));
     const open=EXPANDED.has(key(r));
     h+=`<tr class="grp" onclick="toggle('${key(r).replace(/'/g,"\\'")}')"><td><span class="tw">${cs.length?(open?'▾':'▸'):'&nbsp;'}</span>${esc(r.ItemName)}<div class="muted">${esc(r.ItemCode)}</div></td><td class="whs">${esc(r.WhsCode)}</td><td class="muted">${esc(r.Grade)}</td><td class="num">${r.T||''}</td><td class="num">${r.W||''}</td><td class="num"><b>${fMT(r.OnHand)}</b></td><td class="num">${cs.length||''}</td><td class="num">${fdate(oldestOf(key(r)))}</td></tr>`;
     if(open && cs.length){
       cs.forEach(c=>{
-        if(cut){
-          h+=`<tr class="itm"><td>Source coil <b class="src">${esc(c.CoilNo||'—')}</b>${c.BatchNum?`<div class="muted">cut batch ${esc(c.BatchNum)}</div>`:''}</td><td class="whs muted">${esc(c.WhsCode)}</td><td class="muted" colspan="2">GRPO ${esc(c.GRPONo||'')}</td><td></td><td class="num">${fMT(c.Quantity)}</td><td></td><td class="num">${fdate(c.GRPODate)}</td></tr>`;
-        } else {
-          h+=`<tr class="itm"><td>Coil <b>${esc(c.CoilNo||'—')}</b>${c.BatchNum?`<div class="muted">batch ${esc(c.BatchNum)}</div>`:''}</td><td class="whs muted">${esc(c.WhsCode)}</td><td class="muted" colspan="2">GRPO ${esc(c.GRPONo||'')}</td><td></td><td class="num">${fMT(c.Quantity)}</td><td></td><td class="num">${fdate(c.GRPODate)}</td></tr>`;
-        }
+        h+=`<tr class="itm"><td>Coil <b>${esc(c.CoilNo||'—')}</b>${c.BatchNum?`<div class="muted">batch ${esc(c.BatchNum)}</div>`:''}</td><td class="whs muted">${esc(c.WhsCode)}</td><td class="muted" colspan="2">GRPO ${esc(c.GRPONo||'')}</td><td></td><td class="num">${fMT(c.Quantity)}</td><td></td><td class="num">${fdate(c.GRPODate)}</td></tr>`;
       });
     }
   });
   h+=`</tbody></table></div></div>`;
   return h;
+}
+
+// Sheets & Plates section: FLAT — one row per cut piece, source coil shown on every row
+function cutSectionHtml(rows){
+  const q=$('q').value.trim().toLowerCase();
+  let pieces=[];
+  rows.forEach(r=>{
+    (COILS[key(r)]||[]).forEach(c=>{
+      if(q && !(c.CoilNo||'').toLowerCase().includes(q)
+            && ![r.ItemName,r.ItemCode,r.Grade].some(v=>(v||'').toLowerCase().includes(q))) return;
+      pieces.push({...c, ItemName:r.ItemName, ItemCode:r.ItemCode, Grade:r.Grade, T:r.T, W:r.W});
+    });
+  });
+  const sort=$('sort').value;
+  pieces.sort((a,b)=> sort==='name'? (a.ItemName.localeCompare(b.ItemName) || String(a.CoilNo).localeCompare(String(b.CoilNo)))
+    : sort==='age'? String(a.GRPODate||'9').localeCompare(String(b.GRPODate||'9'))
+    : b.Quantity-a.Quantity);
+  let h=`<div class="card"><div class="tblwrap scroll"><table class="altbl cuttbl"><colgroup><col class="c-item"><col class="c-whs"><col class="c-src"><col class="c-grd"><col class="c-thk"><col class="c-wid"><col class="c-mt"><col class="c-old"></colgroup><thead><tr><th>Item</th><th class="whs">Whs</th><th class="src">Source coil</th><th>Grade</th><th class="num">Thick</th><th class="num">Width</th><th class="num">Qty (MT)</th><th class="num">Received</th></tr></thead><tbody>`;
+  pieces.forEach(c=>{
+    h+=`<tr><td>${esc(c.ItemName)}<div class="muted">${esc(c.ItemCode)}</div></td><td class="whs">${esc(c.WhsCode)}</td><td class="src"><b>${esc(c.CoilNo||'—')}</b>${c.BatchNum?`<div class="muted">batch ${esc(c.BatchNum)}</div>`:''}</td><td class="muted">${esc(c.Grade)}</td><td class="num">${c.T||''}</td><td class="num">${c.W||''}</td><td class="num"><b>${fMT(c.Quantity)}</b></td><td class="num">${fdate(c.GRPODate)}</td></tr>`;
+  });
+  h+=`</tbody></table></div></div>`;
+  return pieces.length ? h : '<div class="card"><div class="empty">No sheet / plate pieces for this filter.</div></div>';
 }
 
 function draw(){
@@ -138,9 +167,9 @@ function draw(){
 
   let html='';
   html+=`<div class="sechead"><h2>Coils</h2><span class="sub">${coilRows.length} items · ${fMT(sum(coilRows))} MT · ${cnt(coilRows)} coils</span></div>`;
-  html+= coilRows.length ? sectionHtml(coilRows,false) : '<div class="card"><div class="empty">No coil stock for this filter.</div></div>';
-  html+=`<div class="sechead"><h2>Sheets &amp; Plates <span class="sub" style="font-weight:600">— showing source coil</span></h2><span class="sub">${cutRows.length} items · ${fMT(sum(cutRows))} MT · ${cnt(cutRows)} pieces</span></div>`;
-  html+= cutRows.length ? sectionHtml(cutRows,true) : '<div class="card"><div class="empty">No sheet / plate stock for this filter.</div></div>';
+  html+= coilRows.length ? coilSectionHtml(coilRows) : '<div class="card"><div class="empty">No coil stock for this filter.</div></div>';
+  html+=`<div class="sechead"><h2>Sheets &amp; Plates <span class="sub" style="font-weight:600">— each piece with its source coil</span></h2><span class="sub">${cutRows.length} items · ${fMT(sum(cutRows))} MT · ${cnt(cutRows)} pieces</span></div>`;
+  html+= cutRows.length ? cutSectionHtml(cutRows) : '<div class="card"><div class="empty">No sheet / plate stock for this filter.</div></div>';
   $('sections').innerHTML=html;
 
   $('fcount').textContent=`${rows.length} rows · ${fMT(sum(rows))} MT`;
